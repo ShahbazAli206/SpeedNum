@@ -1,8 +1,5 @@
-# Video / screen recordings (exceed GitHub's 100 MB file limit)
-*.mp4
-*.mov
-*.avi
-*.mkv
+# Video / screen recordings are tracked via Git LFS (see .gitattributes),
+# since they exceed GitHub's 100 MB per-file limit for regular objects.
 
 # OS / editor cruft
 Thumbs.db
