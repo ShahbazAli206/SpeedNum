@@ -384,6 +384,183 @@ export interface ImportResult {
   errors: string[];
 }
 
+/* -------------------------------------------------------------------------- */
+/* Client-portal books (invoices, expenses, payroll, taxes, documents)        */
+/*                                                                            */
+/* Backs /dashboard/*. lib/demo.ts is the current source for those pages —   */
+/* swap a page to these once NEXT_PUBLIC_SUPABASE_URL is configured and a    */
+/* session exists to call /api/v1/client-portal/*. Field names match         */
+/* schemas.py exactly (snake_case), unlike demo.ts's camelCase.              */
+/* -------------------------------------------------------------------------- */
+export type PortalInvoiceStatus = "draft" | "sent" | "paid" | "overdue" | "void";
+export type PortalExpenseStatus = "pending" | "approved" | "rejected";
+export type EmploymentType = "full_time" | "part_time" | "contract";
+export type PayRunStatus = "draft" | "scheduled" | "processed";
+export type TaxFilingStatus = "open" | "filed" | "overdue";
+export type PortalDocumentKind = "invoice" | "receipt" | "tax" | "contract" | "statement" | "other";
+
+export interface ClientInvoice {
+  id: string;
+  client_id: string;
+  client_name: string | null;
+  number: string;
+  customer_name: string;
+  description: string | null;
+  issued_on: string;
+  due_on: string;
+  amount: number;
+  tax: number;
+  currency: string;
+  status: PortalInvoiceStatus;
+  paid_on: string | null;
+  notes: string | null;
+  created_at: string | null;
+}
+
+export interface ClientInvoiceTotals {
+  billed: number;
+  collected: number;
+  outstanding: number;
+  overdue: number;
+  count: number;
+  overdue_count: number;
+}
+
+export interface ClientExpense {
+  id: string;
+  client_id: string;
+  client_name: string | null;
+  vendor: string;
+  category: string;
+  spent_on: string;
+  amount: number;
+  gst: number;
+  status: PortalExpenseStatus;
+  method: string | null;
+  has_receipt: boolean;
+  notes: string | null;
+  created_at: string | null;
+}
+
+export interface CategoryTotal {
+  label: string;
+  value: number;
+}
+
+export interface ClientExpenseTotals {
+  total: number;
+  approved: number;
+  pending: number;
+  pending_value: number;
+  categories: number;
+  gst_paid: number;
+}
+
+export interface ClientEmployee {
+  id: string;
+  client_id: string;
+  full_name: string;
+  role: string | null;
+  employment_type: EmploymentType;
+  province: string;
+  gross: number;
+  cpp: number;
+  ei: number;
+  income_tax: number;
+  net: number;
+  is_active: boolean;
+  started_on: string | null;
+  ended_on: string | null;
+}
+
+export interface ClientPayRun {
+  id: string;
+  client_id: string;
+  period_label: string;
+  period_start: string | null;
+  period_end: string | null;
+  pay_date: string;
+  employee_count: number;
+  gross: number;
+  deductions: number;
+  net: number;
+  status: PayRunStatus;
+}
+
+export interface PayrollTotals {
+  active: number;
+  monthly_gross: number;
+  monthly_net: number;
+  remittance: number;
+  next_run: ClientPayRun | null;
+}
+
+export interface ClientTaxObligation {
+  id: string;
+  client_id: string;
+  client_name: string | null;
+  deadline_id: string | null;
+  name: string;
+  authority: string;
+  period_label: string | null;
+  due_on: string;
+  amount: number;
+  status: TaxFilingStatus;
+  filed_at: string | null;
+  reference: string | null;
+  notes: string | null;
+  days_remaining: number;
+}
+
+export interface TaxTotals {
+  gst_owing: number;
+  corporate_estimate: number;
+  input_tax_credits: number;
+  total_owing: number;
+  next: ClientTaxObligation | null;
+}
+
+export interface ClientDocument {
+  id: string;
+  client_id: string | null;
+  name: string;
+  kind: PortalDocumentKind;
+  mime_type: string | null;
+  size_bytes: number | null;
+  is_client_visible: boolean;
+  uploaded_by_name: string | null;
+  created_at: string | null;
+}
+
+export interface DocumentTotals {
+  count: number;
+  bytes: number;
+  shared: number;
+}
+
+export interface PortalMonthPoint {
+  x: string;
+  revenue: number;
+  expenses: number;
+  net: number;
+}
+
+export interface ClientBookOverview {
+  revenue_mtd: number;
+  revenue_change: number;
+  expenses_mtd: number;
+  expenses_change: number;
+  net_mtd: number;
+  net_change: number;
+  cash_position: number;
+  cash_change: number;
+  outstanding: number;
+  overdue_count: number;
+  tax_owing: number;
+  pending_expenses: number;
+  monthly: PortalMonthPoint[];
+}
+
 export interface AdminTenant {
   id: string;
   name: string;

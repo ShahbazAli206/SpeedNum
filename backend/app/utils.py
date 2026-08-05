@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Profile
+from .models import Client, Profile
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -54,6 +54,14 @@ def ensure_found(obj: Any, name: str = "Record") -> Any:
     if obj is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"{name} not found")
     return obj
+
+
+async def ensure_client_in_tenant(session: AsyncSession, tenant_id: uuid.UUID, client_id: uuid.UUID) -> Client:
+    """Used by the client-portal book routers to validate a `client_id` the
+    caller supplied (staff scoping to a specific client) actually belongs to
+    their tenant, before it is trusted as a foreign key."""
+    client = await session.scalar(select(Client).where(Client.id == client_id, Client.tenant_id == tenant_id))
+    return ensure_found(client, "Client")
 
 
 def as_float(value: Any, default: float = 0.0) -> float:

@@ -17,6 +17,12 @@ from .db import engine
 from .routers import (
     admin,
     auth,
+    client_documents,
+    client_expenses,
+    client_invoices,
+    client_overview,
+    client_payroll,
+    client_taxes,
     clients,
     custom_fields,
     dashboard,
@@ -106,6 +112,12 @@ for router in (
     admin.router,
     portal.router,
     public.router,
+    client_invoices.router,
+    client_expenses.router,
+    client_payroll.router,
+    client_taxes.router,
+    client_documents.router,
+    client_overview.router,
 ):
     app.include_router(router, prefix=API_PREFIX)
 

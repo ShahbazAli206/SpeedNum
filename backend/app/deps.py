@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -151,6 +151,59 @@ async def require_superadmin(user: CurrentUserDep) -> CurrentUser:
 
 
 SuperadminDep = Annotated[CurrentUser, Depends(require_superadmin)]
+
+
+async def require_staff(user: TenantUserDep) -> CurrentUser:
+    """Reject portal accounts (profile.client_id set) — some actions are firm-only."""
+    if user.profile.client_id is not None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "This action is only available to firm staff.")
+    return user
+
+
+StaffUserDep = Annotated[CurrentUser, Depends(require_staff)]
+
+
+@dataclass(slots=True)
+class BookScope:
+    """Tenant + client scoping for the client-portal 'books' (invoices, expenses,
+    payroll, tax obligations, documents).
+
+    Firm staff (profile.client_id is null) may read/write any client's book under
+    their tenant, optionally narrowed with `?client_id=`. A portal account
+    (profile.client_id set) is always pinned to that one client — the query
+    param is ignored for them, it can never widen access.
+    """
+
+    tenant_id: uuid.UUID
+    client_id: uuid.UUID | None
+    is_portal: bool
+    user: CurrentUser
+
+
+async def get_book_scope(
+    user: TenantUserDep,
+    client_id: Annotated[
+        uuid.UUID | None, Query(description="Firm staff only: narrow to one client's book.")
+    ] = None,
+) -> BookScope:
+    if user.profile.client_id is not None:
+        return BookScope(tenant_id=user.tenant_id, client_id=user.profile.client_id, is_portal=True, user=user)
+    return BookScope(tenant_id=user.tenant_id, client_id=client_id, is_portal=False, user=user)
+
+
+BookScopeDep = Annotated[BookScope, Depends(get_book_scope)]
+
+
+async def require_client_scope(scope: BookScopeDep) -> BookScope:
+    """Same as get_book_scope, but for endpoints that always need exactly one client
+    (e.g. create). Firm staff must pass `?client_id=`; portal accounts already have one.
+    """
+    if scope.client_id is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "client_id is required.")
+    return scope
+
+
+ClientScopeDep = Annotated[BookScope, Depends(require_client_scope)]
 
 
 def client_ip(request: Request) -> str | None:

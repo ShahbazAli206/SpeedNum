@@ -20,6 +20,12 @@ LetterStatus = Literal["draft", "sent", "viewed", "signed", "declined", "void"]
 FieldType = Literal["text", "number", "date", "select", "checkbox", "email", "phone"]
 CustomEntity = Literal["client", "task", "project"]
 Urgency = Literal["overdue", "due_soon", "upcoming", "filed", "dismissed", "snoozed"]
+InvoiceStatus = Literal["draft", "sent", "paid", "overdue", "void"]
+ExpenseStatus = Literal["pending", "approved", "rejected"]
+EmploymentType = Literal["full_time", "part_time", "contract"]
+PayRunStatus = Literal["draft", "scheduled", "processed"]
+TaxFilingStatus = Literal["open", "filed", "overdue"]
+DocumentKind = Literal["invoice", "receipt", "tax", "contract", "statement", "other"]
 
 
 class ORMModel(BaseModel):
@@ -79,6 +85,8 @@ class TenantUpdate(BaseModel):
 class ProfileRead(ORMModel):
     id: uuid.UUID
     tenant_id: uuid.UUID | None = None
+    # Set = this login is a client-portal user pinned to that client. Null = firm staff.
+    client_id: uuid.UUID | None = None
     email: str
     full_name: str | None = None
     title: str | None = None
@@ -748,6 +756,324 @@ class ImportResult(BaseModel):
     updated: int
     failed: int
     errors: list[str] = Field(default_factory=list)
+
+
+# --- Client-portal books (invoices, expenses, payroll, taxes, documents) ------
+# The client's own bookkeeping, shown on /dashboard/*. Distinct from the firm's
+# side (engagement_letters, Client.annual_fee) and from DeadlineRead (the firm's
+# internal filing work item for the same period). See db/migrations/0004.
+class ClientInvoiceBase(BaseModel):
+    number: str = Field(min_length=1, max_length=40)
+    customer_name: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+    issued_on: date
+    due_on: date
+    amount: float = 0
+    tax: float = 0
+    currency: str = "CAD"
+    status: InvoiceStatus = "draft"
+    notes: str | None = None
+
+
+class ClientInvoiceCreate(ClientInvoiceBase):
+    pass
+
+
+class ClientInvoiceUpdate(BaseModel):
+    number: str | None = None
+    customer_name: str | None = None
+    description: str | None = None
+    issued_on: date | None = None
+    due_on: date | None = None
+    amount: float | None = None
+    tax: float | None = None
+    currency: str | None = None
+    status: InvoiceStatus | None = None
+    notes: str | None = None
+
+
+class ClientInvoiceRead(ORMModel):
+    id: uuid.UUID
+    client_id: uuid.UUID
+    client_name: str | None = None
+    number: str
+    customer_name: str
+    description: str | None = None
+    issued_on: date
+    due_on: date
+    amount: float
+    tax: float
+    currency: str
+    status: InvoiceStatus
+    paid_on: date | None = None
+    notes: str | None = None
+    created_at: datetime | None = None
+
+
+class ClientInvoiceTotals(BaseModel):
+    billed: float = 0
+    collected: float = 0
+    outstanding: float = 0
+    overdue: float = 0
+    count: int = 0
+    overdue_count: int = 0
+
+
+class ClientExpenseBase(BaseModel):
+    vendor: str = Field(min_length=1, max_length=200)
+    category: str = "General"
+    spent_on: date
+    amount: float = 0
+    gst: float = 0
+    method: str | None = None
+    has_receipt: bool = False
+    notes: str | None = None
+
+
+class ClientExpenseCreate(ClientExpenseBase):
+    pass
+
+
+class ClientExpenseUpdate(BaseModel):
+    vendor: str | None = None
+    category: str | None = None
+    spent_on: date | None = None
+    amount: float | None = None
+    gst: float | None = None
+    method: str | None = None
+    has_receipt: bool | None = None
+    notes: str | None = None
+
+
+class ClientExpenseRead(ORMModel):
+    id: uuid.UUID
+    client_id: uuid.UUID
+    client_name: str | None = None
+    vendor: str
+    category: str
+    spent_on: date
+    amount: float
+    gst: float
+    status: ExpenseStatus
+    method: str | None = None
+    has_receipt: bool = False
+    notes: str | None = None
+    created_at: datetime | None = None
+
+
+class CategoryTotal(BaseModel):
+    label: str
+    value: float
+
+
+class ClientExpenseTotals(BaseModel):
+    total: float = 0
+    approved: float = 0
+    pending: int = 0
+    pending_value: float = 0
+    categories: int = 0
+    gst_paid: float = 0
+
+
+class ClientEmployeeBase(BaseModel):
+    full_name: str = Field(min_length=1, max_length=160)
+    role: str | None = None
+    employment_type: EmploymentType = "full_time"
+    province: str = "AB"
+    gross: float = 0
+    cpp: float = 0
+    ei: float = 0
+    income_tax: float = 0
+    net: float = 0
+    started_on: date | None = None
+
+
+class ClientEmployeeCreate(ClientEmployeeBase):
+    pass
+
+
+class ClientEmployeeUpdate(BaseModel):
+    full_name: str | None = None
+    role: str | None = None
+    employment_type: EmploymentType | None = None
+    province: str | None = None
+    gross: float | None = None
+    cpp: float | None = None
+    ei: float | None = None
+    income_tax: float | None = None
+    net: float | None = None
+    is_active: bool | None = None
+    ended_on: date | None = None
+
+
+class ClientEmployeeRead(ORMModel):
+    id: uuid.UUID
+    client_id: uuid.UUID
+    full_name: str
+    role: str | None = None
+    employment_type: EmploymentType
+    province: str
+    gross: float
+    cpp: float
+    ei: float
+    income_tax: float
+    net: float
+    is_active: bool = True
+    started_on: date | None = None
+    ended_on: date | None = None
+
+
+class ClientPayRunBase(BaseModel):
+    period_label: str = Field(min_length=1, max_length=80)
+    period_start: date | None = None
+    period_end: date | None = None
+    pay_date: date
+    employee_count: int = 0
+    gross: float = 0
+    deductions: float = 0
+    net: float = 0
+    status: PayRunStatus = "draft"
+
+
+class ClientPayRunCreate(ClientPayRunBase):
+    pass
+
+
+class ClientPayRunUpdate(BaseModel):
+    period_label: str | None = None
+    period_start: date | None = None
+    period_end: date | None = None
+    pay_date: date | None = None
+    employee_count: int | None = None
+    gross: float | None = None
+    deductions: float | None = None
+    net: float | None = None
+    status: PayRunStatus | None = None
+
+
+class ClientPayRunRead(ORMModel):
+    id: uuid.UUID
+    client_id: uuid.UUID
+    period_label: str
+    period_start: date | None = None
+    period_end: date | None = None
+    pay_date: date
+    employee_count: int
+    gross: float
+    deductions: float
+    net: float
+    status: PayRunStatus
+
+
+class PayrollTotals(BaseModel):
+    active: int = 0
+    monthly_gross: float = 0
+    monthly_net: float = 0
+    remittance: float = 0
+    next_run: ClientPayRunRead | None = None
+
+
+class ClientTaxObligationBase(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    authority: str = "CRA"
+    period_label: str | None = None
+    due_on: date
+    amount: float = 0
+    reference: str | None = None
+    notes: str | None = None
+
+
+class ClientTaxObligationCreate(ClientTaxObligationBase):
+    deadline_id: uuid.UUID | None = None
+
+
+class ClientTaxObligationUpdate(BaseModel):
+    name: str | None = None
+    authority: str | None = None
+    period_label: str | None = None
+    due_on: date | None = None
+    amount: float | None = None
+    status: TaxFilingStatus | None = None
+    reference: str | None = None
+    notes: str | None = None
+
+
+class ClientTaxObligationRead(ORMModel):
+    id: uuid.UUID
+    client_id: uuid.UUID
+    client_name: str | None = None
+    deadline_id: uuid.UUID | None = None
+    name: str
+    authority: str
+    period_label: str | None = None
+    due_on: date
+    amount: float
+    status: TaxFilingStatus
+    filed_at: datetime | None = None
+    reference: str | None = None
+    notes: str | None = None
+    # computed at read time, mirrors DeadlineRead.days_remaining
+    days_remaining: int = 0
+
+
+class TaxTotals(BaseModel):
+    gst_owing: float = 0
+    corporate_estimate: float = 0
+    input_tax_credits: float = 0
+    total_owing: float = 0
+    next: ClientTaxObligationRead | None = None
+
+
+class ClientDocumentCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=260)
+    kind: DocumentKind = "other"
+    storage_path: str = Field(min_length=1, max_length=500)
+    mime_type: str | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    is_client_visible: bool = False
+
+
+class ClientDocumentRead(BaseModel):
+    id: uuid.UUID
+    client_id: uuid.UUID | None = None
+    name: str
+    kind: DocumentKind
+    mime_type: str | None = None
+    size_bytes: int | None = None
+    is_client_visible: bool = False
+    uploaded_by_name: str | None = None
+    created_at: datetime | None = None
+
+
+class DocumentTotals(BaseModel):
+    count: int = 0
+    bytes: int = 0
+    shared: int = 0
+
+
+class MonthPoint(BaseModel):
+    x: str
+    revenue: float
+    expenses: float
+    net: float
+
+
+class ClientBookOverview(BaseModel):
+    """Mirrors frontend/src/lib/demo.ts::getOverview() — same shape, real numbers."""
+
+    revenue_mtd: float = 0
+    revenue_change: float = 0
+    expenses_mtd: float = 0
+    expenses_change: float = 0
+    net_mtd: float = 0
+    net_change: float = 0
+    cash_position: float = 0
+    cash_change: float = 0
+    outstanding: float = 0
+    overdue_count: int = 0
+    tax_owing: float = 0
+    pending_expenses: int = 0
+    monthly: list[MonthPoint] = Field(default_factory=list)
 
 
 # --- Misc ---------------------------------------------------------------------

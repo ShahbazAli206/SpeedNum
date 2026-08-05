@@ -45,6 +45,14 @@ LETTER_STATUSES = ("draft", "sent", "viewed", "signed", "declined", "void")
 FIELD_TYPES = ("text", "number", "date", "select", "checkbox", "email", "phone")
 CUSTOM_ENTITIES = ("client", "task", "project")
 
+# Client-portal "books" (db/migrations/0004_client_books.sql)
+INVOICE_STATUSES = ("draft", "sent", "paid", "overdue", "void")
+EXPENSE_STATUSES = ("pending", "approved", "rejected")
+EMPLOYMENT_TYPES = ("full_time", "part_time", "contract")
+PAY_RUN_STATUSES = ("draft", "scheduled", "processed")
+TAX_FILING_STATUSES = ("open", "filed", "overdue")
+DOCUMENT_KINDS = ("invoice", "receipt", "tax", "contract", "statement", "other")
+
 
 def _uuid_pk() -> Mapped[uuid.UUID]:
     return mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
@@ -87,6 +95,10 @@ class Profile(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE")
+    )
+    # Set = this login is a client-portal user pinned to that client. Null = firm staff.
+    client_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE")
     )
     email: Mapped[str] = mapped_column(Text, nullable=False)
     full_name: Mapped[str | None] = mapped_column(Text)
@@ -389,9 +401,144 @@ class Document(Base):
     storage_path: Mapped[str] = mapped_column(Text, nullable=False)
     mime_type: Mapped[str | None] = mapped_column(Text)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    kind: Mapped[str] = mapped_column(pg_enum("document_kind", *DOCUMENT_KINDS), default="other")
     is_client_visible: Mapped[bool] = mapped_column(Boolean, default=False)
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# -----------------------------------------------------------------------------
+# Client-portal "books" — the client's own sales invoices, expenses, payroll and
+# tax obligations, shown on the /dashboard/* surface. Distinct from the firm's
+# side of the relationship (engagement_letters, Client.annual_fee) and from
+# public.deadlines (the firm's internal filing work item for the same period).
+# See db/migrations/0004_client_books.sql.
+# -----------------------------------------------------------------------------
+class ClientInvoice(Base):
+    __tablename__ = "client_invoices"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False
+    )
+    number: Mapped[str] = mapped_column(Text, nullable=False)
+    customer_name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    issued_on: Mapped[date] = mapped_column(Date, server_default=func.current_date())
+    due_on: Mapped[date] = mapped_column(Date, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    tax: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    currency: Mapped[str] = mapped_column(Text, default="CAD")
+    status: Mapped[str] = mapped_column(pg_enum("invoice_status", *INVOICE_STATUSES), default="draft")
+    paid_on: Mapped[date | None] = mapped_column(Date)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ClientExpense(Base):
+    __tablename__ = "client_expenses"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False
+    )
+    vendor: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str] = mapped_column(Text, default="General")
+    spent_on: Mapped[date] = mapped_column(Date, server_default=func.current_date())
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    # GST/HST paid, tracked separately because it is the input tax credit.
+    gst: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    status: Mapped[str] = mapped_column(pg_enum("expense_status", *EXPENSE_STATUSES), default="pending")
+    method: Mapped[str | None] = mapped_column(Text)
+    has_receipt: Mapped[bool] = mapped_column(Boolean, default=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ClientEmployee(Base):
+    __tablename__ = "client_employees"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False
+    )
+    full_name: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[str | None] = mapped_column(Text)
+    employment_type: Mapped[str] = mapped_column(
+        pg_enum("employment_type", *EMPLOYMENT_TYPES), default="full_time"
+    )
+    province: Mapped[str] = mapped_column(Text, default="AB")
+    # Per pay period. Stored, not derived: CPP/EI/tax follow the rules in force
+    # for that period, so recomputing an old run from today's rates would
+    # silently rewrite history.
+    gross: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    cpp: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    ei: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    income_tax: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    net: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    started_on: Mapped[date | None] = mapped_column(Date)
+    ended_on: Mapped[date | None] = mapped_column(Date)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ClientPayRun(Base):
+    __tablename__ = "client_pay_runs"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False
+    )
+    period_label: Mapped[str] = mapped_column(Text, nullable=False)
+    period_start: Mapped[date | None] = mapped_column(Date)
+    period_end: Mapped[date | None] = mapped_column(Date)
+    pay_date: Mapped[date] = mapped_column(Date, nullable=False)
+    employee_count: Mapped[int] = mapped_column(Integer, default=0)
+    gross: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    deductions: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    net: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    status: Mapped[str] = mapped_column(pg_enum("pay_run_status", *PAY_RUN_STATUSES), default="draft")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ClientTaxObligation(Base):
+    __tablename__ = "client_tax_obligations"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False
+    )
+    deadline_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("deadlines.id"))
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    authority: Mapped[str] = mapped_column(Text, default="CRA")
+    period_label: Mapped[str | None] = mapped_column(Text)
+    due_on: Mapped[date] = mapped_column(Date, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    status: Mapped[str] = mapped_column(pg_enum("tax_filing_status", *TAX_FILING_STATUSES), default="open")
+    filed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reference: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Notification(Base):

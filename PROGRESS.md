@@ -2,7 +2,7 @@
 
 Running state of this repo so a fresh session can pick up without re-deriving anything.
 
-**Last updated:** 2026-08-05
+**Last updated:** 2026-08-06
 
 ---
 
@@ -25,7 +25,8 @@ Running state of this repo so a fresh session can pick up without re-deriving an
 | `3072c5e` | Screen recording `2026-08-04 05-48-57-937.mp4` (197 MB) via Git LFS |
 | `82c9f43` | Application source: `backend/`, `frontend/`, `db/`, the demo zip via LFS, hardened `.gitignore` |
 | `0c36d59` | Fix missing `email-validator` dependency and `useApi` hook lint errors |
-| *(uncommitted)* | **Full frontend build — public site, client portal and firm-side app** (this entry) |
+| `4cce1c9` | Full frontend build — public site, client portal and firm-side app |
+| *(uncommitted)* | **Client-portal backend** (models, schemas, routers, migration 0004) **+ `/request-demo` wired live** (this entry) |
 
 ---
 
@@ -38,10 +39,10 @@ Vercel (Next.js 16.3.0)  ──bearer token──▶  HF Space (FastAPI)  ──
 ```
 
 - **`backend/`** — FastAPI, deployed as a Hugging Face Docker Space on port 7860.
-  16 routers / **76 endpoints**. Multi-tenant: every query filtered by the `tenant_id`
+  22 routers / **78 endpoints**. Multi-tenant: every query filtered by the `tenant_id`
   pinned to the caller's `public.profiles` row. JWT verified via Supabase JWKS.
 - **`frontend/`** — Next.js 16.3.0 / React 19.2.8, Tailwind 4, Supabase SSR.
-- **`db/migrations/`** — `0001_schema.sql`, `0002_rls.sql`, `0003_functions.sql`.
+- **`db/migrations/`** — `0001_schema.sql`, `0002_rls.sql`, `0003_functions.sql`, `0004_client_books.sql`.
 
 > **Next.js caveat:** `frontend/AGENTS.md` warns this Next.js version has breaking changes vs.
 > training data. Read `node_modules/next/dist/docs/` before writing frontend code.
@@ -183,32 +184,70 @@ Defects found and fixed during that verification, worth not reintroducing:
 
 ---
 
+## Client-portal backend — built, not yet wired to the frontend
+
+The gap flagged as "no server-side counterpart at all" is closed: `db/migrations/0004_client_books.sql`
+plus 6 new routers give the client portal (`/dashboard/*`) a real API, mirroring
+`frontend/src/lib/demo.ts`'s shape field-for-field so the eventual page swap is mechanical.
+
+| Router | Prefix | Covers |
+|---|---|---|
+| `client_invoices.py` | `/client-portal/invoices` | The client's own sales invoices to its customers. "sent" past due reads as "overdue" at read time (same pattern as `Deadline.urgency`), never written directly. |
+| `client_expenses.py` | `/client-portal/expenses` | Expenses, `pending → approved/rejected`. Approve/reject are firm-staff-only actions; a portal account can edit its own submission only while still pending. |
+| `client_payroll.py` | `/client-portal/payroll` | `employees` (soft-delete via `is_active`) + `runs` (`draft → scheduled → processed`, staff-only `process` action). Per-run amounts are stored, not recomputed from current rates. |
+| `client_taxes.py` | `/client-portal/taxes` | Tax obligations distinct from `deadlines` (which track the firm's *filing work*, not the money owed) — optionally linked via `deadline_id`. Staff-only `file` action. |
+| `client_documents.py` | `/client-portal/documents` | Metadata only — file bytes go straight from the browser to the `documents` Supabase Storage bucket (already provisioned in `0003_functions.sql`); this just registers the pointer row. Extends the existing `documents` table with a `kind` column rather than adding a new one. |
+| `client_overview.py` | `/client-portal/overview` | Landing summary. `cash_position` is a genuinely derived cumulative cash effect (collected invoices − approved expenses − processed payroll − filed tax remittances), not a placeholder constant like `demo.ts`'s `cashPosition: 148_320`. |
+
+**Auth model:** a `profiles` row with `client_id` set (new column, migration 0004) is a
+portal account pinned to that one client. `deps.get_book_scope` (`BookScopeDep`) resolves
+this: firm staff may narrow to one client via `?client_id=`, a portal account always gets its
+own client and that query param is ignored for them — it can only narrow access, never widen
+it. `deps.require_staff` (`StaffUserDep`) gates the actions above that only make sense for
+firm staff (approve, reject, process, file). RLS in `0004` mirrors the same rule for
+defense-in-depth against direct Supabase access.
+
+**Verified:** `python -c "import app.main"` succeeds with a dummy `DATABASE_URL` (the engine
+is lazy — nothing dials out at import), and `app.openapi()` builds cleanly — 78 total paths,
+23 of them under `/client-portal`. Not verified against a real database; there is no Supabase
+project to test against yet (see below).
+
+**Frontend types added, pages not yet swapped.** `frontend/src/lib/types.ts` now mirrors every
+new schema (`ClientInvoice`, `ClientExpense`, `ClientEmployee`, `ClientPayRun`,
+`ClientTaxObligation`, `ClientDocument`, `ClientBookOverview`, …), same as it already does for
+the firm-side schemas. The `/dashboard/*` pages themselves still read `lib/demo.ts` — swapping
+them to call `/client-portal/*` is blocked on the same thing as the firm side (see next
+section): no Supabase project means no session, and a page that calls an authenticated
+endpoint with no session just shows errors instead of the working demo it shows today.
+
+**`/request-demo` now posts for real.** It calls the public, unauthenticated
+`POST /api/v1/public/leads` endpoint (which already existed — `routers/public.py`), so this
+one needed no backend change, just wiring the form in `demo-form.tsx`. Team size and notes
+are folded into `message` since `LeadCreate` has no dedicated field for it.
+
 ## What is left
 
-**Every screen is built.** Nothing further can be completed in the frontend without
-credentials or a backend change — the remaining work is wiring, infrastructure and content.
+**Every screen is built and the client-portal backend now exists.** What remains is wiring
+the frontend to real data (blocked on Supabase credentials this session cannot create),
+plus smaller content/infra gaps.
 
 ### 1. Connect the frontend to the API (blocked on config)
 
-**Zero of the 76 backend endpoints are called yet.** The API client (`src/lib/api.ts`),
-types (`src/lib/types.ts`) and `useApi` hook are all in place and unused. Each firm page
-reads a getter from `lib/firm-demo.ts` whose shape already matches the router's response, so
-wiring is a per-page swap rather than a rewrite.
+**Zero of the 78 backend endpoints are called from a page yet** (`/request-demo` is the one
+exception — see above). The API client (`src/lib/api.ts`), types (`src/lib/types.ts`) and
+`useApi` hook are all in place and otherwise unused. Each firm page reads a getter from
+`lib/firm-demo.ts`, and each portal page from `lib/demo.ts`, whose shapes already match the
+routers' responses, so wiring is a per-page swap rather than a rewrite.
 
 This is blocked on a Supabase project: without `NEXT_PUBLIC_SUPABASE_URL` and
 `NEXT_PUBLIC_SUPABASE_ANON_KEY` there is no session to authenticate with, and `proxy.ts`
 deliberately lets every request through rather than locking the site out.
 
-### 2. Build the client-portal backend
+### 2. Smaller gaps
 
-There are no invoice, expense, payroll, tax or document endpoints. Needs ~5 FastAPI routers
-plus `db/migrations/0004_*.sql`, then swap `src/lib/demo.ts` for real calls. Until then the
-portal is the only surface with no server-side counterpart at all.
-
-### 3. Smaller gaps
-
-- **No demo-request endpoint** — `/request-demo` validates and confirms but posts nowhere.
-- **No file storage** — document upload stages files and says so plainly.
+- **No raw file upload endpoint.** `client_documents.py` registers already-uploaded metadata;
+  actually placing bytes in Supabase Storage from the browser (signed upload URL) isn't wired
+  either, and can't be end-to-end tested without a Supabase project.
 - **`/onboarding` has no page** — `proxy.ts` guards the route; the flow is currently covered
   by `/clients` + `/import` + `/engagements` rather than a dedicated wizard.
 - **Placeholder hero art** on interior pages; no licensed photography. Swapping `HeroArt` in
@@ -224,22 +263,25 @@ portal is the only surface with no server-side counterpart at all.
 | Client portal UI | ✅ Done (on demo data) |
 | Firm-side app UI | ✅ Done (on demo data) |
 | Design system & charts | ✅ Done |
+| Client-portal backend | ✅ Done — untested against a real database |
 | Auth actually enforced | ⬜ Blocked — needs a Supabase project |
 | Firm app → real API | ⬜ Blocked on the above; then ~12 per-page swaps |
-| Portal → real data | ⬜ Needs ~5 new backend routers + a migration |
+| Portal → real API | ⬜ Blocked on the above; then ~7 per-page swaps |
+| Raw file upload | ⬜ Needs a Supabase project + a signed-URL flow |
 | Tests / CI | ⬜ Not started |
 
-**The UI is complete.** What remains is roughly: one afternoon of Supabase setup, a few days
-of per-page API wiring, and a separate backend workstream for the portal's finance features.
+**What remains is one thing, blocking almost everything else:** a Supabase project. Once
+`frontend/.env.local` has real credentials, both surfaces' page-swaps and the file-upload flow
+become mechanical and independently parallelizable.
 
 ### Suggested next step
 
 1. **Create the Supabase project** and fill `frontend/.env.local` — this unblocks everything
    else and switches the auth pages out of demo mode automatically.
-2. **Wire `/clients` end-to-end first.** It is the richest router (10 endpoints) and every
-   other record hangs off the client, so it proves the auth path, the API client and tenant
-   scoping in one go — and gives a pattern the remaining 11 areas copy.
-3. **Then the portal backend**, which is independent work and can run in parallel.
+2. **Run the migrations in order** — `0001` → `0002` → `0003` → `0004` — against it.
+3. **Wire `/clients` end-to-end first** on the firm side (richest router, 10 endpoints, every
+   other record hangs off it) **and `/dashboard/invoices` on the portal side** (now has a full
+   backend). Each proves the auth path and gives a pattern the remaining pages copy.
 
 ---
 
@@ -289,6 +331,9 @@ design should live in the repo, or add it to `.gitignore` if not.
 6. **`.avi` not in the repo** — blocked on LFS quota.
 7. **Redundancy.** The 422 MB zip likely duplicates the extracted source in
    `backend/`/`frontend/`/`db/`. Dropping it would reclaim 422 MiB and leave room for the `.avi`.
+8. **Migration 0004 is untested against a real Postgres.** Syntax and RLS logic were checked
+   by hand against the 0001–0003 conventions, but never actually run — there is no Supabase
+   project yet. Run it and its rollback path before trusting it in production.
 
 ---
 
@@ -298,3 +343,8 @@ design should live in the repo, or add it to `.gitignore` if not.
 - No real `.env` tracked — only `backend/.env.example`.
 - `frontend/package.json` and `package-lock.json` unmodified by the frontend build
   (no dependencies were added; everything uses what was already installed).
+- Backend: `python -m compileall app` and `import app.main` (dummy `DATABASE_URL`) both clean;
+  `app.openapi()` builds without error — 78 paths total.
+- Frontend: `npx tsc --noEmit` and `npx eslint .` both clean after a `.next` cache rebuild
+  (a stale cache from the prior session's build was producing spurious `PageProps` errors —
+  same root cause as the existing `/clients/[id]` gotcha above; `rm -rf .next` fixed it).

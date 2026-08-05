@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { useToast } from "@/components/toast";
 import { Button, Field, Input, Select, Textarea } from "@/components/ui";
+import { ApiError, publicPost } from "@/lib/api";
 
 const TEAM_SIZES = [
   "Just me",
@@ -23,10 +24,9 @@ interface Errors {
 /**
  * Demo request form.
  *
- * There is no submission endpoint yet — the backend has no `/public/demo-request`
- * route — so this validates, shows the success state and tells the visitor to
- * expect a call. Wire `submit()` to the API when that endpoint exists; nothing
- * else in the component needs to change.
+ * Posts to the public lead-capture endpoint (`POST /api/v1/public/leads`,
+ * unauthenticated, backed by `public.leads`). That schema has no `teamSize`
+ * field, so it is folded into `message` alongside the free-text notes.
  */
 export function DemoForm() {
   const toast = useToast();
@@ -40,6 +40,9 @@ export function DemoForm() {
     const name = String(data.get("name") ?? "").trim();
     const email = String(data.get("email") ?? "").trim();
     const firm = String(data.get("firm") ?? "").trim();
+    const phone = String(data.get("phone") ?? "").trim();
+    const teamSize = String(data.get("teamSize") ?? "").trim();
+    const notes = String(data.get("notes") ?? "").trim();
 
     const next: Errors = {};
     if (!name) next.name = "Tell us who we're meeting.";
@@ -50,13 +53,26 @@ export function DemoForm() {
     setErrors(next);
     if (Object.keys(next).length > 0) return;
 
+    const message = [teamSize && `Team size: ${teamSize}`, notes].filter(Boolean).join("\n\n");
+
     setPending(true);
-    // Stand-in for the POST. Deliberately short — it is not pretending to be a
-    // network round trip, just acknowledging the click.
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    setPending(false);
-    setDone(true);
-    toast.success("Demo request received", "We'll be in touch within one business day.");
+    try {
+      await publicPost("/public/leads", {
+        name,
+        email,
+        firm_name: firm,
+        phone: phone || null,
+        message: message || null,
+        source: "request-demo",
+      });
+      setDone(true);
+      toast.success("Demo request received", "We'll be in touch within one business day.");
+    } catch (error) {
+      const detail = error instanceof ApiError ? error.message : "Please try again in a moment.";
+      toast.error("Couldn't send your request", detail);
+    } finally {
+      setPending(false);
+    }
   };
 
   if (done) {

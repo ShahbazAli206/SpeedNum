@@ -37,6 +37,7 @@ Vercel (Next.js)  ──bearer token──▶  HF Space (FastAPI)  ──asyncpg
 | Reporting | `GET /api/v1/reporting`, `GET /api/v1/settings/audit-log` |
 | Import | `POST /api/v1/import/clients/preview` and `/commit` |
 | Superadmin | `/api/v1/admin/tenants`, `/api/v1/admin/stats` |
+| Client-portal books | `/api/v1/client-portal/{invoices,expenses,payroll,taxes,documents,overview}` |
 
 Interactive docs: `/docs`. Health probe: `/health`.
 
@@ -58,6 +59,12 @@ The token's `sub` claim is looked up in `public.profiles`, which pins the user t
 tenant. Every query is filtered by that `tenant_id`, so a token from firm A can never read
 firm B's rows. If the profile row is missing (for example the SQL trigger was never
 installed), the API provisions it from the token's user metadata on first request.
+
+A profile with `client_id` set is a **client-portal** account rather than firm staff: it is
+pinned to exactly one client and can only reach that client's own book (`/client-portal/*`
+in the table above). `deps.get_book_scope` resolves this automatically — firm staff may pass
+`?client_id=` to narrow a request to one client, a portal account always ignores that
+parameter and gets its own client regardless.
 
 ## Configuration
 
