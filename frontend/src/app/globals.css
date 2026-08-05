@@ -1,70 +1,182 @@
 @import "tailwindcss";
 
 /* ---------------------------------------------------------------------------
-   Design tokens. Light is the default; dark follows the OS setting.
-   Firm branding overrides --brand at runtime from the tenant record.
+   SpeedNum design tokens.
+
+   Light is the default. Dark follows the OS setting, and an explicit
+   `data-theme` on <html> always wins so the header toggle can override it.
+   Firm branding may override --brand at runtime from the tenant record.
 --------------------------------------------------------------------------- */
 :root {
-  --canvas: #f6f8fb;
+  /* Surfaces */
+  --canvas: #f8fafc;
   --surface: #ffffff;
   --surface-2: #f1f5f9;
-  --line: #e2e8f0;
-  --line-strong: #cbd5e1;
-  --ink: #0f172a;
-  --ink-soft: #334155;
-  --muted: #64748b;
-  --brand: #1d4ed8;
-  --brand-soft: #dbeafe;
-  --brand-ink: #1e3a8a;
-  --success: #047857;
-  --success-soft: #d1fae5;
+  --surface-3: #e8edf4;
+  --line: #e4e9f0;
+  --line-strong: #cdd6e2;
+
+  /* Type */
+  --ink: #10224b;
+  --ink-soft: #3b4d70;
+  --muted: #6b7c99;
+
+  /* Brand — SpeedNum green */
+  --brand: #0a8f4e;
+  --brand-strong: #077a42;
+  --brand-soft: #e4f6ec;
+  --brand-ink: #06603a;
+
+  /* Deep navy used by dark marketing bands, the auth split and the footer */
+  --navy: #0e2148;
+  --navy-2: #132a58;
+  --navy-line: #24406f;
+
+  /* Brand green for text and icons sitting ON the navy bands.
+     Theme-invariant: those bands are dark in both themes, so this must not
+     follow --brand-ink, which is a dark green meant for light chips.
+     Measures ~9:1 against --navy. */
+  --brand-on-dark: #57dd9d;
+
+  /* Semantic */
+  --success: #0a8f4e;
+  --success-soft: #e4f6ec;
   --warn: #b45309;
   --warn-soft: #fef3c7;
-  --danger: #b91c1c;
-  --danger-soft: #fee2e2;
-  --info: #0369a1;
-  --info-soft: #e0f2fe;
+  --danger: #be123c;
+  --danger-soft: #ffe4e9;
+  --info: #1266f1;
+  --info-soft: #e3edff;
+
+  /* Vivid KPI tile fills (dashboard) — these stay saturated in both themes */
+  --kpi-blue: #1266f1;
+  --kpi-green: #0a8f4e;
+  --kpi-amber: #f59e0b;
+  --kpi-rose: #e11d48;
+  --kpi-violet: #7c3aed;
+
   --ring: color-mix(in oklab, var(--brand) 45%, transparent);
-  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.06), 0 1px 3px rgb(15 23 42 / 0.04);
+  --shadow-card: 0 1px 2px rgb(16 34 75 / 0.05), 0 1px 3px rgb(16 34 75 / 0.04);
+  --shadow-lift: 0 10px 30px -12px rgb(16 34 75 / 0.18), 0 2px 8px -2px rgb(16 34 75 / 0.06);
+  --shadow-float: 0 24px 60px -20px rgb(16 34 75 / 0.28);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --canvas: #0b1220;
-    --surface: #111a2e;
-    --surface-2: #16223c;
-    --line: #24324f;
+    --canvas: #070e1d;
+    --surface: #0e1729;
+    --surface-2: #152036;
+    --surface-3: #1c2a45;
+    --line: #1f2d47;
     --line-strong: #33456b;
-    --ink: #e8eefb;
-    --ink-soft: #c2cee5;
-    --muted: #8ea0c0;
-    --brand: #5b8dff;
-    --brand-soft: #17284b;
-    --brand-ink: #bcd0ff;
-    --success: #34d399;
-    --success-soft: #06301f;
-    --warn: #fbbf24;
-    --warn-soft: #3a2a05;
-    --danger: #f87171;
-    --danger-soft: #3d1111;
-    --info: #38bdf8;
-    --info-soft: #072b3f;
-    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+
+    --ink: #e9eefb;
+    --ink-soft: #c3cfe6;
+    --muted: #8b9cbb;
+
+    --brand: #22b26a;
+    --brand-strong: #34c47c;
+    --brand-soft: #0a2e1f;
+    --brand-ink: #7fe0ab;
+
+    --navy: #0a1225;
+    --navy-2: #101c36;
+    --navy-line: #22345a;
+
+    --success: #22b26a;
+    --success-soft: #0a2e1f;
+    --warn: #f6ad3c;
+    --warn-soft: #38280a;
+    --danger: #fb7185;
+    --danger-soft: #3d1220;
+    --info: #4c8dfb;
+    --info-soft: #0d1f3d;
+
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.45);
+    --shadow-lift: 0 12px 32px -14px rgb(0 0 0 / 0.7);
+    --shadow-float: 0 24px 60px -20px rgb(0 0 0 / 0.75);
   }
+}
+
+/* Explicit toggle wins over the OS preference, in both directions. */
+:root[data-theme="light"] {
+  --canvas: #f8fafc;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --surface-3: #e8edf4;
+  --line: #e4e9f0;
+  --line-strong: #cdd6e2;
+  --ink: #10224b;
+  --ink-soft: #3b4d70;
+  --muted: #6b7c99;
+  --brand: #0a8f4e;
+  --brand-strong: #077a42;
+  --brand-soft: #e4f6ec;
+  --brand-ink: #06603a;
+  --navy: #0e2148;
+  --navy-2: #132a58;
+  --navy-line: #24406f;
+  --success: #0a8f4e;
+  --success-soft: #e4f6ec;
+  --warn: #b45309;
+  --warn-soft: #fef3c7;
+  --danger: #be123c;
+  --danger-soft: #ffe4e9;
+  --info: #1266f1;
+  --info-soft: #e3edff;
+  --shadow-card: 0 1px 2px rgb(16 34 75 / 0.05), 0 1px 3px rgb(16 34 75 / 0.04);
+  --shadow-lift: 0 10px 30px -12px rgb(16 34 75 / 0.18), 0 2px 8px -2px rgb(16 34 75 / 0.06);
+  --shadow-float: 0 24px 60px -20px rgb(16 34 75 / 0.28);
+}
+
+:root[data-theme="dark"] {
+  --canvas: #070e1d;
+  --surface: #0e1729;
+  --surface-2: #152036;
+  --surface-3: #1c2a45;
+  --line: #1f2d47;
+  --line-strong: #33456b;
+  --ink: #e9eefb;
+  --ink-soft: #c3cfe6;
+  --muted: #8b9cbb;
+  --brand: #22b26a;
+  --brand-strong: #34c47c;
+  --brand-soft: #0a2e1f;
+  --brand-ink: #7fe0ab;
+  --navy: #0a1225;
+  --navy-2: #101c36;
+  --navy-line: #22345a;
+  --success: #22b26a;
+  --success-soft: #0a2e1f;
+  --warn: #f6ad3c;
+  --warn-soft: #38280a;
+  --danger: #fb7185;
+  --danger-soft: #3d1220;
+  --info: #4c8dfb;
+  --info-soft: #0d1f3d;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.45);
+  --shadow-lift: 0 12px 32px -14px rgb(0 0 0 / 0.7);
+  --shadow-float: 0 24px 60px -20px rgb(0 0 0 / 0.75);
 }
 
 @theme inline {
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
   --color-ink: var(--ink);
   --color-ink-soft: var(--ink-soft);
   --color-muted: var(--muted);
   --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
   --color-brand-soft: var(--brand-soft);
   --color-brand-ink: var(--brand-ink);
+  --color-brand-on-dark: var(--brand-on-dark);
+  --color-navy: var(--navy);
+  --color-navy-2: var(--navy-2);
+  --color-navy-line: var(--navy-line);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-warn: var(--warn);
@@ -73,8 +185,19 @@
   --color-danger-soft: var(--danger-soft);
   --color-info: var(--info);
   --color-info-soft: var(--info-soft);
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --color-kpi-blue: var(--kpi-blue);
+  --color-kpi-green: var(--kpi-green);
+  --color-kpi-amber: var(--kpi-amber);
+  --color-kpi-rose: var(--kpi-rose);
+  --color-kpi-violet: var(--kpi-violet);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-jakarta), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --shadow-card: var(--shadow-card);
+  --shadow-lift: var(--shadow-lift);
+  --shadow-float: var(--shadow-float);
 }
 
 * {
@@ -83,6 +206,14 @@
 
 html {
   color-scheme: light dark;
+  scroll-behavior: smooth;
+}
+
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
 }
 
 body {
@@ -90,16 +221,23 @@ body {
   color: var(--ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.022em;
 }
 
 ::selection {
-  background: color-mix(in oklab, var(--brand) 25%, transparent);
+  background: color-mix(in oklab, var(--brand) 28%, transparent);
 }
 
 /* Focus ring shared by every interactive element */
 :where(a, button, input, select, textarea, [tabindex]):focus-visible {
   outline: 2px solid var(--brand);
   outline-offset: 2px;
+  border-radius: 4px;
 }
 
 /* Thin scrollbars inside scroll regions */
@@ -107,29 +245,206 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
 }
+.scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 99px;
+}
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
 
-/* Marketing gradient wash */
+/* ---------------------------------------------------------------------------
+   Marketing decoration
+--------------------------------------------------------------------------- */
+
+/* Soft brand wash behind the hero */
 .hero-wash {
   background:
-    radial-gradient(60rem 32rem at 78% -12%, color-mix(in oklab, var(--brand) 16%, transparent), transparent 60%),
-    radial-gradient(48rem 28rem at 6% 4%, color-mix(in oklab, var(--info) 12%, transparent), transparent 62%);
+    radial-gradient(58rem 30rem at 82% -14%, color-mix(in oklab, var(--brand) 13%, transparent), transparent 62%),
+    radial-gradient(44rem 26rem at 2% 2%, color-mix(in oklab, var(--info) 9%, transparent), transparent 64%);
 }
 
+/* Faint engineering grid, masked so it fades out at the edges */
 .grid-lines {
   background-image:
-    linear-gradient(to right, color-mix(in oklab, var(--line) 70%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in oklab, var(--line) 70%, transparent) 1px, transparent 1px);
-  background-size: 44px 44px;
-  mask-image: radial-gradient(70% 60% at 50% 30%, #000 30%, transparent 100%);
+    linear-gradient(to right, color-mix(in oklab, var(--line) 80%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--line) 80%, transparent) 1px, transparent 1px);
+  background-size: 46px 46px;
+  -webkit-mask-image: radial-gradient(72% 62% at 50% 28%, #000 28%, transparent 100%);
+  mask-image: radial-gradient(72% 62% at 50% 28%, #000 28%, transparent 100%);
 }
 
+/* Same grid, tuned for the dark navy bands */
+.grid-lines-dark {
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.05) 1px, transparent 1px);
+  background-size: 46px 46px;
+}
+
+/* Deep navy band with a subtle teal bloom in the corner */
+.navy-band {
+  background:
+    radial-gradient(48rem 26rem at 92% 8%, color-mix(in oklab, var(--brand) 22%, transparent), transparent 60%),
+    linear-gradient(160deg, var(--navy) 0%, var(--navy-2) 58%, var(--navy) 100%);
+}
+
+/* Green gradient used on primary CTAs */
+.brand-gradient {
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-strong) 100%);
+}
+
+/* ---------------------------------------------------------------------------
+   Motion
+--------------------------------------------------------------------------- */
 @keyframes fade-rise {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: none; }
 }
 
-.animate-in {
-  animation: fade-rise 0.28s ease-out both;
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes float-y {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-10px); }
+}
+
+@keyframes draw-line {
+  from { stroke-dashoffset: var(--dash, 1000); }
+  to   { stroke-dashoffset: 0; }
+}
+
+@keyframes grow-bar {
+  from { transform: scaleY(0); }
+  to   { transform: scaleY(1); }
+}
+
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to   { background-position: 200% 0; }
+}
+
+.animate-in    { animation: fade-rise 0.32s ease-out both; }
+.animate-fade  { animation: fade-in 0.4s ease-out both; }
+.animate-scale { animation: scale-in 0.24s ease-out both; }
+.animate-float { animation: float-y 7s ease-in-out infinite; }
+
+/* Scroll-reveal: elements start hidden and are unhidden by an observer that
+   flips data-visible. Without JS the `no-js` fallback keeps them visible. */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1),
+              transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: var(--reveal-delay, 0ms);
+  will-change: opacity, transform;
+}
+.reveal[data-visible="true"] {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .animate-in, .animate-fade, .animate-scale, .animate-float { animation: none; }
+}
+
+/* Skeleton shimmer */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    color-mix(in oklab, var(--surface-2) 60%, var(--surface)) 50%,
+    var(--surface-2) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/* Marquee used by the logo strip */
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.marquee-track {
+  animation: marquee 38s linear infinite;
+}
+.marquee:hover .marquee-track { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track { animation: none; }
+}
+
+/* Long-form legal / blog prose */
+.prose-legal { color: var(--ink-soft); line-height: 1.75; }
+.prose-legal h2 {
+  color: var(--ink);
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin: 2.5rem 0 0.75rem;
+  scroll-margin-top: 6rem;
+}
+.prose-legal h3 {
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-weight: 650;
+  margin: 1.75rem 0 0.5rem;
+}
+.prose-legal p { margin: 0.85rem 0; }
+.prose-legal ul { margin: 0.85rem 0; padding-left: 1.15rem; list-style: disc; }
+.prose-legal ol { margin: 0.85rem 0; padding-left: 1.35rem; list-style: decimal; }
+.prose-legal li { margin: 0.4rem 0; }
+.prose-legal a { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
+.prose-legal strong { color: var(--ink); font-weight: 620; }
+
+/* ---------------------------------------------------------------------------
+   Chart palette.
+
+   Scoped to `.viz` so it never leaks into UI chrome. Both modes are *selected*,
+   not flipped: the dark column is the same five hues re-stepped for the dark
+   surface. The set was validated with the data-viz palette checker against the
+   real surfaces (#ffffff light, #0e1729 dark) — lightness band, chroma floor,
+   adjacent CVD separation, normal-vision floor and contrast all pass in both
+   modes. Do not hand-tweak a value without re-running that check.
+
+   One caveat carried from the light run: slot 3 (amber) sits at 2.15:1 on the
+   light surface. Every chart that uses it therefore ships direct labels and a
+   table view, which is the documented relief for a sub-3:1 series.
+--------------------------------------------------------------------------- */
+.viz {
+  --series-1: #0a8f4e; /* green — brand, always slot 1 */
+  --series-2: #1266f1; /* blue */
+  --series-3: #f59e0b; /* amber */
+  --series-4: #e11d48; /* rose */
+  --series-5: #7c3aed; /* violet */
+  --viz-grid: var(--line);
+  --viz-axis: var(--line-strong);
+  --viz-surface: var(--surface);
+  --viz-muted: var(--muted);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz {
+    --series-1: #1da75f;
+    --series-2: #4c8dfb;
+    --series-3: #c98500;
+    --series-4: #e5556b;
+    --series-5: #9085e9;
+  }
+}
+
+:root[data-theme="dark"] .viz {
+  --series-1: #1da75f;
+  --series-2: #4c8dfb;
+  --series-3: #c98500;
+  --series-4: #e5556b;
+  --series-5: #9085e9;
 }
 
 @media print {

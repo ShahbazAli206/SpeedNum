@@ -63,6 +63,38 @@ export function formatNumber(value: number | null | undefined) {
   return new Intl.NumberFormat("en-CA").format(Number(value ?? 0));
 }
 
+/** Axis-friendly money: $0 / $2.4k / $1.2M. Keeps tick labels short. */
+export function compactMoney(value: number | null | undefined, currency = "CAD") {
+  const amount = Number(value ?? 0);
+  const sign = amount < 0 ? "-" : "";
+  const abs = Math.abs(amount);
+  const symbol = currency === "USD" ? "US$" : "$";
+  if (abs >= 1_000_000) return `${sign}${symbol}${(abs / 1_000_000).toFixed(abs % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (abs >= 1_000) return `${sign}${symbol}${(abs / 1_000).toFixed(abs % 1_000 === 0 ? 0 : 1)}k`;
+  return `${sign}${symbol}${Math.round(abs)}`;
+}
+
+export function compactNumber(value: number | null | undefined) {
+  const amount = Number(value ?? 0);
+  if (Math.abs(amount) >= 1_000_000) return `${(amount / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(amount) >= 1_000) return `${(amount / 1_000).toFixed(1)}k`;
+  return String(Math.round(amount));
+}
+
+export function formatPercent(value: number | null | undefined, decimals = 0) {
+  return `${Number(value ?? 0).toFixed(decimals)}%`;
+}
+
+/** Human file size for the documents list. */
+export function formatBytes(bytes: number | null | undefined) {
+  const size = Number(bytes ?? 0);
+  if (size <= 0) return "0 KB";
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(units.length - 1, Math.floor(Math.log(size) / Math.log(1024)));
+  const scaled = size / Math.pow(1024, index);
+  return `${scaled.toFixed(index === 0 || scaled >= 100 ? 0 : 1)} ${units[index]}`;
+}
+
 /** "Due in 12 days" / "9 days overdue" */
 export function dueLabel(days: number) {
   if (days === 0) return "Due today";

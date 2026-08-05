@@ -1,12 +1,14 @@
 "use client";
 
-import clsx, { type ClassValue } from "clsx";
-import { AlertTriangle, Check, Info, Loader2, X } from "lucide-react";
+import { cn } from "@/lib/cn";
+import { TriangleAlert, Check, ChevronLeft, ChevronRight, Info, LoaderCircle, X } from "lucide-react";
+import Link from "next/link";
 import {
   createContext,
   useContext,
   useEffect,
   useId,
+  type AnchorHTMLAttributes,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type ReactNode,
@@ -14,35 +16,50 @@ import {
   type TextareaHTMLAttributes,
 } from "react";
 
-export const cn = (...values: ClassValue[]) => clsx(values);
+export { cn };
 
 /* -------------------------------------------------------------------------- */
 /* Button                                                                      */
 /* -------------------------------------------------------------------------- */
-type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "soft";
-type ButtonSize = "sm" | "md" | "lg";
+export type ButtonVariant =
+  | "primary"
+  | "secondary"
+  | "ghost"
+  | "danger"
+  | "soft"
+  | "onDark";
+export type ButtonSize = "sm" | "md" | "lg" | "xl";
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   primary:
-    "bg-brand text-white shadow-sm hover:brightness-110 active:brightness-95 disabled:bg-brand/50",
+    "brand-gradient text-white shadow-sm hover:brightness-110 active:brightness-95 disabled:opacity-60",
   secondary:
-    "bg-surface text-ink border border-line-strong hover:bg-surface-2 disabled:text-muted",
+    "bg-surface text-ink border border-line-strong hover:bg-surface-2 hover:border-line-strong disabled:text-muted",
   ghost: "text-ink-soft hover:bg-surface-2 hover:text-ink",
   danger: "bg-danger text-white hover:brightness-110",
   soft: "bg-brand-soft text-brand-ink hover:brightness-105",
+  onDark: "bg-white/10 text-white border border-white/20 backdrop-blur hover:bg-white/18",
 };
 
 const BUTTON_SIZES: Record<ButtonSize, string> = {
   sm: "h-8 px-3 text-[13px] gap-1.5",
   md: "h-9.5 px-4 text-sm gap-2",
   lg: "h-11 px-5 text-[15px] gap-2",
+  xl: "h-13 px-7 text-base gap-2.5",
 };
+
+export const BUTTON_BASE =
+  "inline-flex items-center justify-center rounded-full font-semibold transition " +
+  "disabled:cursor-not-allowed disabled:opacity-70";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   loading?: boolean;
+  /** Rendered before the label. Replaced by the spinner while loading. */
   icon?: ReactNode;
+  /** Rendered after the label — use for the "→" affordance on CTAs. */
+  trailingIcon?: ReactNode;
 }
 
 export function Button({
@@ -50,6 +67,7 @@ export function Button({
   size = "md",
   loading = false,
   icon,
+  trailingIcon,
   className,
   children,
   disabled,
@@ -59,17 +77,41 @@ export function Button({
     <button
       {...props}
       disabled={disabled || loading}
-      className={cn(
-        "inline-flex items-center justify-center rounded-lg font-medium transition",
-        "disabled:cursor-not-allowed disabled:opacity-70",
-        BUTTON_VARIANTS[variant],
-        BUTTON_SIZES[size],
-        className,
-      )}
+      className={cn(BUTTON_BASE, BUTTON_VARIANTS[variant], BUTTON_SIZES[size], className)}
     >
-      {loading ? <Loader2 className="size-4 animate-spin" /> : icon}
+      {loading ? <LoaderCircle className="size-4 animate-spin" /> : icon}
       {children}
+      {loading ? null : trailingIcon}
     </button>
+  );
+}
+
+/** Same visual language as <Button>, but renders a real anchor for navigation. */
+export function ButtonLink({
+  variant = "primary",
+  size = "md",
+  icon,
+  trailingIcon,
+  className,
+  children,
+  ...props
+}: AnchorHTMLAttributes<HTMLAnchorElement> & {
+  href: string;
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  icon?: ReactNode;
+  trailingIcon?: ReactNode;
+}) {
+  return (
+    <Link
+      {...props}
+      href={props.href}
+      className={cn(BUTTON_BASE, BUTTON_VARIANTS[variant], BUTTON_SIZES[size], className)}
+    >
+      {icon}
+      {children}
+      {trailingIcon}
+    </Link>
   );
 }
 
@@ -355,7 +397,7 @@ export function TD({
 /* State displays                                                              */
 /* -------------------------------------------------------------------------- */
 export function Spinner({ className }: { className?: string }) {
-  return <Loader2 className={cn("size-4 animate-spin text-muted", className)} />;
+  return <LoaderCircle className={cn("size-4 animate-spin text-muted", className)} />;
 }
 
 export function LoadingBlock({ label = "Loading…", rows = 3 }: { label?: string; rows?: number }) {
@@ -411,8 +453,8 @@ export function Alert({
   const icons = {
     info: <Info className="size-4" />,
     success: <Check className="size-4" />,
-    warn: <AlertTriangle className="size-4" />,
-    danger: <AlertTriangle className="size-4" />,
+    warn: <TriangleAlert className="size-4" />,
+    danger: <TriangleAlert className="size-4" />,
   };
   const tones = {
     info: "bg-info-soft text-info",
@@ -566,6 +608,229 @@ export function Tabs({
         {children}
       </div>
     </TabsContext.Provider>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Switch, progress, skeleton, pagination, drawer                              */
+/* -------------------------------------------------------------------------- */
+export function Switch({
+  checked,
+  onChange,
+  label,
+  description,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: ReactNode;
+  description?: ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-2.5">
+      <div className="min-w-0">
+        <p className="text-sm text-ink-soft">{label}</p>
+        {description ? <p className="mt-0.5 text-[12.5px] text-muted">{description}</p> : null}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={typeof label === "string" ? label : undefined}
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        className={cn(
+          "relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition disabled:opacity-50",
+          checked ? "bg-brand" : "bg-line-strong",
+        )}
+      >
+        <span
+          className={cn(
+            "absolute top-0.5 left-0.5 size-5 rounded-full bg-white shadow-sm transition-transform",
+            checked && "translate-x-5",
+          )}
+        />
+      </button>
+    </div>
+  );
+}
+
+export function Progress({
+  value,
+  tone = "brand",
+  className,
+  label,
+}: {
+  /** 0–100. Values outside the range are clamped. */
+  value: number;
+  tone?: Tone;
+  className?: string;
+  label?: string;
+}) {
+  const pct = Math.max(0, Math.min(100, value));
+  const fills: Record<Tone, string> = {
+    neutral: "bg-muted",
+    brand: "bg-brand",
+    success: "bg-success",
+    warn: "bg-warn",
+    danger: "bg-danger",
+    info: "bg-info",
+  };
+  return (
+    <div
+      className={cn("h-1.5 w-full overflow-hidden rounded-full bg-surface-2", className)}
+      role="progressbar"
+      aria-valuenow={Math.round(pct)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-label={label}
+    >
+      <div
+        className={cn("h-full rounded-full transition-[width] duration-700 ease-out", fills[tone])}
+        style={{ width: `${pct}%` }}
+      />
+    </div>
+  );
+}
+
+export function Skeleton({ className }: { className?: string }) {
+  return <div className={cn("skeleton rounded-lg", className)} />;
+}
+
+export function Pagination({
+  page,
+  pageCount,
+  onPage,
+  summary,
+}: {
+  page: number;
+  pageCount: number;
+  onPage: (next: number) => void;
+  summary?: string;
+}) {
+  if (pageCount <= 1) {
+    return summary ? (
+      <div className="flex items-center justify-between px-5 py-3 text-[12.5px] text-muted">
+        <span>{summary}</span>
+      </div>
+    ) : null;
+  }
+
+  // Show at most 5 numbered buttons, centred on the current page.
+  const start = Math.max(1, Math.min(page - 2, pageCount - 4));
+  const pages = Array.from({ length: Math.min(5, pageCount) }, (_, i) => start + i);
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-3">
+      <span className="text-[12.5px] text-muted">{summary}</span>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => onPage(page - 1)}
+          disabled={page <= 1}
+          className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-surface-2 hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent"
+          aria-label="Previous page"
+        >
+          <ChevronLeft className="size-4" />
+        </button>
+        {pages.map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => onPage(p)}
+            aria-current={p === page ? "page" : undefined}
+            className={cn(
+              "size-8 rounded-lg text-[13px] font-medium tabular-nums transition",
+              p === page
+                ? "bg-brand text-white"
+                : "border border-line text-ink-soft hover:bg-surface-2",
+            )}
+          >
+            {p}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => onPage(page + 1)}
+          disabled={page >= pageCount}
+          className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-surface-2 hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent"
+          aria-label="Next page"
+        >
+          <ChevronRight className="size-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Right-hand slide-over used for record details. */
+export function Drawer({
+  open,
+  onClose,
+  title,
+  subtitle,
+  children,
+  footer,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: ReactNode;
+  subtitle?: ReactNode;
+  children: ReactNode;
+  footer?: ReactNode;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-70 flex justify-end">
+      <div
+        className="animate-fade absolute inset-0 bg-slate-950/45 backdrop-blur-[2px]"
+        onClick={onClose}
+        aria-hidden
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={typeof title === "string" ? title : "Details"}
+        className="animate-in relative flex h-full w-[min(30rem,100vw)] flex-col border-l border-line bg-surface shadow-[var(--shadow-float)]"
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
+          <div className="min-w-0">
+            <h2 className="truncate text-base font-semibold text-ink">{title}</h2>
+            {subtitle ? <p className="mt-0.5 text-[13px] text-muted">{subtitle}</p> : null}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="-m-1 rounded-lg p-1 text-muted transition hover:bg-surface-2 hover:text-ink"
+            aria-label="Close panel"
+          >
+            <X className="size-4.5" />
+          </button>
+        </div>
+        <div className="scroll-thin flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        {footer ? (
+          <div className="flex items-center justify-end gap-2 border-t border-line bg-surface-2/50 px-5 py-3.5">
+            {footer}
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

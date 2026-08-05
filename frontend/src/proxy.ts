@@ -1,9 +1,15 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-/** Routes that require a signed-in user. */
+/**
+ * Routes that require a signed-in user.
+ *
+ * `/dashboard` is the client portal; the rest are the firm-side app under
+ * `src/app/(firm)/`. Keep this in sync with FIRM_NAV in `src/lib/site.ts`.
+ */
 const PROTECTED = [
   "/dashboard",
+  "/overview",
   "/clients",
   "/workflows",
   "/deadlines",
