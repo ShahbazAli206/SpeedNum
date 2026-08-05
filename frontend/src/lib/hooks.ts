@@ -22,6 +22,11 @@ export function useApi<T>(path: string | null, deps: unknown[] = []) {
   });
   const requestId = useRef(0);
 
+  // Callers pass a variable-length `deps`, but a hook dependency list has to be a
+  // fixed-size array literal — React compares slot by slot and a changing length
+  // is undefined behaviour. Collapse the caller's values into one stable key.
+  const depsKey = JSON.stringify(deps);
+
   const load = useCallback(
     async (silent = false) => {
       if (path === null) {
@@ -43,11 +48,17 @@ export function useApi<T>(path: string | null, deps: unknown[] = []) {
         });
       }
     },
+    // depsKey stands in for the caller's `deps` values, so it is intentionally a
+    // dependency the body never reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [path, ...deps],
+    [path, depsKey],
   );
 
   useEffect(() => {
+    // Issuing the HTTP request is exactly the external-system synchronisation
+    // effects are for. `load` flips isLoading synchronously on the way out, which
+    // trips set-state-in-effect; that transition is the point, so allow it.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
 
