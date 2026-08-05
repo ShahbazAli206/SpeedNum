@@ -1,0 +1,329 @@
+"""Client CRM: records, contacts and their service assignments."""
+
+from __future__ import annotations
+
+import uuid
+
+from fastapi import APIRouter, HTTPException, Query, Request, status
+from sqlalchemy import Date, and_, cast, func, or_, select
+
+from ..deps import SessionDep, TenantUserDep, client_ip
+from ..models import Client, ClientService, Contact, Deadline, Profile, Service, Task
+from ..schemas import (
+    ClientCreate,
+    ClientRead,
+    ClientServiceRead,
+    ClientUpdate,
+    ContactCreate,
+    ContactRead,
+    ContactUpdate,
+    Ok,
+)
+from ..services import audit
+from ..utils import apply_updates, ensure_found, profile_names, read, today_utc
+
+router = APIRouter(tags=["clients"])
+
+OPEN_TASK_STATES = ("todo", "in_progress", "review", "blocked")
+
+
+async def _aggregates(session: SessionDep, client_ids: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
+    if not client_ids:
+        return {}
+
+    today = today_utc()
+    out: dict[uuid.UUID, dict] = {
+        cid: {
+            "open_tasks": 0,
+            "open_deadlines": 0,
+            "overdue_deadlines": 0,
+            "next_due_date": None,
+            "service_count": 0,
+        }
+        for cid in client_ids
+    }
+
+    task_rows = await session.execute(
+        select(Task.client_id, func.count(Task.id))
+        .where(Task.client_id.in_(client_ids), Task.status.in_(OPEN_TASK_STATES))
+        .group_by(Task.client_id)
+    )
+    for cid, count in task_rows:
+        out[cid]["open_tasks"] = count
+
+    deadline_rows = await session.execute(
+        select(
+            Deadline.client_id,
+            func.count(Deadline.id),
+            func.count(Deadline.id).filter(Deadline.due_date < today),
+            func.min(Deadline.due_date),
+        )
+        .where(Deadline.client_id.in_(client_ids), Deadline.status.in_(("open", "snoozed")))
+        .group_by(Deadline.client_id)
+    )
+    for cid, total, overdue, next_due in deadline_rows:
+        out[cid]["open_deadlines"] = total
+        out[cid]["overdue_deadlines"] = overdue
+        out[cid]["next_due_date"] = next_due
+
+    service_rows = await session.execute(
+        select(ClientService.client_id, func.count(ClientService.id))
+        .where(ClientService.client_id.in_(client_ids), ClientService.is_active.is_(True))
+        .group_by(ClientService.client_id)
+    )
+    for cid, count in service_rows:
+        out[cid]["service_count"] = count
+
+    return out
+
+
+@router.get("/clients", response_model=list[ClientRead])
+async def list_clients(
+    session: SessionDep,
+    user: TenantUserDep,
+    search: str | None = None,
+    status_filter: str | None = Query(default=None, alias="status"),
+    client_type: str | None = None,
+    owner_id: uuid.UUID | None = None,
+    tag: str | None = None,
+    limit: int = Query(default=200, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    sort: str = Query(default="legal_name"),
+) -> list[ClientRead]:
+    stmt = select(Client).where(Client.tenant_id == user.tenant_id)
+
+    if search:
+        pattern = f"%{search.strip()}%"
+        stmt = stmt.where(
+            or_(
+                Client.legal_name.ilike(pattern),
+                Client.business_name.ilike(pattern),
+                Client.email.ilike(pattern),
+                Client.code.ilike(pattern),
+                Client.city.ilike(pattern),
+            )
+        )
+    if status_filter:
+        stmt = stmt.where(Client.status == status_filter)
+    if client_type:
+        stmt = stmt.where(Client.client_type == client_type)
+    if owner_id:
+        stmt = stmt.where(Client.owner_id == owner_id)
+    if tag:
+        stmt = stmt.where(Client.tags.any(tag))
+
+    sort_map = {
+        "legal_name": Client.legal_name.asc(),
+        "-legal_name": Client.legal_name.desc(),
+        "created_at": Client.created_at.asc(),
+        "-created_at": Client.created_at.desc(),
+        "annual_fee": Client.annual_fee.asc(),
+        "-annual_fee": Client.annual_fee.desc(),
+    }
+    stmt = stmt.order_by(sort_map.get(sort, Client.legal_name.asc())).limit(limit).offset(offset)
+
+    rows = (await session.scalars(stmt)).all()
+    aggregates = await _aggregates(session, [row.id for row in rows])
+    names = await profile_names(session, user.tenant_id)
+
+    return [
+        read(
+            ClientRead,
+            row,
+            owner_name=names.get(row.owner_id),
+            **aggregates.get(row.id, {}),
+        )
+        for row in rows
+    ]
+
+
+@router.post("/clients", response_model=ClientRead, status_code=status.HTTP_201_CREATED)
+async def create_client(
+    payload: ClientCreate, session: SessionDep, user: TenantUserDep, request: Request
+) -> ClientRead:
+    row = Client(tenant_id=user.tenant_id, created_by=user.profile.id, **payload.model_dump())
+    session.add(row)
+    await session.flush()
+
+    await audit.record(
+        session,
+        tenant_id=user.tenant_id,
+        actor_id=user.profile.id,
+        actor_email=user.profile.email,
+        action="created",
+        entity="client",
+        entity_id=row.id,
+        summary=f"Added client {row.legal_name}",
+        ip_address=client_ip(request),
+    )
+    names = await profile_names(session, user.tenant_id)
+    return read(ClientRead, row, owner_name=names.get(row.owner_id))
+
+
+@router.get("/clients/{client_id}", response_model=ClientRead)
+async def get_client(client_id: uuid.UUID, session: SessionDep, user: TenantUserDep) -> ClientRead:
+    row = await session.scalar(
+        select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
+    )
+    ensure_found(row, "Client")
+    aggregates = await _aggregates(session, [row.id])
+    names = await profile_names(session, user.tenant_id)
+    return read(ClientRead, row, owner_name=names.get(row.owner_id), **aggregates.get(row.id, {}))
+
+
+@router.patch("/clients/{client_id}", response_model=ClientRead)
+async def update_client(
+    client_id: uuid.UUID,
+    payload: ClientUpdate,
+    session: SessionDep,
+    user: TenantUserDep,
+    request: Request,
+) -> ClientRead:
+    row = await session.scalar(
+        select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
+    )
+    ensure_found(row, "Client")
+
+    changed = apply_updates(row, payload)
+    await session.flush()
+
+    if changed:
+        await audit.record(
+            session,
+            tenant_id=user.tenant_id,
+            actor_id=user.profile.id,
+            actor_email=user.profile.email,
+            action="updated",
+            entity="client",
+            entity_id=row.id,
+            summary=f"Updated {row.legal_name} ({', '.join(changed)})",
+            ip_address=client_ip(request),
+        )
+
+    aggregates = await _aggregates(session, [row.id])
+    names = await profile_names(session, user.tenant_id)
+    return read(ClientRead, row, owner_name=names.get(row.owner_id), **aggregates.get(row.id, {}))
+
+
+@router.delete("/clients/{client_id}", response_model=Ok)
+async def delete_client(
+    client_id: uuid.UUID, session: SessionDep, user: TenantUserDep, request: Request
+) -> Ok:
+    row = await session.scalar(
+        select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
+    )
+    ensure_found(row, "Client")
+    name = row.legal_name
+    await session.delete(row)
+    await audit.record(
+        session,
+        tenant_id=user.tenant_id,
+        actor_id=user.profile.id,
+        actor_email=user.profile.email,
+        action="deleted",
+        entity="client",
+        entity_id=client_id,
+        summary=f"Deleted client {name}",
+        ip_address=client_ip(request),
+    )
+    return Ok(message=f"Deleted {name}")
+
+
+# --- contacts -----------------------------------------------------------------
+@router.get("/clients/{client_id}/contacts", response_model=list[ContactRead])
+async def list_contacts(
+    client_id: uuid.UUID, session: SessionDep, user: TenantUserDep
+) -> list[ContactRead]:
+    rows = (
+        await session.scalars(
+            select(Contact)
+            .where(Contact.client_id == client_id, Contact.tenant_id == user.tenant_id)
+            .order_by(Contact.is_primary.desc(), Contact.full_name)
+        )
+    ).all()
+    return [ContactRead.model_validate(row) for row in rows]
+
+
+@router.post("/contacts", response_model=ContactRead, status_code=status.HTTP_201_CREATED)
+async def create_contact(
+    payload: ContactCreate, session: SessionDep, user: TenantUserDep
+) -> ContactRead:
+    owner = await session.scalar(
+        select(Client.id).where(Client.id == payload.client_id, Client.tenant_id == user.tenant_id)
+    )
+    if owner is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Client not found")
+
+    row = Contact(tenant_id=user.tenant_id, **payload.model_dump())
+    session.add(row)
+    await session.flush()
+
+    if row.is_primary:
+        await _demote_other_primaries(session, row)
+    return ContactRead.model_validate(row)
+
+
+@router.patch("/contacts/{contact_id}", response_model=ContactRead)
+async def update_contact(
+    contact_id: uuid.UUID, payload: ContactUpdate, session: SessionDep, user: TenantUserDep
+) -> ContactRead:
+    row = await session.scalar(
+        select(Contact).where(Contact.id == contact_id, Contact.tenant_id == user.tenant_id)
+    )
+    ensure_found(row, "Contact")
+    apply_updates(row, payload)
+    await session.flush()
+    if row.is_primary:
+        await _demote_other_primaries(session, row)
+    return ContactRead.model_validate(row)
+
+
+@router.delete("/contacts/{contact_id}", response_model=Ok)
+async def delete_contact(contact_id: uuid.UUID, session: SessionDep, user: TenantUserDep) -> Ok:
+    row = await session.scalar(
+        select(Contact).where(Contact.id == contact_id, Contact.tenant_id == user.tenant_id)
+    )
+    ensure_found(row, "Contact")
+    await session.delete(row)
+    return Ok(message="Contact removed")
+
+
+async def _demote_other_primaries(session: SessionDep, contact: Contact) -> None:
+    others = (
+        await session.scalars(
+            select(Contact).where(
+                Contact.client_id == contact.client_id,
+                Contact.id != contact.id,
+                Contact.is_primary.is_(True),
+            )
+        )
+    ).all()
+    for other in others:
+        other.is_primary = False
+
+
+# --- service assignments for a client ----------------------------------------
+@router.get("/clients/{client_id}/services", response_model=list[ClientServiceRead])
+async def list_client_services(
+    client_id: uuid.UUID, session: SessionDep, user: TenantUserDep
+) -> list[ClientServiceRead]:
+    rows = (
+        await session.execute(
+            select(ClientService, Service)
+            .join(Service, Service.id == ClientService.service_id)
+            .where(ClientService.client_id == client_id, ClientService.tenant_id == user.tenant_id)
+            .order_by(Service.name)
+        )
+    ).all()
+    names = await profile_names(session, user.tenant_id)
+    return [
+        read(
+            ClientServiceRead,
+            assignment,
+            service_name=service.name,
+            service_code=service.code,
+            frequency=assignment.frequency_override or service.frequency,
+            assignee_name=names.get(assignment.assignee_id),
+        )
+        for assignment, service in rows
+    ]

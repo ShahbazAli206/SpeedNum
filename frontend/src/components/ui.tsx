@@ -1,0 +1,603 @@
+"use client";
+
+import clsx, { type ClassValue } from "clsx";
+import { AlertTriangle, Check, Info, Loader2, X } from "lucide-react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  type ButtonHTMLAttributes,
+  type InputHTMLAttributes,
+  type ReactNode,
+  type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
+} from "react";
+
+export const cn = (...values: ClassValue[]) => clsx(values);
+
+/* -------------------------------------------------------------------------- */
+/* Button                                                                      */
+/* -------------------------------------------------------------------------- */
+type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "soft";
+type ButtonSize = "sm" | "md" | "lg";
+
+const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
+  primary:
+    "bg-brand text-white shadow-sm hover:brightness-110 active:brightness-95 disabled:bg-brand/50",
+  secondary:
+    "bg-surface text-ink border border-line-strong hover:bg-surface-2 disabled:text-muted",
+  ghost: "text-ink-soft hover:bg-surface-2 hover:text-ink",
+  danger: "bg-danger text-white hover:brightness-110",
+  soft: "bg-brand-soft text-brand-ink hover:brightness-105",
+};
+
+const BUTTON_SIZES: Record<ButtonSize, string> = {
+  sm: "h-8 px-3 text-[13px] gap-1.5",
+  md: "h-9.5 px-4 text-sm gap-2",
+  lg: "h-11 px-5 text-[15px] gap-2",
+};
+
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  loading?: boolean;
+  icon?: ReactNode;
+}
+
+export function Button({
+  variant = "primary",
+  size = "md",
+  loading = false,
+  icon,
+  className,
+  children,
+  disabled,
+  ...props
+}: ButtonProps) {
+  return (
+    <button
+      {...props}
+      disabled={disabled || loading}
+      className={cn(
+        "inline-flex items-center justify-center rounded-lg font-medium transition",
+        "disabled:cursor-not-allowed disabled:opacity-70",
+        BUTTON_VARIANTS[variant],
+        BUTTON_SIZES[size],
+        className,
+      )}
+    >
+      {loading ? <Loader2 className="size-4 animate-spin" /> : icon}
+      {children}
+    </button>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Surfaces                                                                    */
+/* -------------------------------------------------------------------------- */
+export function Card({
+  className,
+  children,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      {...props}
+      className={cn(
+        "rounded-xl border border-line bg-surface shadow-[var(--shadow-card)]",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+export function CardHeader({
+  title,
+  description,
+  action,
+  className,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  action?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex flex-wrap items-start justify-between gap-3 border-b border-line px-5 py-4",
+        className,
+      )}
+    >
+      <div className="min-w-0">
+        <h2 className="text-[15px] font-semibold text-ink">{title}</h2>
+        {description ? <p className="mt-0.5 text-[13px] text-muted">{description}</p> : null}
+      </div>
+      {action ? <div className="shrink-0">{action}</div> : null}
+    </div>
+  );
+}
+
+export function PageHeader({
+  title,
+  description,
+  actions,
+}: {
+  title: string;
+  description?: string;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">{title}</h1>
+        {description ? <p className="mt-1 max-w-2xl text-sm text-muted">{description}</p> : null}
+      </div>
+      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Form controls                                                               */
+/* -------------------------------------------------------------------------- */
+const CONTROL =
+  "w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink " +
+  "placeholder:text-muted/70 transition focus:border-brand disabled:bg-surface-2 disabled:text-muted";
+
+export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
+  return <input {...props} className={cn(CONTROL, "h-9.5", className)} />;
+}
+
+export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return <textarea {...props} className={cn(CONTROL, "min-h-24 resize-y leading-relaxed", className)} />;
+}
+
+export function Select({ className, children, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <select {...props} className={cn(CONTROL, "h-9.5 pr-8", className)}>
+      {children}
+    </select>
+  );
+}
+
+export function Field({
+  label,
+  hint,
+  error,
+  required,
+  children,
+  className,
+}: {
+  label?: string;
+  hint?: string;
+  error?: string | null;
+  required?: boolean;
+  children: ReactNode;
+  className?: string;
+}) {
+  const id = useId();
+  return (
+    <label className={cn("block", className)} htmlFor={id}>
+      {label ? (
+        <span className="mb-1.5 block text-[13px] font-medium text-ink-soft">
+          {label}
+          {required ? <span className="ml-0.5 text-danger">*</span> : null}
+        </span>
+      ) : null}
+      {children}
+      {error ? (
+        <span className="mt-1 block text-[12px] text-danger">{error}</span>
+      ) : hint ? (
+        <span className="mt-1 block text-[12px] text-muted">{hint}</span>
+      ) : null}
+    </label>
+  );
+}
+
+export function Checkbox({
+  label,
+  className,
+  ...props
+}: InputHTMLAttributes<HTMLInputElement> & { label: ReactNode }) {
+  return (
+    <label className={cn("flex cursor-pointer items-start gap-2.5 text-sm text-ink-soft", className)}>
+      <input
+        type="checkbox"
+        {...props}
+        className="mt-0.5 size-4 shrink-0 rounded border-line-strong accent-[var(--brand)]"
+      />
+      <span>{label}</span>
+    </label>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Badges & avatars                                                            */
+/* -------------------------------------------------------------------------- */
+export type Tone = "neutral" | "brand" | "success" | "warn" | "danger" | "info";
+
+const TONES: Record<Tone, string> = {
+  neutral: "bg-surface-2 text-ink-soft border-line",
+  brand: "bg-brand-soft text-brand-ink border-transparent",
+  success: "bg-success-soft text-success border-transparent",
+  warn: "bg-warn-soft text-warn border-transparent",
+  danger: "bg-danger-soft text-danger border-transparent",
+  info: "bg-info-soft text-info border-transparent",
+};
+
+export function Badge({
+  tone = "neutral",
+  className,
+  children,
+}: {
+  tone?: Tone;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11.5px] font-medium whitespace-nowrap",
+        TONES[tone],
+        className,
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+export function Dot({ tone = "neutral" }: { tone?: Tone }) {
+  const colours: Record<Tone, string> = {
+    neutral: "bg-muted",
+    brand: "bg-brand",
+    success: "bg-success",
+    warn: "bg-warn",
+    danger: "bg-danger",
+    info: "bg-info",
+  };
+  return <span className={cn("inline-block size-1.5 rounded-full", colours[tone])} />;
+}
+
+export function Avatar({
+  name,
+  size = 32,
+  className,
+}: {
+  name: string | null | undefined;
+  size?: number;
+  className?: string;
+}) {
+  const label = (name ?? "?")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("") || "?";
+
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center justify-center rounded-full bg-brand-soft font-semibold text-brand-ink",
+        className,
+      )}
+      style={{ width: size, height: size, fontSize: size * 0.38 }}
+      title={name ?? undefined}
+    >
+      {label}
+    </span>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Table                                                                       */
+/* -------------------------------------------------------------------------- */
+export function Table({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={cn("scroll-thin w-full overflow-x-auto", className)}>
+      <table className="w-full min-w-full border-collapse text-sm">{children}</table>
+    </div>
+  );
+}
+
+export function TH({
+  children,
+  className,
+  align = "left",
+}: {
+  children?: ReactNode;
+  className?: string;
+  align?: "left" | "right" | "center";
+}) {
+  return (
+    <th
+      className={cn(
+        "sticky top-0 z-10 border-b border-line bg-surface-2/80 px-4 py-2.5 text-[12px] font-semibold tracking-wide text-muted uppercase backdrop-blur",
+        align === "right" && "text-right",
+        align === "center" && "text-center",
+        align === "left" && "text-left",
+        className,
+      )}
+    >
+      {children}
+    </th>
+  );
+}
+
+export function TD({
+  children,
+  className,
+  align = "left",
+}: {
+  children?: ReactNode;
+  className?: string;
+  align?: "left" | "right" | "center";
+}) {
+  return (
+    <td
+      className={cn(
+        "border-b border-line px-4 py-3 align-middle text-ink-soft",
+        align === "right" && "text-right",
+        align === "center" && "text-center",
+        className,
+      )}
+    >
+      {children}
+    </td>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* State displays                                                              */
+/* -------------------------------------------------------------------------- */
+export function Spinner({ className }: { className?: string }) {
+  return <Loader2 className={cn("size-4 animate-spin text-muted", className)} />;
+}
+
+export function LoadingBlock({ label = "Loading…", rows = 3 }: { label?: string; rows?: number }) {
+  return (
+    <div className="space-y-2 p-5" aria-busy="true" aria-label={label}>
+      {Array.from({ length: rows }).map((_, index) => (
+        <div
+          key={index}
+          className="h-10 animate-pulse rounded-lg bg-surface-2"
+          style={{ animationDelay: `${index * 90}ms` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+export function EmptyState({
+  title,
+  description,
+  action,
+  icon,
+}: {
+  title: string;
+  description?: string;
+  action?: ReactNode;
+  icon?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
+      {icon ? <div className="rounded-full bg-surface-2 p-3 text-muted">{icon}</div> : null}
+      <div>
+        <p className="font-medium text-ink">{title}</p>
+        {description ? (
+          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">{description}</p>
+        ) : null}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+export function Alert({
+  tone = "info",
+  title,
+  children,
+  onDismiss,
+}: {
+  tone?: "info" | "success" | "warn" | "danger";
+  title?: string;
+  children?: ReactNode;
+  onDismiss?: () => void;
+}) {
+  const icons = {
+    info: <Info className="size-4" />,
+    success: <Check className="size-4" />,
+    warn: <AlertTriangle className="size-4" />,
+    danger: <AlertTriangle className="size-4" />,
+  };
+  const tones = {
+    info: "bg-info-soft text-info",
+    success: "bg-success-soft text-success",
+    warn: "bg-warn-soft text-warn",
+    danger: "bg-danger-soft text-danger",
+  };
+  return (
+    <div className={cn("flex items-start gap-2.5 rounded-lg px-3.5 py-2.5 text-sm", tones[tone])}>
+      <span className="mt-0.5 shrink-0">{icons[tone]}</span>
+      <div className="min-w-0 flex-1">
+        {title ? <p className="font-medium">{title}</p> : null}
+        {children ? <div className={cn(title && "mt-0.5", "opacity-90")}>{children}</div> : null}
+      </div>
+      {onDismiss ? (
+        <button type="button" onClick={onDismiss} className="shrink-0 opacity-70 hover:opacity-100">
+          <X className="size-4" />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function StatTile({
+  label,
+  value,
+  hint,
+  tone = "neutral",
+  icon,
+}: {
+  label: string;
+  value: ReactNode;
+  hint?: ReactNode;
+  tone?: Tone;
+  icon?: ReactNode;
+}) {
+  const accents: Record<Tone, string> = {
+    neutral: "text-ink",
+    brand: "text-brand",
+    success: "text-success",
+    warn: "text-warn",
+    danger: "text-danger",
+    info: "text-info",
+  };
+  return (
+    <Card className="p-4">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-[12.5px] font-medium tracking-wide text-muted uppercase">{label}</p>
+        {icon ? <span className={cn("shrink-0", accents[tone])}>{icon}</span> : null}
+      </div>
+      <p className={cn("mt-2 text-2xl font-semibold tabular-nums", accents[tone])}>{value}</p>
+      {hint ? <p className="mt-1 text-[12.5px] text-muted">{hint}</p> : null}
+    </Card>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Modal                                                                       */
+/* -------------------------------------------------------------------------- */
+export function Modal({
+  open,
+  onClose,
+  title,
+  description,
+  children,
+  footer,
+  width = "md",
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  description?: string;
+  children: ReactNode;
+  footer?: ReactNode;
+  width?: "sm" | "md" | "lg" | "xl";
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const widths = { sm: "max-w-md", md: "max-w-xl", lg: "max-w-3xl", xl: "max-w-5xl" };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/45 p-4 backdrop-blur-[2px] sm:p-8">
+      <div className="absolute inset-0" onClick={onClose} aria-hidden />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className={cn(
+          "animate-in relative my-auto w-full rounded-xl border border-line bg-surface shadow-xl",
+          widths[width],
+        )}
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
+          <div>
+            <h2 className="text-base font-semibold text-ink">{title}</h2>
+            {description ? <p className="mt-0.5 text-[13px] text-muted">{description}</p> : null}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="-m-1 rounded-lg p-1 text-muted transition hover:bg-surface-2 hover:text-ink"
+            aria-label="Close"
+          >
+            <X className="size-4.5" />
+          </button>
+        </div>
+        <div className="scroll-thin max-h-[70vh] overflow-y-auto px-5 py-4">{children}</div>
+        {footer ? (
+          <div className="flex items-center justify-end gap-2 border-t border-line bg-surface-2/50 px-5 py-3.5">
+            {footer}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Tabs                                                                        */
+/* -------------------------------------------------------------------------- */
+const TabsContext = createContext<{ value: string; onChange: (value: string) => void } | null>(null);
+
+export function Tabs({
+  value,
+  onChange,
+  children,
+  className,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <TabsContext.Provider value={{ value, onChange }}>
+      <div className={cn("flex flex-wrap gap-1 border-b border-line", className)} role="tablist">
+        {children}
+      </div>
+    </TabsContext.Provider>
+  );
+}
+
+export function Tab({ id, children, count }: { id: string; children: ReactNode; count?: number }) {
+  const context = useContext(TabsContext);
+  if (!context) throw new Error("<Tab> must be used inside <Tabs>");
+  const active = context.value === id;
+
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={() => context.onChange(id)}
+      className={cn(
+        "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition",
+        active
+          ? "border-brand text-brand"
+          : "border-transparent text-muted hover:border-line-strong hover:text-ink",
+      )}
+    >
+      {children}
+      {count !== undefined ? (
+        <span
+          className={cn(
+            "rounded-full px-1.5 py-0.5 text-[11px] tabular-nums",
+            active ? "bg-brand-soft text-brand-ink" : "bg-surface-2 text-muted",
+          )}
+        >
+          {count}
+        </span>
+      ) : null}
+    </button>
+  );
+}

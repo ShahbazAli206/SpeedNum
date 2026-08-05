@@ -1,1 +1,5 @@
+# Large binary media exceeds GitHub's 100 MB per-file limit, so it is stored
+# via Git LFS. Clones need `git lfs install` to fetch real content.
 *.mp4 filter=lfs diff=lfs merge=lfs -text
+*.zip filter=lfs diff=lfs merge=lfs -text
+*.avi filter=lfs diff=lfs merge=lfs -text

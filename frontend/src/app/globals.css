@@ -1,0 +1,138 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Design tokens. Light is the default; dark follows the OS setting.
+   Firm branding overrides --brand at runtime from the tenant record.
+--------------------------------------------------------------------------- */
+:root {
+  --canvas: #f6f8fb;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --line: #e2e8f0;
+  --line-strong: #cbd5e1;
+  --ink: #0f172a;
+  --ink-soft: #334155;
+  --muted: #64748b;
+  --brand: #1d4ed8;
+  --brand-soft: #dbeafe;
+  --brand-ink: #1e3a8a;
+  --success: #047857;
+  --success-soft: #d1fae5;
+  --warn: #b45309;
+  --warn-soft: #fef3c7;
+  --danger: #b91c1c;
+  --danger-soft: #fee2e2;
+  --info: #0369a1;
+  --info-soft: #e0f2fe;
+  --ring: color-mix(in oklab, var(--brand) 45%, transparent);
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.06), 0 1px 3px rgb(15 23 42 / 0.04);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #0b1220;
+    --surface: #111a2e;
+    --surface-2: #16223c;
+    --line: #24324f;
+    --line-strong: #33456b;
+    --ink: #e8eefb;
+    --ink-soft: #c2cee5;
+    --muted: #8ea0c0;
+    --brand: #5b8dff;
+    --brand-soft: #17284b;
+    --brand-ink: #bcd0ff;
+    --success: #34d399;
+    --success-soft: #06301f;
+    --warn: #fbbf24;
+    --warn-soft: #3a2a05;
+    --danger: #f87171;
+    --danger-soft: #3d1111;
+    --info: #38bdf8;
+    --info-soft: #072b3f;
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+  }
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-muted: var(--muted);
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-ink: var(--brand-ink);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+* {
+  border-color: var(--line);
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--brand) 25%, transparent);
+}
+
+/* Focus ring shared by every interactive element */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* Thin scrollbars inside scroll regions */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+/* Marketing gradient wash */
+.hero-wash {
+  background:
+    radial-gradient(60rem 32rem at 78% -12%, color-mix(in oklab, var(--brand) 16%, transparent), transparent 60%),
+    radial-gradient(48rem 28rem at 6% 4%, color-mix(in oklab, var(--info) 12%, transparent), transparent 62%);
+}
+
+.grid-lines {
+  background-image:
+    linear-gradient(to right, color-mix(in oklab, var(--line) 70%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--line) 70%, transparent) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(70% 60% at 50% 30%, #000 30%, transparent 100%);
+}
+
+@keyframes fade-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.animate-in {
+  animation: fade-rise 0.28s ease-out both;
+}
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: #fff; }
+}
