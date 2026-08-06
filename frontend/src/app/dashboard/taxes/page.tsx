@@ -7,12 +7,15 @@ import { DashboardHeader, KpiRow } from "@/components/dashboard/page-shell";
 import { cn } from "@/lib/cn";
 import { DEMO_ACCOUNT, getTaxTotals, getTaxes } from "@/lib/demo";
 import { dueLabel, formatDate, formatMoney } from "@/lib/format";
+import { fetchLiveTaxTotals, fetchLiveTaxes } from "@/lib/portal-live";
 
 export const metadata: Metadata = { title: "Taxes" };
 
-export default function TaxesPage() {
-  const obligations = getTaxes();
-  const totals = getTaxTotals();
+export default async function TaxesPage() {
+  const [obligations, totals] = await Promise.all([
+    fetchLiveTaxes().then((live) => live ?? getTaxes()),
+    fetchLiveTaxTotals().then((live) => live ?? getTaxTotals()),
+  ]);
 
   const open = obligations
     .filter((item) => item.status !== "filed")

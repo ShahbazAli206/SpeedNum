@@ -35,7 +35,10 @@ export interface Expense {
   amount: number;
   gst: number;
   status: ExpenseStatus;
-  method: "Visa ••4821" | "Mastercard ••7702" | "Bank transfer" | "Cash";
+  /** Free text — "Visa ••4821", "Bank transfer", etc. Not a closed set: the
+   * live API (backend/app/schemas.py::ClientExpenseBase.method) accepts any
+   * string, and this type has to admit whatever it returns. */
+  method: string;
   receipt: boolean;
 }
 
@@ -66,7 +69,9 @@ export interface PayRun {
 export interface TaxObligation {
   id: string;
   name: string;
-  authority: "CRA" | "Revenu Québec";
+  /** Free text — usually "CRA", sometimes "Revenu Québec" or a provincial
+   * body. Not a closed set; see the note on Expense.method above. */
+  authority: string;
   period: string;
   due: string;
   amount: number;

@@ -23,6 +23,7 @@ import {
   getOverview,
 } from "@/lib/demo";
 import { formatDate, formatMoney } from "@/lib/format";
+import { fetchLiveInvoices, fetchLiveMonthly, fetchLiveOverview } from "@/lib/portal-live";
 
 import { OverviewChart } from "./overview-chart";
 
@@ -34,14 +35,20 @@ const URGENCY = {
   upcoming: { dot: "bg-success", text: "text-success", label: "Upcoming" },
 } as const;
 
-export default function DashboardPage() {
-  const overview = getOverview();
-  const months = getMonthly();
+export default async function DashboardPage() {
+  // Upcoming deadlines and recent activity have no /client-portal backing —
+  // they mix concepts (CRA filings, firm handoffs, sign-in history) that this
+  // API doesn't model for a portal account. They stay on demo data; the KPIs,
+  // chart and invoice list below use real data once it exists.
   const deadlines = getDeadlines();
   const activity = getActivity();
-  const recentInvoices = getInvoices()
-    .filter((invoice) => invoice.status !== "draft")
-    .slice(0, 5);
+
+  const [overview, months, invoices] = await Promise.all([
+    fetchLiveOverview().then((live) => live ?? getOverview()),
+    fetchLiveMonthly().then((live) => live ?? getMonthly()),
+    fetchLiveInvoices().then((live) => live ?? getInvoices()),
+  ]);
+  const recentInvoices = invoices.filter((invoice) => invoice.status !== "draft").slice(0, 5);
 
   return (
     <>

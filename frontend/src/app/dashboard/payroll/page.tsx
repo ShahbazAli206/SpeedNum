@@ -7,13 +7,16 @@ import { DashboardHeader, KpiRow } from "@/components/dashboard/page-shell";
 import { Progress } from "@/components/ui";
 import { getEmployees, getPayRuns, getPayrollTotals } from "@/lib/demo";
 import { formatDate, formatMoney } from "@/lib/format";
+import { fetchLiveEmployees, fetchLivePayRuns, fetchLivePayrollTotals } from "@/lib/portal-live";
 
 export const metadata: Metadata = { title: "Payroll" };
 
-export default function PayrollPage() {
-  const employees = getEmployees();
-  const runs = getPayRuns();
-  const totals = getPayrollTotals();
+export default async function PayrollPage() {
+  const [employees, runs, totals] = await Promise.all([
+    fetchLiveEmployees().then((live) => live ?? getEmployees()),
+    fetchLivePayRuns().then((live) => live ?? getPayRuns()),
+    fetchLivePayrollTotals().then((live) => live ?? getPayrollTotals()),
+  ]);
 
   return (
     <>

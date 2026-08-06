@@ -8,6 +8,7 @@ import {
   Paperclip,
   Upload,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
 import { KpiTile } from "@/components/charts";
@@ -15,9 +16,12 @@ import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { DashboardHeader, KpiRow } from "@/components/dashboard/page-shell";
 import { useToast } from "@/components/toast";
 import { Button } from "@/components/ui";
+import { ApiError } from "@/lib/api";
+import { SUPABASE_CONFIGURED } from "@/lib/auth";
 import { cn } from "@/lib/cn";
 import type { DocumentFile } from "@/lib/demo";
 import { formatBytes, formatDate } from "@/lib/format";
+import { UploadError, uploadDocument } from "@/lib/storage";
 
 const KIND_LABEL: Record<string, string> = {
   invoice: "Invoice",
@@ -43,24 +47,51 @@ export function DocumentsClient({
   totals: { count: number; bytes: number; shared: number };
 }) {
   const toast = useToast();
+  const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
-  /**
-   * Uploads are not wired to a backend yet — there is no documents endpoint.
-   * The picker acknowledges the file and says so rather than silently doing
-   * nothing, which would read as a bug.
-   */
-  const acknowledge = (files: FileList | null) => {
+  const acknowledge = async (files: FileList | null) => {
     if (!files?.length) return;
-    const names = Array.from(files)
-      .slice(0, 3)
-      .map((file) => file.name)
-      .join(", ");
-    toast.info(
-      `${files.length} file${files.length === 1 ? "" : "s"} selected`,
-      `${names} — uploads go live once the documents API is connected.`,
-    );
+
+    // Demo mode: no Supabase project configured, so there's nowhere real to
+    // put the bytes. Acknowledge the pick rather than silently doing nothing.
+    if (!SUPABASE_CONFIGURED) {
+      const names = Array.from(files)
+        .slice(0, 3)
+        .map((file) => file.name)
+        .join(", ");
+      toast.info(
+        `${files.length} file${files.length === 1 ? "" : "s"} selected`,
+        `${names} — this is demo data; connect Supabase to upload for real.`,
+      );
+      return;
+    }
+
+    setUploading(true);
+    let succeeded = 0;
+    for (const file of Array.from(files)) {
+      try {
+        await uploadDocument(file);
+        succeeded += 1;
+      } catch (error) {
+        const detail =
+          error instanceof UploadError || error instanceof ApiError
+            ? error.message
+            : "Please try again.";
+        toast.error(`Couldn't upload ${file.name}`, detail);
+      }
+    }
+    setUploading(false);
+
+    if (succeeded > 0) {
+      toast.success(
+        `${succeeded} file${succeeded === 1 ? "" : "s"} uploaded`,
+        "Your accountant can now see it in this workspace.",
+      );
+      router.refresh();
+    }
   };
 
   const columns: Column<DocumentFile>[] = [
@@ -137,7 +168,11 @@ export function DocumentsClient({
         title="Documents"
         subtitle="Invoices, receipts, tax forms and contracts"
         actions={
-          <Button icon={<Upload className="size-4" />} onClick={() => inputRef.current?.click()}>
+          <Button
+            icon={<Upload className="size-4" />}
+            loading={uploading}
+            onClick={() => inputRef.current?.click()}
+          >
             Upload
           </Button>
         }

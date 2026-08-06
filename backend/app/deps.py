@@ -122,12 +122,32 @@ async def get_current_user(
 CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
 
 
-async def get_tenant_user(user: CurrentUserDep) -> CurrentUser:
-    """Same as get_current_user, but rejects accounts with no firm attached."""
+async def get_firm_linked_user(user: CurrentUserDep) -> CurrentUser:
+    """Any authenticated user with a tenant — firm staff OR a client-portal
+    account. This is the broad check; almost everything wants the stricter
+    get_tenant_user below instead. It exists only for BookScope, which is the
+    one place both kinds of account are meant to land."""
     if user.tenant is None:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "No firm is linked to this account. Create one via POST /auth/bootstrap.",
+        )
+    return user
+
+
+AnyTenantUserDep = Annotated[CurrentUser, Depends(get_firm_linked_user)]
+
+
+async def get_tenant_user(user: AnyTenantUserDep) -> CurrentUser:
+    """Firm staff only. A client-portal account (profile.client_id set) is
+    rejected here, not just at individual actions — every firm-internal
+    router (clients, team, deadlines, reporting, ...) depends on this, and
+    without the check a portal account's token could list every other
+    client of the same firm. Portal accounts belong on /client-portal/*
+    (BookScopeDep) instead, which pins them to their own client."""
+    if user.profile.client_id is not None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Client-portal accounts cannot use this endpoint."
         )
     return user
 
@@ -152,15 +172,10 @@ async def require_superadmin(user: CurrentUserDep) -> CurrentUser:
 
 SuperadminDep = Annotated[CurrentUser, Depends(require_superadmin)]
 
-
-async def require_staff(user: TenantUserDep) -> CurrentUser:
-    """Reject portal accounts (profile.client_id set) — some actions are firm-only."""
-    if user.profile.client_id is not None:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "This action is only available to firm staff.")
-    return user
-
-
-StaffUserDep = Annotated[CurrentUser, Depends(require_staff)]
+# TenantUserDep already excludes portal accounts (see get_tenant_user above);
+# this name exists purely so staff-only action endpoints (approve an expense,
+# process payroll, file a return) read clearly at the call site.
+StaffUserDep = TenantUserDep
 
 
 @dataclass(slots=True)
@@ -181,7 +196,7 @@ class BookScope:
 
 
 async def get_book_scope(
-    user: TenantUserDep,
+    user: AnyTenantUserDep,
     client_id: Annotated[
         uuid.UUID | None, Query(description="Firm staff only: narrow to one client's book.")
     ] = None,

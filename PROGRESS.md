@@ -2,7 +2,7 @@
 
 Running state of this repo so a fresh session can pick up without re-deriving anything.
 
-**Last updated:** 2026-08-06
+**Last updated:** 2026-08-06 (session 2)
 
 ---
 
@@ -26,7 +26,8 @@ Running state of this repo so a fresh session can pick up without re-deriving an
 | `82c9f43` | Application source: `backend/`, `frontend/`, `db/`, the demo zip via LFS, hardened `.gitignore` |
 | `0c36d59` | Fix missing `email-validator` dependency and `useApi` hook lint errors |
 | `4cce1c9` | Full frontend build — public site, client portal and firm-side app |
-| *(uncommitted)* | **Client-portal backend** (models, schemas, routers, migration 0004) **+ `/request-demo` wired live** (this entry) |
+| `56ea0e7` | Client-portal backend (models, schemas, routers, migration 0004) + `/request-demo` wired live |
+| *(uncommitted)* | **Portal pages wired to real data, an access-control fix, document upload, backend unit tests, CI** (this entry) |
 
 ---
 
@@ -62,7 +63,7 @@ Three distinct surfaces, each with its own shell:
 | Surface | Routes | Shell | Data |
 |---|---|---|---|
 | Public marketing site | `/`, `/features`, `/pricing`, `/blog`, `/case-studies`, `/request-demo`, `/terms`, `/privacy` | `app/(marketing)/layout.tsx` | Static content modules |
-| Client portal | `/dashboard/*` | `components/dashboard/shell.tsx` | `lib/demo.ts` |
+| Client portal | `/dashboard/*` | `components/dashboard/shell.tsx` | `lib/demo.ts`, real data where available (see below) |
 | Firm-side app | `/overview`, `/clients`, `/workflows`, `/deadlines`, `/services`, `/engagements`, `/team`, `/reporting`, `/notifications`, `/custom-fields`, `/import`, `/admin` | `components/firm/shell.tsx` | `lib/firm-demo.ts` |
 
 ### Public marketing site — complete
@@ -75,17 +76,18 @@ Three distinct surfaces, each with its own shell:
 | `/pricing` | Plan card, capability comparison table, accordion FAQ |
 | `/blog`, `/blog/[slug]` | 9 full-length posts, prev/next navigation |
 | `/case-studies`, `/case-studies/[slug]` | 12 illustrative firm scenarios |
-| `/request-demo` | Validated form (no endpoint yet — see below) |
+| `/request-demo` | Validated form, posts live to `POST /api/v1/public/leads` |
 | `/terms`, `/privacy` | Sticky contents rail; **template wording, not lawyer-reviewed** |
 | `/login`, `/signup` | Split-screen auth, route-aware pitch panel |
 | `not-found` | Custom 404 |
 
-### Client portal — UI complete, running on demo data
+### Client portal — UI complete, wired to real data with a demo fallback
 
 `/dashboard` plus `invoices`, `expenses`, `payroll`, `taxes`, `reports`, `documents`,
 `settings`. Collapsible sidebar, breadcrumb topbar, **Ctrl/⌘-K command palette**,
 notifications panel, saturated KPI tiles matching the reference, sortable/filterable/
-paginated tables with CSV export, detail drawers, drag-and-drop file staging.
+paginated tables with CSV export, detail drawers, drag-and-drop file upload (now real —
+see *Portal wired to real data* below).
 
 ### Firm-side app — UI complete, running on demo data
 
@@ -124,7 +126,10 @@ animation, Features mega-menu, dependency-free SVG charts, toasts, cookie consen
 | `src/lib/site.ts` | Brand, contact, navigation — single source of truth |
 | `src/lib/content/features.ts` | The 15 modules; drives mega-menu, index and detail pages |
 | `src/lib/content/blog.ts` · `case-studies.ts` · `legal.ts` | Editorial and legal copy |
-| `src/lib/demo.ts` | **All portal data.** Typed; swap for API calls to go live |
+| `src/lib/demo.ts` | Portal demo data / fallback shapes. Live now via `portal-live.ts` where a backend exists |
+| `src/lib/portal-live.ts` | Fetches `/client-portal/*` and maps it into `demo.ts`'s shapes — see *Portal wired to real data* |
+| `src/lib/api-server.ts` | Server Component fetch helper (cookie-backed session), the `api.ts` of Server Components |
+| `src/lib/storage.ts` | Signed-URL upload straight to Supabase Storage, then registers metadata via the API |
 | `src/components/charts.tsx` | SVG charts — line/area, column, stacked share, sparkline, stat + KPI tiles |
 | `src/components/ui.tsx` | Primitives (button, field, modal, drawer, pagination, switch…) |
 | `src/lib/cn.ts` | Class joiner. **Lives outside `ui.tsx` on purpose** — that file is `"use client"`, and a server component calling a function exported from a client module fails at prerender |
@@ -184,11 +189,10 @@ Defects found and fixed during that verification, worth not reintroducing:
 
 ---
 
-## Client-portal backend — built, not yet wired to the frontend
+## Client-portal backend
 
-The gap flagged as "no server-side counterpart at all" is closed: `db/migrations/0004_client_books.sql`
-plus 6 new routers give the client portal (`/dashboard/*`) a real API, mirroring
-`frontend/src/lib/demo.ts`'s shape field-for-field so the eventual page swap is mechanical.
+`db/migrations/0004_client_books.sql` plus 6 new routers give the client portal (`/dashboard/*`)
+a real API, mirroring `frontend/src/lib/demo.ts`'s shape field-for-field.
 
 | Router | Prefix | Covers |
 |---|---|---|
@@ -208,80 +212,180 @@ firm staff (approve, reject, process, file). RLS in `0004` mirrors the same rule
 defense-in-depth against direct Supabase access.
 
 **Verified:** `python -c "import app.main"` succeeds with a dummy `DATABASE_URL` (the engine
-is lazy — nothing dials out at import), and `app.openapi()` builds cleanly — 78 total paths,
-23 of them under `/client-portal`. Not verified against a real database; there is no Supabase
-project to test against yet (see below).
+is lazy — nothing dials out at import), `app.openapi()` builds cleanly (78 total paths, 23
+under `/client-portal`), and `pytest tests/` passes (see *Backend unit tests* below). Not
+verified against a real database — there is no Supabase project to test against yet.
 
-**Frontend types added, pages not yet swapped.** `frontend/src/lib/types.ts` now mirrors every
-new schema (`ClientInvoice`, `ClientExpense`, `ClientEmployee`, `ClientPayRun`,
-`ClientTaxObligation`, `ClientDocument`, `ClientBookOverview`, …), same as it already does for
-the firm-side schemas. The `/dashboard/*` pages themselves still read `lib/demo.ts` — swapping
-them to call `/client-portal/*` is blocked on the same thing as the firm side (see next
-section): no Supabase project means no session, and a page that calls an authenticated
-endpoint with no session just shows errors instead of the working demo it shows today.
+## Access-control fix: portal accounts could read every other client's data
 
-**`/request-demo` now posts for real.** It calls the public, unauthenticated
-`POST /api/v1/public/leads` endpoint (which already existed — `routers/public.py`), so this
-one needed no backend change, just wiring the form in `demo-form.tsx`. Team size and notes
-are folded into `message` since `LeadCreate` has no dedicated field for it.
+Adding `profiles.client_id` (migration 0004) created a real gap that didn't exist before it:
+every firm-side router (`clients.py`, `team.py`, `deadlines.py`, `reporting.py`, …) depends on
+`TenantUserDep`, which only checked "does this account belong to a tenant" — it never checked
+*which kind* of account. A portal account has a tenant too (the firm it belongs to), so its
+token could call `GET /clients`, `GET /team`, etc. and get **every** client's records, not just
+its own — a client-facing login reading the firm's entire book, including its own competitors.
+
+Fixed in `deps.py` by splitting the dependency in two:
+
+- `get_firm_linked_user` / `AnyTenantUserDep` — the old broad check ("has a tenant"), used only
+  by `get_book_scope` (which legitimately needs to accept both kinds of account).
+- `get_tenant_user` / `TenantUserDep` — now additionally rejects `profile.client_id is not None`.
+  Every firm-only router already used this name, so **zero router files needed to change** —
+  the fix is contained entirely to `deps.py`. `StaffUserDep` becomes a plain alias for it
+  (`TenantUserDep` already excludes portal accounts, so the old separate check was redundant).
+
+Verified via `app.openapi()` still building the same 78 paths after the change (no route lost
+the ability to resolve its dependencies).
+
+## Portal wired to real data (with a demo fallback that can never break)
+
+The `/dashboard/*` pages now try the real API first and fall back to `lib/demo.ts` on any
+failure — no session, no Supabase project, a network error, a non-2xx response. This can only
+improve on the working demo, never regress it, which matters because none of this can be
+tested against a live backend yet.
+
+- **`frontend/src/lib/api-server.ts`** (new) — the Server Component equivalent of `api.ts`.
+  `api.ts` is `"use client"` and reads the bearer token via `supabaseBrowser()`, which doesn't
+  exist during server rendering; `apiServer()` pulls it from the cookie-backed session instead
+  and returns `null` on any failure rather than throwing.
+- **`frontend/src/lib/portal-live.ts`** (new) — one `fetchLiveX()` per backend endpoint, each
+  mapping the snake_case response into the exact camelCase shape `lib/demo.ts` already returns
+  (`revenue_mtd` → `revenueMTD`, `customer_name` → `client`, `employment_type: "full_time"` →
+  `type: "Full-time"`, …), so **no page JSX changed at all** — only the data-sourcing line did:
+  `const invoices = (await fetchLiveInvoices()) ?? getInvoices();`
+- **Two real mismatches found and fixed, not glossed over:**
+  - The live API's invoice `status` can be `"void"`; `demo.ts`'s `InvoiceStatus` union has no
+    such state. Mapped by dropping voided invoices from what the adapter returns, rather than
+    mislabelling them as `"draft"` or similar.
+  - `Expense.method` and `TaxObligation.authority` were typed as closed string unions in
+    `demo.ts` (`"Visa ••4821" | "Mastercard ••7702" | …`, `"CRA" | "Revenu Québec"`) but the
+    live API allows free text for both. Checked every usage first (both are plain-text
+    display, never switched on) and widened both to `string` in `demo.ts` — the honest fix,
+    versus silently coercing any other value into a wrong-but-compiling label.
+- **Pages wired:** `/dashboard` (overview KPIs, monthly chart, recent invoices — "upcoming
+  deadlines" and "recent activity" stay on demo data, see below), `/dashboard/invoices`,
+  `/dashboard/expenses`, `/dashboard/payroll`, `/dashboard/taxes`, `/dashboard/documents`.
+- **Not wired, on purpose:** the dashboard's "upcoming deadlines" and "recent activity" panels
+  use `demo.ts`'s `Deadline`/`ActivityEntry`, which mix concepts (CRA filings, firm handoffs,
+  sign-in history) this API doesn't model for a portal account — there is no
+  `/client-portal/deadlines` or `/client-portal/activity` endpoint, and inventing one wasn't in
+  scope this pass.
+- **Document upload is now real.** `frontend/src/lib/storage.ts` (new) uploads straight to the
+  `documents` Supabase Storage bucket via a signed URL (`createSignedUploadUrl` +
+  `uploadToSignedUrl` — bytes never pass through the FastAPI Space), then registers the
+  metadata via `POST /client-portal/documents`. `documents-client.tsx`'s upload handler calls
+  it when Supabase is configured and keeps its old "acknowledged, not stored" toast in demo
+  mode. **Download is still just a toast** — no signed *read* URL flow yet, only upload.
+
+## Firm-side app: NOT wired — `lib/firm-demo.ts` has drifted from `schemas.py`
+
+The previous session's claim that firm-side shapes "mirror `backend/app/schemas.py`... so
+wiring is a per-page swap" turned out to be **only approximately true**, and not safe to act on
+blindly. Spot-checking `/clients` and `/clients/[id]` surfaced real drift:
+
+- `firm-demo.ts` defines its **own** local `Client`/`Service` interfaces rather than importing
+  from `types.ts` — they've diverged from `ClientRead`/`ServiceRead` in `schemas.py`.
+- `Client.joined` (demo) vs. `onboarded_at` (backend) — a rename, but also a `Client.plan`
+  field the backend doesn't have at all, and a `service_ids: string[]` array where the backend
+  has a computed `service_count: number` instead.
+- `Service.due_rule: string` (demo, human-readable — `"6 months after fiscal year-end"`) vs.
+  `due_rule: dict[str, Any]` (backend, structured — `{"type": "offset_from_period_end", ...}`).
+  `[id]/page.tsx` renders `{service.due_rule}` directly; rendering the live *object* there would
+  throw ("Objects are not valid as a React child"), not just display wrong.
+- `Contact.phone`/`.email` are demo-typed as required strings and called with `.replace(...)`
+  directly; the backend's `ContactRead.phone`/`.email` are `string | null` — a null from real
+  data would crash that line, not just look wrong.
+
+None of this is unfixable — it's the same kind of rename-and-translate work the portal side
+just went through — but it needs the same care (read every real usage, don't cast around a
+type error) applied to **12 firm pages and their demo interfaces**, not 6 already-well-understood
+portal ones. Given no live backend exists yet to catch a wrong guess, and a wrong "swap" would
+regress the currently-verified-working demo for uncertain benefit, this pass stopped at
+finding and documenting the drift rather than guessing through a fix. **Firm-side pages still
+read `lib/firm-demo.ts` exactly as before — nothing there changed.**
+
+## Backend unit tests + CI
+
+- **`backend/tests/test_deadlines.py`** (24 tests) — the compliance-calendar engine
+  (`app/services/deadlines.py`): month-end/leap-year handling, the Easter computus (checked
+  against published Easter Sundays), statutory holiday rolling, `periods_for` for every
+  frequency, `due_date_for` for both rule types, `plan_deadlines`' service-window filtering,
+  and `urgency_for`/`summarise`'s bucketing. All pure functions, no database.
+- **`backend/tests/test_utils.py`** (11 tests) — `apply_updates`, `ensure_found`, `as_float`,
+  `group_count`.
+- **`backend/requirements-dev.txt`** (new) — `-r requirements.txt` + `pytest`, kept out of the
+  production Docker image on purpose.
+- **`.github/workflows/ci.yml`** (new) — two jobs. Backend: byte-compile, import smoke test,
+  `pytest`. Frontend: `npm run build` (generates `.next/types` — running `tsc` without it first
+  produces the exact spurious `PageProps` errors hit earlier this session), then `tsc --noEmit`,
+  then `npm run lint`. Both jobs skip Git LFS checkout (source only; the repo's ~619 MB of media
+  would burn a meaningful slice of the free 1 GB/month LFS bandwidth on every run otherwise).
+
+All 35 backend tests pass locally; the workflow itself has not run on GitHub Actions yet (no
+push since it was added — see the commit this section describes).
 
 ## What is left
 
-**Every screen is built and the client-portal backend now exists.** What remains is wiring
-the frontend to real data (blocked on Supabase credentials this session cannot create),
-plus smaller content/infra gaps.
+**Every screen is built, the client-portal backend exists, and the portal is wired to it with
+tests and CI in place.** What remains: the firm-side wiring (needs demo-data reconciliation
+first, see above), a Supabase project to test any of this against, and smaller content gaps.
 
-### 1. Connect the frontend to the API (blocked on config)
+### 1. Firm-side wiring (needs reconciliation first, not just a Supabase project)
 
-**Zero of the 78 backend endpoints are called from a page yet** (`/request-demo` is the one
-exception — see above). The API client (`src/lib/api.ts`), types (`src/lib/types.ts`) and
-`useApi` hook are all in place and otherwise unused. Each firm page reads a getter from
-`lib/firm-demo.ts`, and each portal page from `lib/demo.ts`, whose shapes already match the
-routers' responses, so wiring is a per-page swap rather than a rewrite.
+Per the drift found above, wiring `/clients`, `/team`, `/services`, etc. to their routers isn't
+a mechanical swap until `firm-demo.ts`'s `Client`/`Service`/`Contact` interfaces (and the pages
+that read their now-demo-only fields — `.joined`, `.plan`, `.service_ids`, `due_rule` as a
+string) are reconciled against `schemas.py`. That reconciliation is real, separate work, ideally
+done with a live backend available to verify each page against — see item 2.
 
-This is blocked on a Supabase project: without `NEXT_PUBLIC_SUPABASE_URL` and
-`NEXT_PUBLIC_SUPABASE_ANON_KEY` there is no session to authenticate with, and `proxy.ts`
-deliberately lets every request through rather than locking the site out.
+### 2. A Supabase project (blocks everything else)
 
-### 2. Smaller gaps
+Nothing here — the client-portal wiring included — has run against a real database. Once
+`frontend/.env.local` has real credentials:
 
-- **No raw file upload endpoint.** `client_documents.py` registers already-uploaded metadata;
-  actually placing bytes in Supabase Storage from the browser (signed upload URL) isn't wired
-  either, and can't be end-to-end tested without a Supabase project.
+1. Run the migrations in order: `0001` → `0002` → `0003` → `0004`.
+2. The portal pages built this session start showing real data automatically — no code change
+   needed, `apiServer()` just stops returning `null`.
+3. `.github/workflows/ci.yml` can finally be watched run for real on a push.
+4. The firm-side reconciliation (item 1) can be done *against* real responses instead of by
+   reading schemas side-by-side — much lower-risk than continuing to guess blind.
+
+### 3. Smaller gaps
+
+- **No signed *read* URL flow for documents** — upload is real (this session); download is
+  still a "will download once storage is connected" toast.
 - **`/onboarding` has no page** — `proxy.ts` guards the route; the flow is currently covered
   by `/clients` + `/import` + `/engagements` rather than a dedicated wizard.
 - **Placeholder hero art** on interior pages; no licensed photography. Swapping `HeroArt` in
   `components/marketing/page-hero.tsx` won't shift layout.
 - **Legal copy is a template** — needs a lawyer before launch.
-- **No tests, no CI** despite the token carrying `workflow` scope.
 
 ### Rough sizing
 
 | Area | State |
 |---|---|
 | Public marketing site | ✅ Done |
-| Client portal UI | ✅ Done (on demo data) |
+| Client portal UI | ✅ Done |
 | Firm-side app UI | ✅ Done (on demo data) |
 | Design system & charts | ✅ Done |
 | Client-portal backend | ✅ Done — untested against a real database |
+| Access control (portal vs. staff) | ✅ Done |
+| Portal → real API | ✅ Done (with demo fallback) — untested against a real database |
+| Document upload | ✅ Done — untested against a real database; download still not wired |
+| Backend tests / CI | ✅ Done — CI itself hasn't run on GitHub yet |
+| Firm-demo data reconciled with schemas.py | ⬜ Not started — see finding above |
+| Firm app → real API | ⬜ Blocked on the above, then ~12 per-page swaps |
 | Auth actually enforced | ⬜ Blocked — needs a Supabase project |
-| Firm app → real API | ⬜ Blocked on the above; then ~12 per-page swaps |
-| Portal → real API | ⬜ Blocked on the above; then ~7 per-page swaps |
-| Raw file upload | ⬜ Needs a Supabase project + a signed-URL flow |
-| Tests / CI | ⬜ Not started |
-
-**What remains is one thing, blocking almost everything else:** a Supabase project. Once
-`frontend/.env.local` has real credentials, both surfaces' page-swaps and the file-upload flow
-become mechanical and independently parallelizable.
 
 ### Suggested next step
 
 1. **Create the Supabase project** and fill `frontend/.env.local` — this unblocks everything
    else and switches the auth pages out of demo mode automatically.
 2. **Run the migrations in order** — `0001` → `0002` → `0003` → `0004` — against it.
-3. **Wire `/clients` end-to-end first** on the firm side (richest router, 10 endpoints, every
-   other record hangs off it) **and `/dashboard/invoices` on the portal side** (now has a full
-   backend). Each proves the auth path and gives a pattern the remaining pages copy.
+3. **Exercise the portal pages against real data** (sign up, add an invoice/expense/etc. via
+   `/docs`, reload the page) — this is the first real test any of this session's work gets.
+4. **Then tackle the firm-side reconciliation**, now with a live backend to check each page
+   against instead of reading two files side by side and hoping.
 
 ---
 
@@ -320,13 +424,15 @@ design should live in the repo, or add it to `.gitignore` if not.
 
 ## Open items / known issues
 
-1. **Nothing is wired to the API** — see *What is left*, item 1. Blocked on Supabase config.
+1. **Firm-side pages are not wired** — real, documented shape drift between `lib/firm-demo.ts`
+   and `backend/app/schemas.py`. See *Firm-side app: NOT wired* above before attempting it.
 2. **Plaintext credentials in research doc.** Line 24 of `speednum_chatgpt_research.md`
    contains `sa38299793@gmail.com` / password `test`. Harmless while the repo is private, but
    **scrub it before making the repo public** — removing it from history afterwards requires a
    history rewrite (`git filter-repo`), which is far more work than editing it now.
-3. **No CI.** No workflow files yet.
-4. **No tests.** Neither `backend/` nor `frontend/` has a test suite.
+3. **CI has never run on GitHub.** The workflow exists (`.github/workflows/ci.yml`) and passes
+   locally; it hasn't been exercised by an actual push/PR yet.
+4. **No frontend tests.** Backend has 35 (pure-logic) unit tests; the frontend has none.
 5. **Legal pages are unreviewed template wording.**
 6. **`.avi` not in the repo** — blocked on LFS quota.
 7. **Redundancy.** The 422 MB zip likely duplicates the extracted source in
@@ -334,6 +440,7 @@ design should live in the repo, or add it to `.gitignore` if not.
 8. **Migration 0004 is untested against a real Postgres.** Syntax and RLS logic were checked
    by hand against the 0001–0003 conventions, but never actually run — there is no Supabase
    project yet. Run it and its rollback path before trusting it in production.
+9. **No signed *read* URL for documents** — upload is real, download is still a toast.
 
 ---
 
@@ -343,8 +450,11 @@ design should live in the repo, or add it to `.gitignore` if not.
 - No real `.env` tracked — only `backend/.env.example`.
 - `frontend/package.json` and `package-lock.json` unmodified by the frontend build
   (no dependencies were added; everything uses what was already installed).
-- Backend: `python -m compileall app` and `import app.main` (dummy `DATABASE_URL`) both clean;
-  `app.openapi()` builds without error — 78 paths total.
-- Frontend: `npx tsc --noEmit` and `npx eslint .` both clean after a `.next` cache rebuild
-  (a stale cache from the prior session's build was producing spurious `PageProps` errors —
-  same root cause as the existing `/clients/[id]` gotcha above; `rm -rf .next` fixed it).
+- Backend: `python -m compileall app`, `import app.main` (dummy `DATABASE_URL`), and
+  `app.openapi()` (78 paths) all clean. `pytest tests/` — **35 passed**.
+- Frontend: `npx tsc --noEmit`, `npx eslint .`, and `npx next build` (87 pages) all clean after
+  a `.next` cache rebuild (a stale cache from the prior session's build was producing spurious
+  `PageProps` errors — same root cause as the existing `/clients/[id]` gotcha above; `rm -rf
+  .next` fixed it — now baked into `ci.yml` as `npm run build` before `tsc`).
+- `.github/workflows/ci.yml` YAML validated with `yaml.safe_load()`; not yet run by GitHub
+  Actions itself (see *Open items* above).
