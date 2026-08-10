@@ -26,6 +26,11 @@ yarn-error.log*
 .env
 .env.*
 !.env.example
+# Local-only secret store for deployment credentials (DB password, keys, tokens).
+# This file holds live secrets and must NEVER be pushed. DEPLOYMENT.md (committed)
+# documents where each secret lives and how to retrieve it instead.
+*.secrets.local.md
+DEPLOYMENT.secrets.local.md
 
 # ---- Large media ----
 # *.mp4 and *.zip are stored via Git LFS (see .gitattributes).

@@ -1,5 +1,6 @@
-# Hugging Face Spaces (Docker SDK) expects the app to listen on port 7860
-# and to run as a non-root user with uid 1000.
+# Runs as a Docker container on any host. The listen port is taken from the
+# $PORT env var when present (Render, Cloud Run, etc.) and falls back to 7860
+# (Hugging Face Spaces / local) when it is not set. Runs as non-root uid 1000.
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -22,6 +23,7 @@ ENV HOME=/home/user \
 EXPOSE 7860
 
 HEALTHCHECK --interval=60s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:7860/health', timeout=4).status == 200 else 1)"
+    CMD python -c "import os,urllib.request,sys; p=os.environ.get('PORT','7860'); sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:'+p+'/health', timeout=4).status == 200 else 1)"
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# Shell form so ${PORT} is expanded at runtime; exec keeps uvicorn as PID 1 for signals.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-7860} --proxy-headers --forwarded-allow-ips '*'"]
