@@ -15,6 +15,31 @@
 
 ---
 
+## ⏸️ RESUME HERE (picking up on another machine)
+
+**Done:** ✅ Frontend on Vercel · ✅ Supabase database + auth.
+**Next:** deploy the backend to **Render** — this is **Step 3** below.
+
+On a fresh PC:
+1. `git lfs install` then `git clone https://github.com/ShahbazAli206/SpeedNum.git` (LFS media
+   isn't needed for deployment; a plain clone is fine).
+2. Follow **Step 3 (Render)** below — the port-agnostic `backend/Dockerfile` is already pushed.
+3. You need **one secret that is not in git**: the Supabase **DB password** (for `DATABASE_URL`).
+   Use the password saved when the project was created, or reset it at
+   **Supabase → Settings → Database → Reset database password**.
+4. Paste this into Render's Environment (swap `<db-password>` for the real one):
+   ```
+   DATABASE_URL=postgresql://postgres.xftnqkmakeaqaandxyei:<db-password>@aws-0-ca-central-1.pooler.supabase.com:6543/postgres
+   SUPABASE_URL=https://xftnqkmakeaqaandxyei.supabase.co
+   PUBLIC_APP_URL=https://speed-num.vercel.app
+   CORS_ORIGINS=https://speed-num.vercel.app
+   ENVIRONMENT=production
+   ```
+5. For the final Vercel wiring (Step 4) you'll also need the Supabase **anon** key (public-safe):
+   Supabase → Settings → API Keys → `anon` `public`.
+
+---
+
 ## Architecture
 
 Target: this app's own Postgres, storage, and (as of this branch) authentication, all on the
