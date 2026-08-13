@@ -18,10 +18,13 @@ import {
   getDeadlines,
   getFirmOverview,
   getLetters,
+  getRecurringRevenueTrend,
   getTasks,
   getTeam,
 } from "@/lib/firm-demo";
 import { formatDate, formatMoney, formatPercent } from "@/lib/format";
+
+import { RevenueTrendChart } from "./revenue-chart";
 
 export const metadata: Metadata = { title: "Overview" };
 
@@ -77,6 +80,8 @@ export default function FirmOverviewPage() {
     .filter((deadline) => deadline.status === "open" && deadline.days_remaining >= 0)
     .sort((a, b) => a.days_remaining - b.days_remaining)
     .slice(0, 6);
+
+  const revenueTrend = getRecurringRevenueTrend();
 
   return (
     <>
@@ -216,6 +221,10 @@ export default function FirmOverviewPage() {
             })}
           </ul>
         </section>
+      </div>
+
+      <div className="mt-6">
+        <RevenueTrendChart rows={revenueTrend.rows} changePct={revenueTrend.change_pct} />
       </div>
 
       <div className="mt-6 grid gap-5 lg:grid-cols-[1.5fr_1fr]">

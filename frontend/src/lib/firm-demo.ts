@@ -668,6 +668,33 @@ export function getDeadlinesByMonth() {
   return rows;
 }
 
+/** Monthly recurring revenue, last 6 months, for the overview trend chart. */
+export function getRecurringRevenueTrend() {
+  const monthShort = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+  const monthlyNow = getFirmOverview().recurring_revenue / 12;
+  // A gentle, deterministic ramp up to the current run-rate — no Math.random,
+  // so the chart is stable across renders and snapshots.
+  const factors = [0.82, 0.86, 0.89, 0.93, 0.97, 1];
+  const currentMonth = Number(TODAY.slice(5, 7)); // 1–12
+
+  const rows = factors.map((factor, i) => {
+    const monthNumber = ((currentMonth - 1 - (factors.length - 1 - i) + 12 * 10) % 12) + 1;
+    return {
+      x: monthShort[monthNumber - 1],
+      revenue: Math.round((monthlyNow * factor) / 100) * 100,
+    };
+  });
+
+  const last = rows.at(-1)!.revenue;
+  const prev = rows.at(-2)!.revenue;
+  const change_pct = prev === 0 ? 0 : ((last - prev) / prev) * 100;
+
+  return { rows, change_pct };
+}
+
 /** Recurring revenue by service category, for the part-to-whole chart. */
 export function getRevenueByCategory() {
   const totals = new Map<string, number>();
