@@ -1,0 +1,472 @@
+"use client";
+
+import {
+  Building2,
+  Mail,
+  Plus,
+  ShieldCheck,
+  Trash2,
+  UserPlus,
+  Users,
+} from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+
+import { useToast } from "@/components/toast";
+import { Button, Checkbox, Field, Input, Select, Textarea } from "@/components/ui";
+import type { CustomField, TeamRow } from "@/lib/firm-demo";
+
+interface ContactDraft {
+  id: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  role: string;
+  isPrimary: boolean;
+}
+
+const STATUS_OPTIONS = [
+  { value: "active", label: "Active" },
+  { value: "prospect", label: "Prospect" },
+  { value: "inactive", label: "Inactive" },
+  { value: "archived", label: "Archived" },
+];
+
+const PLAN_OPTIONS = ["Starter", "Professional", "Growth"];
+
+let contactSeq = 0;
+function nextContactId() {
+  contactSeq += 1;
+  return `draft-${contactSeq}`;
+}
+
+export function NewClientClient({
+  customFields,
+  team,
+}: {
+  customFields: CustomField[];
+  team: TeamRow[];
+}) {
+  const toast = useToast();
+  const router = useRouter();
+
+  const [businessName, setBusinessName] = useState("");
+  const [legalName, setLegalName] = useState("");
+  const [status, setStatus] = useState("active");
+  const [plan, setPlan] = useState("Starter");
+  const [annualFee, setAnnualFee] = useState("0");
+  const [ownerId, setOwnerId] = useState(team[0]?.id ?? "");
+
+  const [primaryEmail, setPrimaryEmail] = useState("");
+  const [telephone, setTelephone] = useState("");
+  const [businessNumber, setBusinessNumber] = useState("");
+  const [city, setCity] = useState("");
+  const [province, setProvince] = useState("ON");
+  const [fiscalYearEnd, setFiscalYearEnd] = useState("");
+  const [mailingAddress, setMailingAddress] = useState("");
+
+  const [contacts, setContacts] = useState<ContactDraft[]>([]);
+
+  const [customValues, setCustomValues] = useState<Record<string, string>>({});
+  const [sendWelcomeEmail, setSendWelcomeEmail] = useState(false);
+
+  const [error, setError] = useState<string | null>(null);
+
+  const addContact = () => {
+    setContacts((current) => [
+      ...current,
+      {
+        id: nextContactId(),
+        fullName: "",
+        email: "",
+        phone: "",
+        role: "",
+        isPrimary: current.length === 0,
+      },
+    ]);
+  };
+
+  const updateContact = (id: string, patch: Partial<ContactDraft>) => {
+    setContacts((current) =>
+      current.map((contact) => (contact.id === id ? { ...contact, ...patch } : contact)),
+    );
+  };
+
+  const removeContact = (id: string) => {
+    setContacts((current) => current.filter((contact) => contact.id !== id));
+  };
+
+  const onSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+
+    const trimmedName = businessName.trim();
+    if (!trimmedName) {
+      setError("Business / trade name is required.");
+      return;
+    }
+
+    const missingRequired = customFields.find(
+      (field) => field.is_required && !customValues[field.id]?.trim(),
+    );
+    if (missingRequired) {
+      setError(`"${missingRequired.label}" is required.`);
+      return;
+    }
+
+    setError(null);
+    toast.success(
+      `${trimmedName} added`,
+      sendWelcomeEmail && primaryEmail
+        ? "Client record created and a portal invite is queued to send."
+        : "Client record created — you'll find them in the client book.",
+    );
+    router.push("/clients");
+  };
+
+  return (
+    <>
+      <Link
+        href="/clients"
+        className="text-[12.5px] font-medium text-brand transition hover:underline"
+      >
+        ← Back to clients
+      </Link>
+
+      <div className="mt-3 mb-6 flex items-start gap-4">
+        <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand">
+          <UserPlus className="size-5" />
+        </span>
+        <div>
+          <h1 className="font-display text-[1.6rem] font-bold tracking-tight text-ink">
+            Add client
+          </h1>
+          <p className="mt-0.5 text-[14px] text-muted">
+            Create a new client record and optionally invite them to the portal.
+          </p>
+        </div>
+      </div>
+
+      <form onSubmit={onSubmit} className="space-y-5">
+        <Section
+          icon={<Building2 className="size-4.5" />}
+          title="Business details"
+          description="Legal identity and engagement summary."
+        >
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Business / trade name" required>
+              <Input
+                value={businessName}
+                onChange={(event) => setBusinessName(event.target.value)}
+                placeholder="Maple Retail Co."
+                autoFocus
+              />
+            </Field>
+            <Field label="Legal name">
+              <Input
+                value={legalName}
+                onChange={(event) => setLegalName(event.target.value)}
+                placeholder="Maple Retail Co. Inc."
+              />
+            </Field>
+            <Field label="Status">
+              <Select value={status} onChange={(event) => setStatus(event.target.value)}>
+                {STATUS_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Plan">
+              <Select value={plan} onChange={(event) => setPlan(event.target.value)}>
+                {PLAN_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Annual fee ($)" hint="Shown on the client list as a monthly figure.">
+              <Input
+                type="number"
+                min={0}
+                step={100}
+                value={annualFee}
+                onChange={(event) => setAnnualFee(event.target.value)}
+              />
+            </Field>
+            <Field label="Assigned accountant / manager">
+              <Select value={ownerId} onChange={(event) => setOwnerId(event.target.value)}>
+                <option value="">Unassigned</option>
+                {team.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.full_name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+        </Section>
+
+        <Section
+          icon={<Mail className="size-4.5" />}
+          title="Contact & compliance"
+          description="Details staff can pull up while working a file, plus the fiscal year-end that drives year-end reminders."
+        >
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Primary email">
+              <Input
+                type="email"
+                value={primaryEmail}
+                onChange={(event) => setPrimaryEmail(event.target.value)}
+                placeholder="accounts@company.ca"
+              />
+            </Field>
+            <Field label="Telephone">
+              <Input
+                value={telephone}
+                onChange={(event) => setTelephone(event.target.value)}
+                placeholder="+1 (416) 555-0142"
+              />
+            </Field>
+            <Field label="Business number">
+              <Input
+                value={businessNumber}
+                onChange={(event) => setBusinessNumber(event.target.value)}
+                placeholder="80112 3345 RC0001"
+              />
+            </Field>
+            <Field label="City">
+              <Input value={city} onChange={(event) => setCity(event.target.value)} placeholder="Toronto" />
+            </Field>
+            <Field label="Province">
+              <Input
+                value={province}
+                onChange={(event) => setProvince(event.target.value.toUpperCase().slice(0, 2))}
+                placeholder="ON"
+              />
+            </Field>
+            <Field label="Fiscal year-end" hint="Only the month and day drive filing deadlines.">
+              <Input
+                type="date"
+                value={fiscalYearEnd}
+                onChange={(event) => setFiscalYearEnd(event.target.value)}
+              />
+            </Field>
+            <Field label="Mailing address" className="sm:col-span-2">
+              <Textarea
+                value={mailingAddress}
+                onChange={(event) => setMailingAddress(event.target.value)}
+                placeholder="123 King St W, Toronto, ON M5H 1A1"
+                rows={2}
+              />
+            </Field>
+          </div>
+        </Section>
+
+        <Section
+          icon={<Users className="size-4.5" />}
+          title="Key contacts"
+          description="Officers and contacts — President, VP, controller, etc."
+          action={
+            <Button type="button" size="sm" variant="secondary" icon={<Plus className="size-3.5" />} onClick={addContact}>
+              Add contact
+            </Button>
+          }
+        >
+          {contacts.length === 0 ? (
+            <p className="py-6 text-center text-[13px] text-muted">
+              No contacts yet. Add the people you deal with at this client.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {contacts.map((contact, index) => (
+                <div
+                  key={contact.id}
+                  className="grid gap-3 rounded-lg border border-line p-3 sm:grid-cols-[1.2fr_1.2fr_1fr_1fr_auto]"
+                >
+                  <Input
+                    value={contact.fullName}
+                    onChange={(event) => updateContact(contact.id, { fullName: event.target.value })}
+                    placeholder={`Contact ${index + 1} name`}
+                    aria-label="Full name"
+                  />
+                  <Input
+                    type="email"
+                    value={contact.email}
+                    onChange={(event) => updateContact(contact.id, { email: event.target.value })}
+                    placeholder="Email"
+                    aria-label="Email"
+                  />
+                  <Input
+                    value={contact.phone}
+                    onChange={(event) => updateContact(contact.id, { phone: event.target.value })}
+                    placeholder="Phone"
+                    aria-label="Phone"
+                  />
+                  <Input
+                    value={contact.role}
+                    onChange={(event) => updateContact(contact.id, { role: event.target.value })}
+                    placeholder="Role"
+                    aria-label="Role"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeContact(contact.id)}
+                    className="grid size-9.5 shrink-0 place-items-center rounded-lg text-muted transition hover:bg-danger-soft hover:text-danger"
+                    aria-label="Remove contact"
+                  >
+                    <Trash2 className="size-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+
+        <Section
+          icon={<ShieldCheck className="size-4.5" />}
+          title="Additional information"
+          description="Custom fields configured by your firm in Client settings."
+        >
+          {customFields.length === 0 ? (
+            <p className="py-6 text-center text-[13px] text-muted">
+              No custom fields configured yet.{" "}
+              <Link href="/clients/settings" className="font-medium text-brand hover:underline">
+                Add one in Client settings
+              </Link>
+              .
+            </p>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {customFields.map((field) => (
+                <CustomFieldInput
+                  key={field.id}
+                  field={field}
+                  value={customValues[field.id] ?? ""}
+                  onChange={(value) =>
+                    setCustomValues((current) => ({ ...current, [field.id]: value }))
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </Section>
+
+        <Section
+          icon={<Mail className="size-4.5" />}
+          title="Portal access"
+          description="Onboard this client to their secure dashboard as soon as they're created."
+        >
+          <Checkbox
+            label={
+              <>
+                Send a branded welcome email with portal access
+                {!primaryEmail ? (
+                  <span className="mt-0.5 block text-[12px] text-muted">
+                    Add a primary email above to enable the welcome email.
+                  </span>
+                ) : null}
+              </>
+            }
+            checked={sendWelcomeEmail}
+            disabled={!primaryEmail}
+            onChange={(event) => setSendWelcomeEmail(event.target.checked)}
+          />
+        </Section>
+
+        {error ? (
+          <p role="alert" className="text-[13px] font-medium text-danger">
+            {error}
+          </p>
+        ) : null}
+
+        <div className="flex items-center justify-end gap-2 pb-2">
+          <Button type="button" variant="secondary" onClick={() => router.push("/clients")}>
+            Cancel
+          </Button>
+          <Button type="submit">Create client</Button>
+        </div>
+      </form>
+    </>
+  );
+}
+
+function Section({
+  icon,
+  title,
+  description,
+  action,
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-line bg-surface shadow-[var(--shadow-card)]">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-5 py-4">
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-surface-2 text-ink-soft">
+            {icon}
+          </span>
+          <div>
+            <h2 className="text-[15px] font-semibold text-ink">{title}</h2>
+            <p className="mt-0.5 text-[13px] text-muted">{description}</p>
+          </div>
+        </div>
+        {action}
+      </div>
+      <div className="p-5">{children}</div>
+    </section>
+  );
+}
+
+function CustomFieldInput({
+  field,
+  value,
+  onChange,
+}: {
+  field: CustomField;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  if (field.field_type === "checkbox") {
+    return (
+      <Checkbox
+        label={
+          <>
+            {field.label}
+            {field.is_required ? <span className="ml-0.5 text-danger">*</span> : null}
+          </>
+        }
+        checked={value === "true"}
+        onChange={(event) => onChange(event.target.checked ? "true" : "")}
+      />
+    );
+  }
+
+  return (
+    <Field label={field.label} required={field.is_required} hint={field.help_text}>
+      {field.field_type === "select" ? (
+        <Select value={value} onChange={(event) => onChange(event.target.value)}>
+          <option value="">Select…</option>
+          {field.options.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </Select>
+      ) : (
+        <Input
+          type={field.field_type === "date" ? "date" : field.field_type === "number" ? "number" : "text"}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      )}
+    </Field>
+  );
+}
