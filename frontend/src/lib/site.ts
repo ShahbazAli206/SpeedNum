@@ -165,10 +165,10 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
     group: "Firm",
     items: [
       {
-        label: "Team",
+        label: "Accountants",
         href: "/team",
         icon: "network",
-        description: "Roster, roles and live workload",
+        description: "Your internal team of CPAs — roster, roles and live workload",
       },
       {
         label: "Notifications",

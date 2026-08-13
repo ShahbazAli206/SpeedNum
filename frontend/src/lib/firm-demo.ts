@@ -73,28 +73,45 @@ export const FIRM = {
 /* Team                                                                        */
 /* -------------------------------------------------------------------------- */
 
+export type TeamStatus = "active" | "away" | "inactive";
+
 export interface TeamMember {
   id: string;
   full_name: string;
   email: string;
+  phone: string | null;
   title: string;
   role: UserRole;
   weekly_capacity: number;
   is_active: boolean;
+  status: TeamStatus;
+  joined: string;
 }
 
 const TEAM: TeamMember[] = [
-  { id: "u1", full_name: "Sarah Johnson", email: "sarah@harrisoncpa.ca", title: "Managing Partner", role: "owner", weekly_capacity: 30, is_active: true },
-  { id: "u2", full_name: "Michael Chen", email: "michael@harrisoncpa.ca", title: "Tax Partner", role: "admin", weekly_capacity: 34, is_active: true },
-  { id: "u3", full_name: "Emily Carter", email: "emily@harrisoncpa.ca", title: "Senior Accountant", role: "member", weekly_capacity: 37.5, is_active: true },
-  { id: "u4", full_name: "David Thompson", email: "david@harrisoncpa.ca", title: "Accountant", role: "member", weekly_capacity: 37.5, is_active: true },
-  { id: "u5", full_name: "Jessica Williams", email: "jessica@harrisoncpa.ca", title: "Bookkeeper", role: "member", weekly_capacity: 37.5, is_active: true },
-  { id: "u6", full_name: "Daniel Kim", email: "daniel@harrisoncpa.ca", title: "Practice Administrator", role: "admin", weekly_capacity: 37.5, is_active: true },
-  { id: "u7", full_name: "Priya Raman", email: "priya@harrisoncpa.ca", title: "Junior Accountant", role: "member", weekly_capacity: 37.5, is_active: true },
-  { id: "u8", full_name: "Owen Fraser", email: "owen@harrisoncpa.ca", title: "Seasonal Preparer", role: "viewer", weekly_capacity: 20, is_active: false },
+  { id: "u1", full_name: "Sarah Johnson", email: "sarah@harrisoncpa.ca", phone: null, title: "Managing Partner", role: "owner", weekly_capacity: 30, is_active: true, status: "active", joined: "2019-03-01" },
+  { id: "u2", full_name: "Michael Chen", email: "michael@harrisoncpa.ca", phone: null, title: "Tax Partner", role: "admin", weekly_capacity: 34, is_active: true, status: "active", joined: "2020-06-15" },
+  { id: "u3", full_name: "Emily Carter", email: "emily@harrisoncpa.ca", phone: null, title: "Senior Accountant", role: "member", weekly_capacity: 37.5, is_active: true, status: "active", joined: "2021-02-01" },
+  { id: "u4", full_name: "David Thompson", email: "david@harrisoncpa.ca", phone: null, title: "Accountant", role: "member", weekly_capacity: 37.5, is_active: true, status: "active", joined: "2021-09-12" },
+  { id: "u5", full_name: "Jessica Williams", email: "jessica@harrisoncpa.ca", phone: null, title: "Bookkeeper", role: "member", weekly_capacity: 37.5, is_active: true, status: "away", joined: "2022-01-10" },
+  { id: "u6", full_name: "Daniel Kim", email: "daniel@harrisoncpa.ca", phone: null, title: "Practice Administrator", role: "admin", weekly_capacity: 37.5, is_active: true, status: "active", joined: "2022-05-01" },
+  { id: "u7", full_name: "Priya Raman", email: "priya@harrisoncpa.ca", phone: null, title: "Junior Accountant", role: "member", weekly_capacity: 37.5, is_active: true, status: "away", joined: "2023-03-20" },
+  { id: "u8", full_name: "Owen Fraser", email: "owen@harrisoncpa.ca", phone: null, title: "Seasonal Preparer", role: "viewer", weekly_capacity: 20, is_active: false, status: "inactive", joined: "2025-05-01" },
 ];
 
 const NAME_BY_ID = new Map(TEAM.map((member) => [member.id, member.full_name]));
+
+export interface TeamNote {
+  id: string;
+  member_id: string;
+  body: string;
+  when: string;
+}
+
+const TEAM_NOTES: TeamNote[] = [
+  { id: "tn1", member_id: "u5", body: "Out on parental leave until mid-September — route new bookkeeping clients to Emily in the meantime.", when: "Jul 2, 2026" },
+  { id: "tn2", member_id: "u8", body: "Seasonal preparer, only available Feb–Apr for T1 season.", when: "Feb 10, 2026" },
+];
 
 /* -------------------------------------------------------------------------- */
 /* Services catalogue                                                          */
@@ -597,6 +614,17 @@ export function getTeam(): TeamRow[] {
       estimated_hours: tasks.reduce((total, task) => total + task.estimate_hours, 0),
     };
   });
+}
+
+export function getTeamMember(id: string): TeamRow | undefined {
+  return getTeam().find((member) => member.id === id);
+}
+
+export const TEAM_IDS = TEAM.map((member) => member.id);
+
+/** Internal admin-only notes on a team member. */
+export function getTeamNotes(memberId: string): TeamNote[] {
+  return TEAM_NOTES.filter((note) => note.member_id === memberId);
 }
 
 /** Services with their live client counts. */
