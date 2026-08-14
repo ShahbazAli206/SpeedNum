@@ -22,6 +22,7 @@ from .routers import (
     client_invoices,
     client_overview,
     client_payroll,
+    client_services,
     client_taxes,
     clients,
     custom_fields,
@@ -118,6 +119,7 @@ for router in (
     client_taxes.router,
     client_documents.router,
     client_overview.router,
+    client_services.router,
 ):
     app.include_router(router, prefix=API_PREFIX)
 

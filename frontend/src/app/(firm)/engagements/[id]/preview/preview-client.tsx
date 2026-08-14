@@ -1,11 +1,11 @@
 "use client";
 
-import { Download, FileSignature } from "lucide-react";
+import { FileSignature } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
+import { ExportMenu } from "@/components/engagement/export-menu";
 import { LetterDocument } from "@/components/engagement/letter-document";
-import { downloadLetterPdf } from "@/components/engagement/letter-pdf";
 import { SignaturePad } from "@/components/engagement/signature-pad";
 import { useToast } from "@/components/toast";
 import { Button, Field, Input } from "@/components/ui";
@@ -24,7 +24,7 @@ export function EngagementPreviewClient({
 }) {
   const toast = useToast();
   const [letter, setLetter] = useState(initialLetter);
-  const [downloading, setDownloading] = useState(false);
+  const documentRef = useRef<HTMLDivElement>(null);
 
   const [signature, setSignature] = useState<string | null>(null);
   const [signerName, setSignerName] = useState("");
@@ -51,56 +51,48 @@ export function EngagementPreviewClient({
     }
   };
 
-  const download = async () => {
-    setDownloading(true);
-    try {
-      await downloadLetterPdf({
-        firmName,
-        firmLogoUrl,
-        letter,
-        filenameHint: `${letter.title}-${letter.client_name ?? "client"}`,
-      });
-    } finally {
-      setDownloading(false);
-    }
-  };
-
   return (
     <div className="mx-auto max-w-3xl py-6">
       <div className="mb-4 flex items-center justify-between gap-3">
         <Link href={`/engagements/${letter.id}`} className="text-[12.5px] font-medium text-brand hover:underline">
           ← Back to engagement
         </Link>
-        <Button icon={<Download className="size-4" />} loading={downloading} onClick={download}>
-          Download PDF
-        </Button>
+        <ExportMenu
+          letter={letter}
+          firmName={firmName}
+          firmLogoUrl={firmLogoUrl}
+          filenameHint={`${letter.title}-${letter.client_name ?? "client"}`}
+          documentRef={documentRef}
+        />
       </div>
 
-      <LetterDocument
-        firmName={firmName}
-        firmLogoUrl={firmLogoUrl}
-        letter={letter}
-        firmSignatureSlot={
-          !letter.firm_signature_data ? (
-            <div className="w-full max-w-xs space-y-2 text-left">
-              <p className="flex items-center gap-1.5 text-[12px] font-medium text-muted">
-                <FileSignature className="size-3.5" /> Not yet signed
-              </p>
-              <Field label="Signer name">
-                <Input value={signerName} onChange={(event) => setSignerName(event.target.value)} placeholder="Your full name" />
-              </Field>
-              <Field label="Signer title">
-                <Input value={signerTitle} onChange={(event) => setSignerTitle(event.target.value)} placeholder="Title (optional)" />
-              </Field>
-              <SignaturePad value={signature} onChange={setSignature} label="Firm signature" />
-              {error ? <p className="text-[12px] text-danger">{error}</p> : null}
-              <Button size="sm" disabled={!signature || !signerName.trim()} loading={signing} onClick={applyFirmSignature}>
-                Apply firm signature
-              </Button>
-            </div>
-          ) : undefined
-        }
-      />
+      <div ref={documentRef}>
+        <LetterDocument
+          firmName={firmName}
+          firmLogoUrl={firmLogoUrl}
+          letter={letter}
+          firmSignatureSlot={
+            !letter.firm_signature_data ? (
+              <div className="w-full max-w-xs space-y-2 text-left">
+                <p className="flex items-center gap-1.5 text-[12px] font-medium text-muted">
+                  <FileSignature className="size-3.5" /> Not yet signed
+                </p>
+                <Field label="Signer name">
+                  <Input value={signerName} onChange={(event) => setSignerName(event.target.value)} placeholder="Your full name" />
+                </Field>
+                <Field label="Signer title">
+                  <Input value={signerTitle} onChange={(event) => setSignerTitle(event.target.value)} placeholder="Title (optional)" />
+                </Field>
+                <SignaturePad value={signature} onChange={setSignature} label="Firm signature" />
+                {error ? <p className="text-[12px] text-danger">{error}</p> : null}
+                <Button size="sm" disabled={!signature || !signerName.trim()} loading={signing} onClick={applyFirmSignature}>
+                  Apply firm signature
+                </Button>
+              </div>
+            ) : undefined
+          }
+        />
+      </div>
     </div>
   );
 }

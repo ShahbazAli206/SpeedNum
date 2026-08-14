@@ -1,10 +1,10 @@
 "use client";
 
-import { CircleCheck, CircleX, Download } from "lucide-react";
-import { useEffect, useState } from "react";
+import { CircleCheck, CircleX } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
+import { ExportMenu } from "@/components/engagement/export-menu";
 import { LetterDocument } from "@/components/engagement/letter-document";
-import { downloadLetterPdf } from "@/components/engagement/letter-pdf";
 import { SignaturePad } from "@/components/engagement/signature-pad";
 import { Button, Checkbox, Field, Input, LoadingBlock } from "@/components/ui";
 import { ApiError } from "@/lib/api";
@@ -21,8 +21,8 @@ export function EngagementSignClient({ token }: { token: string }) {
   const [agreed, setAgreed] = useState(false);
   const [signing, setSigning] = useState(false);
   const [declining, setDeclining] = useState(false);
-  const [downloading, setDownloading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const documentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,21 +74,6 @@ export function EngagementSignClient({ token }: { token: string }) {
     }
   };
 
-  const download = async () => {
-    if (!letter) return;
-    setDownloading(true);
-    try {
-      await downloadLetterPdf({
-        firmName: letter.brand.firm_name,
-        firmLogoUrl: letter.brand.logo_url,
-        letter,
-        filenameHint: `${letter.title}-${letter.client_name}`,
-      });
-    } finally {
-      setDownloading(false);
-    }
-  };
-
   if (loadError) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-canvas px-5 py-12">
@@ -113,16 +98,24 @@ export function EngagementSignClient({ token }: { token: string }) {
   return (
     <main className="min-h-screen bg-canvas px-5 py-10">
       <div className="mx-auto max-w-3xl space-y-5">
-        <LetterDocument firmName={letter.brand.firm_name} firmLogoUrl={letter.brand.logo_url} letter={letter} />
+        <div ref={documentRef}>
+          <LetterDocument firmName={letter.brand.firm_name} firmLogoUrl={letter.brand.logo_url} letter={letter} />
+        </div>
 
         {letter.status === "signed" ? (
           <section className="rounded-xl border border-line bg-surface p-5 text-center shadow-[var(--shadow-card)]">
             <CircleCheck className="mx-auto size-8 text-success" />
             <p className="mt-2 text-[14px] font-semibold text-ink">You&apos;ve signed this engagement letter</p>
             <p className="mt-0.5 text-[13px] text-muted">Keep a copy for your records.</p>
-            <Button className="mt-4" icon={<Download className="size-4" />} loading={downloading} onClick={download}>
-              Download PDF
-            </Button>
+            <div className="mt-4 flex justify-center">
+              <ExportMenu
+                letter={letter}
+                firmName={letter.brand.firm_name}
+                firmLogoUrl={letter.brand.logo_url}
+                filenameHint={`${letter.title}-${letter.client_name}`}
+                documentRef={documentRef}
+              />
+            </div>
           </section>
         ) : letter.status === "void" ? (
           <section className="rounded-xl border border-line bg-surface p-5 text-center shadow-[var(--shadow-card)]">

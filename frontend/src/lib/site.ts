@@ -267,6 +267,12 @@ export const DASHBOARD_NAV: { group: string; items: DashboardNavItem[] }[] = [
         icon: "landmark",
         description: "GST/HST, corporate and payroll tax",
       },
+      {
+        label: "Services",
+        href: "/dashboard/services",
+        icon: "tag",
+        description: "What you're engaged for, and at what cadence",
+      },
     ],
   },
   {

@@ -1,7 +1,7 @@
 "use client";
 
-import { ArrowDown, ArrowUp, ChevronsUpDown, Download, Search } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronsUpDown, Download, Search } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useToast } from "@/components/toast";
 import { EmptyState, Pagination } from "@/components/ui";
@@ -15,6 +15,13 @@ export interface Column<T> {
   cell: (row: T) => ReactNode;
   /** Comparable value; omit to make the column unsortable. */
   sortValue?: (row: T) => string | number;
+  /**
+   * Value written to CSV/Excel exports. Preferred over `sortValue` there,
+   * since a sort key isn't always the human-readable form (e.g. a raw
+   * timestamp used to sort a "3 days ago" cell). Falls back to `sortValue`,
+   * then an empty cell, when omitted.
+   */
+  exportValue?: (row: T) => string | number;
   className?: string;
 }
 
@@ -107,18 +114,48 @@ export function DataTable<T extends { id: string }>({
     });
   };
 
-  const exportCsv = () => {
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!exportMenuOpen) return;
+    const onClick = (event: MouseEvent) => {
+      if (!exportMenuRef.current?.contains(event.target as Node)) setExportMenuOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setExportMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [exportMenuOpen]);
+
+  // Read exportValue (falling back to sortValue) so the file carries raw
+  // values rather than the rendered React nodes.
+  const exportRows = () => {
     const header = columns.map((column) => column.header);
-    // Read the sortValue where present so the CSV carries raw values rather
-    // than the rendered React nodes.
     const body = filtered.map((row) =>
-      columns.map((column) => (column.sortValue ? String(column.sortValue(row)) : "")),
+      columns.map((column) => {
+        const value = column.exportValue ? column.exportValue(row) : column.sortValue ? column.sortValue(row) : "";
+        return String(value);
+      }),
     );
+    return { header, body };
+  };
+
+  const exportCsv = () => {
+    const { header, body } = exportRows();
     const csv = [header, ...body]
       .map((line) => line.map((cell) => `"${cell.replace(/"/g, '""')}"`).join(","))
       .join("\n");
 
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    // A leading UTF-8 BOM so Excel on Windows doesn't mis-render accented
+    // or non-Latin characters when the file is opened directly.
+    const blob = new Blob(["﻿", csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -126,6 +163,35 @@ export function DataTable<T extends { id: string }>({
     link.click();
     URL.revokeObjectURL(url);
     toast.success("Export ready", `${filtered.length} rows downloaded as CSV.`);
+  };
+
+  const exportXlsx = async () => {
+    setExporting(true);
+    try {
+      const { Workbook } = await import("exceljs");
+      const { header, body } = exportRows();
+      const workbook = new Workbook();
+      const sheet = workbook.addWorksheet("Export");
+      sheet.addRow(header).font = { bold: true };
+      for (const line of body) sheet.addRow(line);
+      sheet.columns.forEach((column) => {
+        column.width = 18;
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${exportName}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success("Export ready", `${filtered.length} rows downloaded as Excel.`);
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -174,14 +240,45 @@ export function DataTable<T extends { id: string }>({
         ))}
 
         {exportName ? (
-          <button
-            type="button"
-            onClick={exportCsv}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-[13px] font-medium text-muted transition hover:bg-surface-2 hover:text-ink"
-          >
-            <Download className="size-3.5" />
-            Export
-          </button>
+          <div ref={exportMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setExportMenuOpen((current) => !current)}
+              disabled={exporting}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-[13px] font-medium text-muted transition hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Download className="size-3.5" />
+              Export
+              <ChevronDown className="size-3.5" />
+            </button>
+
+            {exportMenuOpen ? (
+              <div
+                role="menu"
+                className="absolute top-full right-0 z-30 mt-1.5 w-36 overflow-hidden rounded-lg border border-line bg-surface py-1 shadow-[var(--shadow-lift)]"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    exportCsv();
+                    setExportMenuOpen(false);
+                  }}
+                  className="block w-full px-3.5 py-2 text-left text-[13px] text-ink-soft transition hover:bg-surface-2 hover:text-ink"
+                >
+                  CSV
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => void exportXlsx().then(() => setExportMenuOpen(false))}
+                  className="block w-full px-3.5 py-2 text-left text-[13px] text-ink-soft transition hover:bg-surface-2 hover:text-ink"
+                >
+                  Excel
+                </button>
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </div>
 

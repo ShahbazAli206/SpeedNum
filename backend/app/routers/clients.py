@@ -14,7 +14,9 @@ from ..models import Client, ClientService, Contact, Deadline, Profile, Service,
 from ..schemas import (
     ClientCreate,
     ClientRead,
+    ClientServiceCreate,
     ClientServiceRead,
+    ClientServiceUpdate,
     ClientUpdate,
     ContactCreate,
     ContactRead,
@@ -440,3 +442,106 @@ async def list_client_services(
         )
         for assignment, service in rows
     ]
+
+
+@router.post(
+    "/clients/{client_id}/services", response_model=ClientServiceRead, status_code=status.HTTP_201_CREATED
+)
+async def assign_client_service(
+    client_id: uuid.UUID,
+    payload: ClientServiceCreate,
+    session: SessionDep,
+    user: TenantUserDep,
+    request: Request,
+) -> ClientServiceRead:
+    client = await session.scalar(
+        select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
+    )
+    ensure_found(client, "Client")
+    service = await session.scalar(
+        select(Service).where(Service.id == payload.service_id, Service.tenant_id == user.tenant_id)
+    )
+    ensure_found(service, "Service")
+
+    row = ClientService(
+        tenant_id=user.tenant_id,
+        client_id=client_id,
+        service_id=service.id,
+        price=payload.price,
+        frequency_override=payload.frequency_override,
+        assignee_id=payload.assignee_id,
+        start_date=payload.start_date or today_utc(),
+        end_date=payload.end_date,
+        notes=payload.notes,
+    )
+    session.add(row)
+    await session.flush()
+
+    await audit.record(
+        session,
+        tenant_id=user.tenant_id,
+        actor_id=user.profile.id,
+        actor_email=user.profile.email,
+        action="service_assigned",
+        entity="client",
+        entity_id=client.id,
+        summary=f"Assigned {service.name} to {client.legal_name}",
+        ip_address=client_ip(request),
+    )
+
+    names = await profile_names(session, user.tenant_id)
+    return read(
+        ClientServiceRead,
+        row,
+        service_name=service.name,
+        service_code=service.code,
+        frequency=row.frequency_override or service.frequency,
+        assignee_name=names.get(row.assignee_id),
+    )
+
+
+@router.patch("/clients/{client_id}/services/{assignment_id}", response_model=ClientServiceRead)
+async def update_client_service(
+    client_id: uuid.UUID,
+    assignment_id: uuid.UUID,
+    payload: ClientServiceUpdate,
+    session: SessionDep,
+    user: TenantUserDep,
+) -> ClientServiceRead:
+    row = await session.scalar(
+        select(ClientService).where(
+            ClientService.id == assignment_id,
+            ClientService.client_id == client_id,
+            ClientService.tenant_id == user.tenant_id,
+        )
+    )
+    ensure_found(row, "Service assignment")
+    apply_updates(row, payload)
+    await session.flush()
+
+    service = await session.get(Service, row.service_id)
+    names = await profile_names(session, user.tenant_id)
+    return read(
+        ClientServiceRead,
+        row,
+        service_name=service.name if service else None,
+        service_code=service.code if service else None,
+        frequency=row.frequency_override or (service.frequency if service else None),
+        assignee_name=names.get(row.assignee_id),
+    )
+
+
+@router.delete("/clients/{client_id}/services/{assignment_id}", response_model=Ok)
+async def remove_client_service(
+    client_id: uuid.UUID, assignment_id: uuid.UUID, session: SessionDep, user: TenantUserDep
+) -> Ok:
+    row = await session.scalar(
+        select(ClientService).where(
+            ClientService.id == assignment_id,
+            ClientService.client_id == client_id,
+            ClientService.tenant_id == user.tenant_id,
+        )
+    )
+    ensure_found(row, "Service assignment")
+    await session.delete(row)
+    return Ok(message="Service removed")

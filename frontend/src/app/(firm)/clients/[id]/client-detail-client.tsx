@@ -22,6 +22,7 @@ import { Button, Card, CardHeader, Field, Input, Modal, Select, Tab, Tabs } from
 import { ApiError, post } from "@/lib/api";
 import { SUPABASE_CONFIGURED } from "@/lib/auth";
 import { cn } from "@/lib/cn";
+import { assignClientService } from "@/lib/client-services";
 import type {
   ClientRow,
   Contact,
@@ -187,9 +188,10 @@ export function ClientDetailClient({
   const submitService = () => {
     const picked = catalogue.find((service) => service.id === selectedServiceId);
     if (!picked) return;
+    const priceValue = Number(price) || 0;
     setAddedServices((current) => [
       ...current,
-      { ...picked, frequency: cadence, default_price: Number(price) || 0 },
+      { ...picked, frequency: cadence, default_price: priceValue },
     ]);
     toast.success(`${picked.name} assigned`, "Added to this client's services.");
     setServiceModalOpen(false);
@@ -197,6 +199,16 @@ export function ClientDetailClient({
     setCadence("annual");
     setPrice("0");
     setNextDue("");
+
+    // Real backend + Supabase configured: persist the assignment for real.
+    // Any failure (most commonly: no backend reachable yet) is silent here —
+    // the optimistic row above already gives the admin working feedback,
+    // same fallback philosophy as the rest of this page's "Add" actions.
+    void assignClientService(client.id, {
+      service_id: picked.id,
+      price: priceValue,
+      frequency_override: cadence,
+    }).catch(() => {});
   };
 
   const submitTask = () => {

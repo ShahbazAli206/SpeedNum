@@ -43,6 +43,7 @@ import type {
   ClientInvoice,
   ClientInvoiceTotals,
   ClientPayRun,
+  ClientServiceLink,
   PayrollTotals as LivePayrollTotals,
   ClientTaxObligation,
   TaxTotals as LiveTaxTotals,
@@ -265,6 +266,16 @@ export async function fetchLiveDocumentTotals(): Promise<DocumentTotals | null> 
   const totals = await apiServer<LiveDocumentTotals>("/client-portal/documents/totals");
   if (!totals) return null;
   return { count: totals.count, bytes: totals.bytes, shared: totals.shared };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Services                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/** No demo.ts equivalent exists (this is a new view) — the real shape is
+ * already what the client-portal Services page needs, so no remapping. */
+export async function fetchLiveClientServices(): Promise<ClientServiceLink[] | null> {
+  return apiServer<ClientServiceLink[]>("/client-portal/services");
 }
 
 /* -------------------------------------------------------------------------- */
