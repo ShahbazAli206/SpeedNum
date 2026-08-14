@@ -162,7 +162,7 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
     ],
   },
   {
-    group: "Firm",
+    group: "Administration",
     items: [
       {
         label: "Accountants",
@@ -171,10 +171,28 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         description: "Your internal team of CPAs — roster, roles and live workload",
       },
       {
+        label: "Users",
+        href: "/users",
+        icon: "users",
+        description: "Every platform account — staff and client-portal logins",
+      },
+      {
         label: "Notifications",
         href: "/notifications",
         icon: "bell",
         description: "In-app feed of everything that changed",
+      },
+      {
+        label: "Integrations",
+        href: "/integrations",
+        icon: "plug",
+        description: "Email, Google Calendar, Drive and Gmail",
+      },
+      {
+        label: "Settings",
+        href: "/settings",
+        icon: "settings",
+        description: "Branding, colours, font and alert preferences",
       },
       {
         label: "Custom fields",

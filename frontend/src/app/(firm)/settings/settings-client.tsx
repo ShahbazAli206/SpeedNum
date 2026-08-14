@@ -138,11 +138,13 @@ export function SettingsClient() {
             label="Primary colour"
             value={form.primary}
             onChange={(value) => update("primary", value)}
+            placeholder={DEFAULT_BRANDING.primary}
           />
           <ColorField
             label="Primary (dark)"
             value={form.primaryDark}
             onChange={(value) => update("primaryDark", value)}
+            placeholder={DEFAULT_BRANDING.primaryDark}
           />
           <Field label="Font family">
             <select
@@ -262,10 +264,12 @@ function ColorField({
   label,
   value,
   onChange,
+  placeholder,
 }: {
   label: string;
   value: string;
   onChange: (hex: string) => void;
+  placeholder: string;
 }) {
   return (
     <Field label={label}>
@@ -283,7 +287,7 @@ function ColorField({
             const next = event.target.value;
             if (/^#[0-9a-fA-F]{0,6}$/.test(next)) onChange(next);
           }}
-          placeholder="#0a8f4e"
+          placeholder={placeholder}
         />
       </div>
     </Field>
