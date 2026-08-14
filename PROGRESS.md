@@ -2,7 +2,7 @@
 
 Running state of this repo so a fresh session can pick up without re-deriving anything.
 
-**Last updated:** 2026-08-06 (session 2)
+**Last updated:** 2026-08-15 (session 4 — see the bottom of this file)
 
 ---
 
@@ -426,10 +426,9 @@ design should live in the repo, or add it to `.gitignore` if not.
 
 1. **Firm-side pages are not wired** — real, documented shape drift between `lib/firm-demo.ts`
    and `backend/app/schemas.py`. See *Firm-side app: NOT wired* above before attempting it.
-2. **Plaintext credentials in research doc.** Line 24 of `speednum_chatgpt_research.md`
-   contains `sa38299793@gmail.com` / password `test`. Harmless while the repo is private, but
-   **scrub it before making the repo public** — removing it from history afterwards requires a
-   history rewrite (`git filter-repo`), which is far more work than editing it now.
+2. ~~**Plaintext credentials in research doc.**~~ Scrubbed in session 4 — the working copy now
+   points at the gitignored secrets file instead. **They remain in git history**, so if the repo
+   is ever made public, rewrite history first (`git filter-repo`) or rotate that password.
 3. **CI has never run on GitHub.** The workflow exists (`.github/workflows/ci.yml`) and passes
    locally; it hasn't been exercised by an actual push/PR yet.
 4. **No frontend tests.** Backend has 35 (pure-logic) unit tests; the frontend has none.
@@ -458,3 +457,271 @@ design should live in the repo, or add it to `.gitignore` if not.
   .next` fixed it — now baked into `ci.yml` as `npm run build` before `tsc`).
 - `.github/workflows/ci.yml` YAML validated with `yaml.safe_load()`; not yet run by GitHub
   Actions itself (see *Open items* above).
+
+---
+
+# Session 3 — QA pass, dropdown system, and the wiring gaps (2026-08-15)
+
+A full UX/functional audit against the brief, then fixes. Everything below is verified
+by the gates in *Verified state (session 3)*.
+
+## The build was broken
+
+`frontend/src/app/(firm)/users/page.tsx` passed an `isLive` prop that `users-client.tsx`
+did not declare — one TS error, so `npx next build` and therefore **any Vercel deploy
+would have failed**. That half of the change had simply not been written. Fixed by
+wiring the users page properly (below).
+
+`npx eslint .` was also failing on `lib/session.tsx` and `reminders/reminders-client.tsx`
+(React Compiler rules: `set-state-in-effect`, `purity`). CI runs lint, so that was red too.
+Both fixed at the root rather than silenced — except one narrow, justified disable in
+`session.tsx` where the rule cannot see across an `await`.
+
+## The dropdown system — `frontend/src/components/select.tsx` (new)
+
+Every dropdown in the app was a native `<select>`: the option list is drawn by the OS, so
+it ignored our tokens, our dark mode and our type scale, and could not show a second line,
+a status dot or an icon. Three call sites had started fighting the primitive's fixed size
+with `!important`.
+
+Replaced with a real listbox plus a `Menu` primitive for action menus. Two load-bearing
+details:
+
+- **Portal + `position: fixed`.** Tables live inside `overflow-x-auto`, which clips an
+  absolutely positioned child. Fixed-and-portaled is the only thing that reliably escapes
+  an ancestor's overflow. Coordinates are recomputed on scroll/resize (capture phase, so
+  scrolling an ancestor tracks too) and flip above the trigger when space below is tight.
+- **Width is a `fullWidth` prop, not a class.** `cn` is plain clsx with no tailwind-merge,
+  so emitting `w-full` in the component and `w-40` at the call site puts both in the
+  stylesheet and lets source order decide. That exact conflict is the documented reason
+  `data-table.tsx` had bailed out to a raw `<select>` (gotcha 4, session 2).
+
+Full WAI-ARIA listbox keyboard contract, type-ahead, optional search (auto-on past 10
+options), groups, descriptions, dots, and a hidden input so it still posts inside a plain
+form (`request-demo` relies on this).
+
+**Rolled out to all 33 call sites** — every `Select` usage, all 7 raw `<select>` elements,
+the DataTable export menu, the engagement export menu, and new account menus in both shells.
+
+> `openPanel` explicitly calls `triggerRef.current?.focus()`. Clicking a `<button>` does
+> not focus it in every browser (Safari, and any programmatic click), and the keyboard
+> handler hangs off the trigger — without it, open-with-mouse-then-arrow did nothing.
+> Caught by the interaction suite, not by reading the code.
+
+## Things that looked done but were not connected
+
+| Surface | Was | Now |
+|---|---|---|
+| `/import` | Hardcoded `PREVIEW_ROWS` constant, no file parsing, ended in a toast saying *"Import not connected"* — while `routers/imports.py` had preview **and** commit for both clients and users | Real upload to server-side preview to commit, for **both** clients and users. Invalid rows are excluded from the commit and shown with their reasons. Bulk user import shows each temporary password once. |
+| `/users` | Full CRUD UI backed only by `useState`; toasts claimed *"their account and access have been revoked"* when nothing happened | Wired to `POST/PATCH/DELETE /users` plus `resend-credentials`. Delete copy now matches what the server does (staff deactivated, portal logins deleted). |
+| `/services` | Read-only demo catalogue, no add/edit/delete at all | Full CRUD. The `due_rule` JSON grammar is exposed as a two-option form rather than raw JSON, and rendered back through `describeDueRule`. |
+| `/clients` | Demo data even with the API up | Live via `toClientRow`. Bulk-add grid actually POSTs. |
+| Client export | Columns had no `exportValue`, so it fell back to sort keys — "Year-end" exported `1231`, "Open work" exported `3002` | Real values in CSV **and** xlsx. |
+| Add client | `catch {}` swallowed every failure and still showed a green success toast; `plan` and `ownerId` were collected but never sent | Only an unreachable API (`ApiError.status === 0`) falls back to demo; a real rejection is surfaced. Plan posts as `tags`, owner as `owner_id`. |
+| Portal topbar | Demo deadlines as "notifications", no polling, no blink, `DEMO_ACCOUNT`'s name for every real client, sign-out was a `<Link href="/login">` the proxy bounced straight back | Real `/notifications` feed, blinking bell matching the firm shell, real identity, real sign-out. |
+
+## Reminders now actually fire — `backend/app/services/scheduler.py` (new)
+
+Generation was endpoint-driven only, and **nothing called the endpoint**. A "10 days left"
+reminder existed only if a human happened to open the page and press *Check now*.
+
+Added an in-process daily sweep on the FastAPI lifespan. Safe because `persist()` inserts
+`ON CONFLICT DO NOTHING` against `reminders_dedupe_unique` and returns only new rows, so a
+duplicate run creates nothing and emails no one. Every failure is logged and swallowed —
+**verified**: with a dead database the startup sweep failed and the API stayed up.
+
+The next-run time is computed against a wall clock, not a fixed 24h sleep, so a restart at
+09:05 does not permanently move the daily sweep to 09:05. Six tests pin that down.
+
+Config: `REMINDER_SCHEDULER_ENABLED`, `REMINDER_SWEEP_HOUR` (UTC), `REMINDER_SWEEP_ON_START`.
+
+## Email
+
+- **Client welcome** now carries the services the client is signed up for and their next
+  four deadlines, read at send time from the same tables the portal renders, plus the
+  assigned accountant as a named contact. Empty sections are omitted entirely.
+- **Staff credentials** finally get a magic link. `staff_welcome_html` always accepted one;
+  `accounts._send_welcome` just never passed it, so an accountant had to type a 16-character
+  password by hand while clients got one-click access.
+- `/portal-login` honours `?next=`, so staff links land on `/overview` and client links on
+  `/dashboard`. Only same-origin relative paths are accepted — an open redirect handed out
+  by email is the worst kind.
+- `ForcePasswordModal` is now mounted in the **firm** shell too. It was portal-only, so a
+  new accountant was never asked to replace the temp password an admin generated.
+
+## Security / correctness fixes
+
+- `GET/POST /notifications*` now accept portal logins (they need their own feed) but a
+  null `profile_id` — a firm-wide broadcast — stays with staff. Single-row read/delete got
+  the same scoping; without it one account could act on another's row by id.
+- `POST /reminders/run` is now `AdminUserDep`. It emails every owner and admin of the firm,
+  so it should not be triggerable by any staff member who finds the button. The UI hides it
+  for non-admins rather than letting them click into a 403.
+- `POST /clients` from the bulk grid only sends `owner_id` when it is a real UUID (demo team
+  rows carry slugs, which would 422).
+- Added `GET /notifications/unread-count` — the bell polled `/auth/me`, which loads the
+  profile and tenant to return one number.
+- `/integrations` documented `GMAIL_USER` / `GMAIL_APP_PASSWORD`, which the backend has
+  never read. It uses Resend.
+- Import aliases now recognise "Primary Contact Email/Phone" — the headers the app's **own**
+  downloadable template uses did not round-trip. Caught by a new test.
+
+## Tests: 62 to 114
+
+New: `test_imports.py` (importer parsing had **zero** coverage), `test_scheduler.py`,
+`test_email.py`. Still pure-logic — there is no DB fixture, so endpoints remain untested.
+
+Two new headless-Chrome suites under `frontend/scripts/`, driven over CDP directly (no
+Puppeteer dependency — Node 22 has a global `WebSocket`):
+
+- `cdp-check.mjs` — 42 routes, asserting status and zero console errors.
+- `cdp-interact.mjs` — 31 assertions on the parts you have to *use*: the listbox opens,
+  keyboards correctly, exposes the right ARIA, escapes an overflow-clipped table, commits
+  on Enter, does not commit on Escape; menus portal; the bell blinks; the importer no
+  longer shows its fake preview.
+
+## Verified state (session 3)
+
+- Backend: `pytest tests/` — **114 passed**. `compileall app` clean. `app.openapi()` — 102 paths.
+- Frontend: `tsc --noEmit`, `eslint .`, `next build` — all clean.
+- `node scripts/cdp-check.mjs` — **42/42 routes clean**, no console errors.
+- `node scripts/cdp-interact.mjs` — **31/31 checks passed**.
+- Live servers: API on :8111 (DB deliberately unreachable) reported `degraded` and stayed
+  up through a failed scheduled sweep; every new endpoint returns 401 unauthenticated
+  rather than 404, confirming registration and the auth gate.
+- A messy 11-column **XLSX** was parsed end-to-end through `_read_table`, `detect_mapping`
+  and `parse_row`: all headers mapped, good rows parsed, bad rows flagged individually.
+
+## Still open
+
+1. **No endpoint/integration tests.** Everything is pure-logic; there is no DB fixture and
+   no `TestClient`. The wiring above is verified by browser and by hand, not by CI.
+2. **Nothing has been run against a real Supabase.** `backend/.env` points at a dead host on
+   purpose. Account creation, credential email delivery and the reminder digest have been
+   verified by rendering and by contract, **not** by delivering a real email to a real inbox.
+3. ~~`must_change_password` is still **advisory**~~ — enforced server-side in session 4.
+4. `kind="portal"` reminders are declared in the enum and never generated.
+5. `db/migrations/0007_reminders.sql` has not been applied to a real database.
+6. The client welcome email is still awaiting the reference screenshot; services and
+   upcoming deadlines were added per the brief, layout may need to change to match.
+
+---
+
+# Session 4 — deployment readiness (2026-08-15)
+
+Started from the four gates in *Verified state (session 3)*: all green on the current tree
+(114 backend tests, `tsc`/`eslint`/`next build` clean). So this pass went after what those
+gates cannot see — the things that only break once the app meets a real deployment.
+
+## Four defects that would have surfaced on the first real deploy
+
+### 1. Document storage could never have worked (the big one)
+
+`0003_functions.sql` creates the `documents` bucket with `public = false` and defines **no
+policies on `storage.objects`**. Supabase has RLS on that table by default, so deny-by-default
+applies: the browser-side flow in `lib/storage.ts` — `createSignedUploadUrl` then
+`uploadToSignedUrl` with the user's anon-role session — is denied every step. Upload was
+marked ✅ done in session 2 and had only ever run in demo mode, where it makes no calls at all.
+
+Fixed by moving signing to the backend (`app/services/storage.py`), which uses the
+service-role key and so bypasses storage RLS. The access decision therefore has to happen
+*before* signing, which is the right place anyway: `routers/client_documents.py` already knows
+the tenant/portal visibility rules. Bytes still go browser↔Supabase directly and never
+through the API.
+
+**This also closed a read-anything hole.** `storage_path` used to be chosen by the browser and
+accepted as given. Combined with service-role signing, a caller could have registered a row
+pointing at *any* object in the bucket and then read it back. Now the server mints every path
+under `{tenant_id}/{client_id}/` and `register_document` rejects anything outside the caller's
+own prefix. Both properties are pinned by tests, including traversal attempts (`../../etc/passwd`).
+
+Download is wired at the same time — `GET /client-portal/documents/{id}/download-url` returns a
+5-minute signed URL, minted per click, applying the same visibility rules as the list endpoint.
+It had been a toast reading *"will download once storage is connected"* since session 2.
+Deleting a document now removes the object too, instead of orphaning the bytes.
+
+### 2. CI would have failed on its first push
+
+The backend job's *Unit tests* step never set `DATABASE_URL`, while the *Import smoke test*
+step right above it did. `app/db.py` builds the engine at import time and raises without one,
+so every test errored at collection. It passed locally only because `backend/.env` exists on
+this machine and is gitignored — CI and any fresh clone have no such file.
+
+Fixed at the root in `backend/tests/conftest.py` rather than by patching the workflow, so a
+fresh clone works too. Verified by running the suite from an empty directory with no `.env`.
+
+### 3. Every dropdown in the app was keyboard-dead
+
+Opening a listbox with the mouse left focus wherever it already was — on `/clients/new`, on the
+autofocused first field; elsewhere, on `<body>`. Keyboard handling hangs off the trigger, so
+every subsequent arrow key went somewhere else and nothing moved. `openPanel` did call
+`triggerRef.current?.focus()`, but that runs *before* React commits `setOpen(true)` and the
+commit put focus back. Moved into an effect, which runs after the commit and wins.
+
+The interaction suite had been catching this all along — it was reporting 26/31, not the
+documented 31/31. **Now 31/31.** (Four of those five failures were one cascade: a panel left
+open by the dead keyboard path swallowed the click the bell assertion needed.)
+
+> Debugging note, because it cost real time: `next start` failed to bind with `EADDRINUSE` and
+> the *previous* server kept serving an older build, so a fix that worked read as a fix that
+> did nothing. If a verified change appears to have no effect, check the port before doubting
+> the change.
+
+### 4. The runbook would have produced a half-working deployment
+
+`DEPLOYMENT.md`'s Render step listed the env vars to set and omitted
+`SUPABASE_SERVICE_ROLE_KEY`. Following it literally yields a service that boots, passes
+`/health`, and cannot create a single login or serve a single document — every one of those
+routes returns 424. Added, with the consequence spelled out.
+
+Also corrected there: Supabase is marked ⚠️ rather than ✅, because **migrations `0005`–`0007`
+were never applied**. `0005` is not optional — it adds `profiles.must_change_password` and the
+`clients.portal_invited_*` columns that `models.py` already selects, so *every* request that
+loads a profile fails until it is run. All four are `if not exists`-guarded and safe to re-run.
+
+## Security hardening
+
+- **`must_change_password` is now enforced**, not merely prompted. It was advisory: the modal
+  was dismissible and nothing on the server cared, so anyone holding an admin-generated
+  temporary password — emailed in plaintext, often read aloud — had the full API. Enforced in
+  `deps.get_firm_linked_user`, the choke point every data dependency is built on, so no router
+  had to change (same shape as session 2's portal/staff fix). Returns **428** so the client can
+  tell it apart from a role failure; `/auth/*` uses `CurrentUserDep` and stays reachable, which
+  is what lets the user actually escape the state. The modal is now non-dismissible when the
+  server is the one asking.
+- **CORS no longer trusts all of `vercel.app`.** A standing `https://.*\.vercel\.app` regex
+  meant *anyone's* Vercel project was an allowed origin. Replaced with an opt-in
+  `CORS_ORIGIN_REGEX` that should be scoped to this project's own preview hostnames.
+- **Startup now warns** about a production deploy with wildcard CORS, a missing service-role
+  key, a missing Resend key, or a `PUBLIC_APP_URL` still on localhost. Warnings, not failures —
+  a deploy that refuses to boot over CORS would be worse than one that works and says so.
+- Plaintext credentials scrubbed from `speednum_chatgpt_research.md` (still in git history —
+  see *Open items*).
+- `/onboarding` removed from `proxy.ts`'s guarded list: it has no page, so the guard sent a
+  signed-out visitor through login only to land them on a 404.
+
+## Tests: 114 → 144
+
+- `test_storage.py` (22) — path minting, prefix confinement, traversal, signed-URL parsing.
+- `test_deps.py` (8) — the temporary-password gate and the portal/staff split, which had no
+  direct coverage despite being the load-bearing access-control code.
+- `conftest.py` — the CI fix above.
+
+## Verified state (session 4)
+
+- Backend: `pytest tests/` — **144 passed**; also passes from an empty cwd with no `.env`
+  (the CI condition). `compileall app` clean. `app.openapi()` — 105 paths.
+- Frontend: `tsc --noEmit`, `eslint .`, `next build` (122 pages) — all clean.
+- `node scripts/cdp-check.mjs` — **42/42 routes**, no console errors.
+- `node scripts/cdp-interact.mjs` — **31/31**, run three times, against a confirmed-fresh build.
+
+## What is still open
+
+1. **Nothing has run against a real Supabase.** Unchanged, and still the top item — every fix
+   above is verified by test and by browser, not against the live project.
+2. **Apply migrations `0005`–`0007`** before or with the backend deploy (see DEPLOYMENT.md §2).
+3. **No endpoint/integration tests** — still no DB fixture or `TestClient`.
+4. The document *upload* path is now correct by construction but has never moved a real byte
+   into a real bucket; that is the first thing to exercise once Supabase is live.
+5. Items 4–6 from session 3 (portal reminders, welcome-email layout) are unchanged.
+6. Legal copy is still unreviewed template wording.

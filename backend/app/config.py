@@ -30,10 +30,32 @@ class Settings(BaseSettings):
     # --- Web ------------------------------------------------------------------
     public_app_url: str = Field(default="http://localhost:3000", alias="PUBLIC_APP_URL")
     cors_origins: str = Field(default="*", alias="CORS_ORIGINS")
+    # Optional extra allowance for origins that cannot be listed literally —
+    # in practice Vercel preview deployments, whose hostname carries a build
+    # hash. Empty by default: this used to be a hardcoded `https://.*\.vercel\.app`,
+    # which allowed *anyone's* Vercel project to call the API, not just ours.
+    # Set it to your own project's pattern, e.g.
+    #   CORS_ORIGIN_REGEX=https://speed-num[a-z0-9-]*\.vercel\.app
+    cors_origin_regex: str = Field(default="", alias="CORS_ORIGIN_REGEX")
 
     # --- Email (optional; falls back to logging the message) -------------------
     resend_api_key: str = Field(default="", alias="RESEND_API_KEY")
     email_from: str = Field(default="SpeedNum <onboarding@resend.dev>", alias="EMAIL_FROM")
+
+    # --- Reminder scheduler ----------------------------------------------------
+    # An in-process daily sweep (services/scheduler.py). Turn it off if you drive
+    # POST /admin/reminders/sweep from an external cron, or if you run more than
+    # one API replica and only want one of them sweeping.
+    reminder_scheduler_enabled: bool = Field(default=True, alias="REMINDER_SCHEDULER_ENABLED")
+    # Hour of day, UTC. Early morning means the digest is waiting when the firm
+    # opens rather than landing mid-afternoon.
+    reminder_sweep_hour: int = Field(default=6, ge=0, le=23, alias="REMINDER_SWEEP_HOUR")
+    # Sweep once shortly after boot as well. Useful on a fresh deploy so the
+    # board is populated without waiting for tomorrow.
+    reminder_sweep_on_start: bool = Field(default=True, alias="REMINDER_SWEEP_ON_START")
+    reminder_sweep_delay_seconds: int = Field(
+        default=30, ge=0, alias="REMINDER_SWEEP_DELAY_SECONDS"
+    )
 
     @field_validator("database_url")
     @classmethod
@@ -52,6 +74,14 @@ class Settings(BaseSettings):
         if not raw or raw == "*":
             return ["*"]
         return [origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()]
+
+    @property
+    def cors_is_wildcard(self) -> bool:
+        return "*" in self.cors_origin_list
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.strip().lower() in {"production", "prod"}
 
     @property
     def jwks_url(self) -> str:

@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from ..deps import SessionDep, SuperadminDep
 from ..models import Client, Deadline, EngagementLetter, Profile, Tenant
 from ..utils import ensure_found
+from .reminders import sweep_tenant
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -67,6 +68,30 @@ async def update_tenant(
         setattr(tenant, key, value)
     await session.flush()
     return {"id": str(tenant.id), "plan": tenant.plan, "seats": tenant.seats, "is_active": tenant.is_active}
+
+
+@router.post("/reminders/sweep")
+async def sweep_all_reminders(
+    session: SessionDep, user: SuperadminDep, send_emails: bool = True
+) -> dict[str, Any]:
+    """Run the reminder sweep for every active firm.
+
+    This is the endpoint a scheduler (Render cron, Supabase scheduled function)
+    should hit once a day with a superadmin token — POST /reminders/run only
+    covers the caller's own firm. Both are idempotent, so an overlapping manual
+    run does no harm.
+    """
+    tenants = (
+        await session.scalars(select(Tenant).where(Tenant.is_active.is_(True)))
+    ).all()
+
+    totals = {"tenants": 0, "created": 0, "skipped": 0, "emailed": 0, "scanned": 0}
+    for tenant in tenants:
+        result = await sweep_tenant(session, tenant, send_emails=send_emails)
+        totals["tenants"] += 1
+        for key, value in result.as_dict().items():
+            totals[key] += value
+    return totals
 
 
 @router.get("/stats")

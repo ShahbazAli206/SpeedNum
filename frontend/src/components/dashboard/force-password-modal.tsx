@@ -1,7 +1,7 @@
 "use client";
 
 import { ShieldCheck } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { useToast } from "@/components/toast";
@@ -24,11 +24,16 @@ import type { Me } from "@/lib/types";
  */
 export function ForcePasswordModal() {
   const toast = useToast();
+  const router = useRouter();
   const searchParams = useSearchParams();
   // ?first_login=1 is known at mount time — fold it into the initial state
   // instead of a synchronous setState inside the effect below, which only
   // needs to handle the async GET /auth/me round trip.
   const [open, setOpen] = useState(() => searchParams.get("first_login") === "1");
+  // Set only by the server's answer. While true the API refuses every data
+  // endpoint with 428, so letting the dialog be dismissed would strand the user
+  // on a page of errors with no way to reopen it.
+  const [forced, setForced] = useState(false);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +45,9 @@ export function ForcePasswordModal() {
     let cancelled = false;
     get<Me>("/auth/me")
       .then((me) => {
-        if (!cancelled && me.profile.must_change_password) setOpen(true);
+        if (cancelled || !me.profile.must_change_password) return;
+        setOpen(true);
+        setForced(true);
       })
       .catch(() => {
         // Not signed in, or the API isn't reachable yet — nothing to force.
@@ -75,8 +82,13 @@ export function ForcePasswordModal() {
       }
       toast.success("Password updated", "Use your new password the next time you sign in.");
       setOpen(false);
+      setForced(false);
       setPassword("");
       setConfirm("");
+      // Anything rendered while the account was still blocked came back 428.
+      // Re-fetch now that the API will answer, rather than leaving the user on
+      // a page of empty states until they navigate.
+      if (forced) router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not update your password.");
     } finally {
@@ -88,8 +100,13 @@ export function ForcePasswordModal() {
     <Modal
       open={open}
       onClose={() => setOpen(false)}
+      dismissible={!forced}
       title="Set a new password"
-      description="For your security, please replace the temporary password from your welcome email before continuing."
+      description={
+        forced
+          ? "Your account is using a temporary password. Replace it to continue — the rest of the app stays locked until you do."
+          : "For your security, please replace the temporary password from your welcome email before continuing."
+      }
       footer={
         <Button className="w-full" icon={<ShieldCheck className="size-4" />} loading={saving} onClick={submit}>
           Update password

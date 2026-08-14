@@ -20,6 +20,17 @@ export class ApiError extends Error {
   get needsFirm() {
     return this.status === 409 && /firm/i.test(this.message);
   }
+
+  /**
+   * The account is still on the temporary password an admin generated, and the
+   * API refuses everything but `/auth/*` until it is replaced
+   * (backend/app/deps.py::get_firm_linked_user). ForcePasswordModal handles it;
+   * pages should treat it as "not an error worth showing" rather than surfacing
+   * a failure the user cannot act on from where they are.
+   */
+  get needsPasswordChange() {
+    return this.status === 428;
+  }
 }
 
 export interface RequestOptions extends Omit<RequestInit, "body"> {

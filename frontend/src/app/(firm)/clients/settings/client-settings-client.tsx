@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { useToast } from "@/components/toast";
-import { Button, Checkbox, Field, Input, Select } from "@/components/ui";
+import { Button, Checkbox, Field, Input, Select, toOptions } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import type { CustomField } from "@/lib/firm-demo";
 
@@ -126,14 +126,9 @@ export function ClientSettingsClient({ initialFields }: { initialFields: CustomF
             <Field label="Field type">
               <Select
                 value={fieldType}
-                onChange={(event) => setFieldType(event.target.value as FieldTypeLabel)}
-              >
-                {FIELD_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </Select>
+                onValueChange={(next) => setFieldType(next as FieldTypeLabel)}
+                options={toOptions(FIELD_TYPES)}
+              />
             </Field>
 
             <Checkbox

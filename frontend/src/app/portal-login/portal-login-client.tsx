@@ -12,19 +12,39 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 type Status = "working" | "success" | "error";
 
 /**
- * The link behind "Sign in to your dashboard" in the portal welcome email.
+ * The link behind "Sign in to your dashboard" in the welcome emails.
  * No login form is ever shown here — it exchanges the token embedded in the
- * URL for a real session (supabase.auth.verifyOtp), then hands off to
- * /dashboard. `first_login=1` tells the dashboard shell to show the "set a
- * new password" prompt without waiting on a round trip to the API.
+ * URL for a real session (supabase.auth.verifyOtp), then hands off.
+ * `first_login=1` tells the shell to show the "set a new password" prompt
+ * without waiting on a round trip to the API.
+ *
+ * `?next=` decides where. Client-portal welcome emails send `/dashboard`;
+ * staff credential emails send `/overview` (see accounts.staff_login_url), so
+ * a new accountant clicking their link lands in the practice app rather than
+ * in a client portal they have no business seeing. Only same-origin paths are
+ * honoured — see `safeNext`.
  */
 const MISSING_TOKEN_MESSAGE =
   "This sign-in link is missing its token. Ask your accountant to resend the welcome email.";
+
+const DEFAULT_NEXT = "/dashboard";
+
+/**
+ * An open redirect here would be handed to users by email, which is exactly
+ * where it does the most damage. Only a single-slash-prefixed relative path is
+ * accepted: "//evil.com" and "https://evil.com" are both rejected.
+ */
+function safeNext(raw: string | null): string {
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return DEFAULT_NEXT;
+  return raw;
+}
 
 export function PortalLoginClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tokenHash = searchParams.get("token_hash");
+  const next = safeNext(searchParams.get("next"));
+  const destination = `${next}${next.includes("?") ? "&" : "?"}first_login=1`;
 
   // Demo mode (no Supabase configured) or a missing token are both known at
   // mount time — fold them into the initial state instead of a synchronous
@@ -39,7 +59,7 @@ export function PortalLoginClient() {
     // Demo mode: no Supabase project configured, so there is no real session
     // to establish — go straight to the dashboard, same as the login form.
     if (!SUPABASE_CONFIGURED) {
-      const timeout = setTimeout(() => router.replace("/dashboard?first_login=1"), 500);
+      const timeout = setTimeout(() => router.replace(destination), 500);
       return () => clearTimeout(timeout);
     }
     if (!tokenHash) return;
@@ -55,7 +75,7 @@ export function PortalLoginClient() {
           return;
         }
         setStatus("success");
-        router.replace("/dashboard?first_login=1");
+        router.replace(destination);
         router.refresh();
       });
 

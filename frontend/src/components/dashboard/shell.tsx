@@ -2,6 +2,8 @@
 
 import { Suspense, useEffect, useState, type ReactNode } from "react";
 
+import { SessionProvider } from "@/lib/session";
+
 import { CommandPalette } from "./command-palette";
 import { ForcePasswordModal } from "./force-password-modal";
 import { Sidebar } from "./sidebar";
@@ -14,8 +16,21 @@ const COLLAPSE_KEY = "speednum-sidebar-collapsed";
  *
  * State lives here rather than in the layout so the layout itself can stay a
  * server component.
+ *
+ * Wrapped in SessionProvider for the same reason the firm shell is: the bell
+ * badge, the sidebar identity and the account menu all need the signed-in
+ * profile, and one polled `/auth/me` keeps them from disagreeing. Before this,
+ * the portal rendered DEMO_ACCOUNT's name to every real client.
  */
 export function DashboardShell({ children }: { children: ReactNode }) {
+  return (
+    <SessionProvider>
+      <DashboardShellInner>{children}</DashboardShellInner>
+    </SessionProvider>
+  );
+}
+
+function DashboardShellInner({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);

@@ -9,23 +9,62 @@ metadata row, same division of labour as most Supabase-backed apps.
 
 from __future__ import annotations
 
+import re
 import uuid
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 
 from ..deps import BookScopeDep, ClientScopeDep, SessionDep
 from ..models import Document, Profile
-from ..schemas import ClientDocumentCreate, ClientDocumentRead, DocumentTotals, Ok
+from ..schemas import (
+    ClientDocumentCreate,
+    ClientDocumentRead,
+    DocumentDownloadUrl,
+    DocumentTotals,
+    DocumentUploadUrl,
+    DocumentUploadUrlRequest,
+    Ok,
+)
+from ..services import storage
 from ..utils import ensure_client_in_tenant, ensure_found
 
 router = APIRouter(prefix="/client-portal/documents", tags=["client-portal"])
+
+_UNSAFE_NAME = re.compile(r"[^\w.\-]+")
 
 
 def _visible_to_portal(stmt, uploaded_by: uuid.UUID):
     """A portal user sees what the firm shared, plus whatever it uploaded itself
     — hiding a client's own upload from that same client would make no sense."""
     return stmt.where((Document.is_client_visible.is_(True)) | (Document.uploaded_by == uploaded_by))
+
+
+def _prefix_for(tenant_id: uuid.UUID, client_id: uuid.UUID) -> str:
+    """Every object lives under `{tenant}/{client}/`, which is what makes a
+    storage path checkable rather than merely opaque — see _mint_path."""
+    return f"{tenant_id}/{client_id}/"
+
+
+def _mint_path(tenant_id: uuid.UUID, client_id: uuid.UUID, name: str) -> str:
+    """The server names the object; the browser never gets to.
+
+    Signing happens with the service-role key (see services/storage.py), which
+    bypasses storage RLS — so a caller-chosen path would be a read-anything
+    primitive: register a row whose `storage_path` points at another client's
+    object, then ask for a download URL for your own row. Minting here, plus the
+    prefix check in `register_document`, keeps a document inside the book it
+    belongs to.
+    """
+    safe = _UNSAFE_NAME.sub("_", name).strip("._") or "file"
+    return f"{_prefix_for(tenant_id, client_id)}{uuid.uuid4()}-{safe[:120]}"
+
+
+def _storage_unavailable(exc: storage.StorageError) -> HTTPException:
+    """424, matching how an unconfigured service-role key is reported when
+    provisioning logins (services/accounts.py) — the request was fine, a
+    dependency this deployment needs is missing."""
+    return HTTPException(status.HTTP_424_FAILED_DEPENDENCY, str(exc))
 
 
 @router.get("", response_model=list[ClientDocumentRead])
@@ -79,11 +118,75 @@ async def document_totals(session: SessionDep, scope: BookScopeDep) -> DocumentT
     )
 
 
+@router.post("/upload-url", response_model=DocumentUploadUrl)
+async def create_upload_url(
+    payload: DocumentUploadUrlRequest, session: SessionDep, scope: ClientScopeDep
+) -> DocumentUploadUrl:
+    """Step 1 of an upload: hand the browser a signed slot to PUT the bytes into.
+
+    Step 2 is POST "" with the returned `storage_path`, once the bytes are in.
+    Splitting it this way keeps the file itself off this API — the browser talks
+    to Supabase Storage directly — while still letting us decide *here* whether
+    this caller may write into this client's book at all.
+    """
+    await ensure_client_in_tenant(session, scope.tenant_id, scope.client_id)
+    assert scope.client_id is not None  # ClientScopeDep guarantees it
+
+    path = _mint_path(scope.tenant_id, scope.client_id, payload.name)
+    try:
+        url, token = await storage.create_upload_url(path)
+    except storage.StorageError as exc:
+        raise _storage_unavailable(exc) from exc
+
+    return DocumentUploadUrl(storage_path=path, token=token, url=url)
+
+
+@router.get("/{document_id}/download-url", response_model=DocumentDownloadUrl)
+async def create_download_url(
+    document_id: uuid.UUID, session: SessionDep, scope: BookScopeDep
+) -> DocumentDownloadUrl:
+    """A short-lived signed URL for a document the caller is allowed to see.
+
+    The visibility rules are the same ones `list_documents` applies — a portal
+    account cannot sign a URL for a firm-internal file it was never shown.
+    Deliberately not derived from the row alone: signing uses the service-role
+    key, so the row has to be re-fetched *through* the caller's scope rather
+    than looked up by id.
+    """
+    stmt = select(Document).where(
+        Document.id == document_id, Document.tenant_id == scope.tenant_id
+    )
+    if scope.client_id:
+        stmt = stmt.where(Document.client_id == scope.client_id)
+    if scope.is_portal:
+        stmt = _visible_to_portal(stmt, scope.user.profile.id)
+
+    row = await session.scalar(stmt)
+    ensure_found(row, "Document")
+
+    try:
+        url = await storage.create_download_url(row.storage_path)
+    except storage.StorageError as exc:
+        raise _storage_unavailable(exc) from exc
+
+    return DocumentDownloadUrl(url=url, expires_in=storage.DOWNLOAD_TTL_SECONDS)
+
+
 @router.post("", response_model=ClientDocumentRead, status_code=status.HTTP_201_CREATED)
 async def register_document(
     payload: ClientDocumentCreate, session: SessionDep, scope: ClientScopeDep
 ) -> ClientDocumentRead:
     await ensure_client_in_tenant(session, scope.tenant_id, scope.client_id)
+    assert scope.client_id is not None  # ClientScopeDep guarantees it
+
+    # The path must be one we minted for this very book. Without this a caller
+    # could register a row pointing at any object in the bucket and then read it
+    # back through /download-url, since signing bypasses storage RLS.
+    if not payload.storage_path.startswith(_prefix_for(scope.tenant_id, scope.client_id)):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "storage_path must come from POST /client-portal/documents/upload-url.",
+        )
 
     data = payload.model_dump()
     # A portal user uploading its own file always sees it — see _visible_to_portal.
@@ -123,5 +226,15 @@ async def delete_document(document_id: uuid.UUID, session: SessionDep, scope: Bo
         stmt = stmt.where(Document.uploaded_by == scope.user.profile.id)
     row = await session.scalar(stmt)
     ensure_found(row, "Document")
+
+    name, path = row.name, row.storage_path
     await session.delete(row)
-    return Ok(message=f"{row.name} removed")
+    await session.flush()
+
+    # Best-effort, and after the row is gone: leaving bytes behind is a storage
+    # bill, whereas refusing the delete because storage is unreachable leaves a
+    # row the user cannot clear. If the outer commit were to fail after this,
+    # the row survives without its object — /download-url reports that cleanly
+    # rather than handing out a URL that 404s.
+    await storage.delete_object(path)
+    return Ok(message=f"{name} removed")

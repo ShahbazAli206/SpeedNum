@@ -4,7 +4,7 @@ import { ArrowRight, CircleCheck } from "lucide-react";
 import { useState } from "react";
 
 import { useToast } from "@/components/toast";
-import { Button, Field, Input, Select, Textarea } from "@/components/ui";
+import { Button, Field, Input, Select, Textarea, toOptions } from "@/components/ui";
 import { ApiError, publicPost } from "@/lib/api";
 
 const TEAM_SIZES = [
@@ -33,6 +33,10 @@ export function DemoForm() {
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
+  // The listbox isn't a native control, so it can't be read by FormData on its
+  // own — it emits a hidden input under this name. The state is what the
+  // trigger renders; `data.get("teamSize")` below still does the reading.
+  const [teamSize, setTeamSize] = useState("");
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -115,16 +119,13 @@ export function DemoForm() {
       </div>
 
       <Field label="Team size" className="mt-4">
-        <Select name="teamSize" defaultValue="">
-          <option value="" disabled>
-            Select team size
-          </option>
-          {TEAM_SIZES.map((size) => (
-            <option key={size} value={size}>
-              {size}
-            </option>
-          ))}
-        </Select>
+        <Select
+          name="teamSize"
+          value={teamSize}
+          onValueChange={setTeamSize}
+          placeholder="Select team size"
+          options={toOptions(TEAM_SIZES)}
+        />
       </Field>
 
       <Field label="What would you like to improve?" className="mt-4">

@@ -698,24 +698,25 @@ export function ClientDetailClient({
         }
       >
         <Field label="Service">
-          <Select value={selectedServiceId} onChange={(event) => handleServiceSelect(event.target.value)}>
-            <option value="">Select a service…</option>
-            {availableCatalogue.map((service) => (
-              <option key={service.id} value={service.id}>
-                {service.name} — {titleCase(service.frequency)} · {formatMoney(service.default_price)}
-              </option>
-            ))}
-          </Select>
+          <Select
+            value={selectedServiceId}
+            onValueChange={handleServiceSelect}
+            placeholder="Select a service…"
+            searchPlaceholder="Search the catalogue…"
+            options={availableCatalogue.map((service) => ({
+              value: service.id,
+              label: service.name,
+              description: `${titleCase(service.frequency)} · ${formatMoney(service.default_price)}`,
+            }))}
+          />
         </Field>
         <div className="mt-4 grid grid-cols-3 gap-3">
           <Field label="Cadence">
-            <Select value={cadence} onChange={(event) => setCadence(event.target.value as Frequency)}>
-              {FREQUENCY_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
+            <Select
+              value={cadence}
+              onValueChange={(next) => setCadence(next as Frequency)}
+              options={FREQUENCY_OPTIONS}
+            />
           </Field>
           <Field label="Price ($)">
             <Input type="number" min={0} step={10} value={price} onChange={(event) => setPrice(event.target.value)} />
@@ -753,32 +754,33 @@ export function ClientDetailClient({
         </Field>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <Field label="Assign to">
-            <Select value={taskAssigneeId} onChange={(event) => setTaskAssigneeId(event.target.value)}>
-              <option value="">Unassigned</option>
-              {team.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.full_name}
-                </option>
-              ))}
-            </Select>
+            <Select
+              value={taskAssigneeId}
+              onValueChange={setTaskAssigneeId}
+              placeholder="Unassigned"
+              options={[
+                { value: "", label: "Unassigned" },
+                ...team.map((member) => ({
+                  value: member.id,
+                  label: member.full_name,
+                  description: member.email,
+                })),
+              ]}
+            />
           </Field>
           <Field label="Priority">
-            <Select value={taskPriority} onChange={(event) => setTaskPriority(event.target.value as TaskPriority)}>
-              {PRIORITY_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
+            <Select
+              value={taskPriority}
+              onValueChange={(next) => setTaskPriority(next as TaskPriority)}
+              options={PRIORITY_OPTIONS}
+            />
           </Field>
           <Field label="Status">
-            <Select value={taskStatus} onChange={(event) => setTaskStatus(event.target.value as TaskStatus)}>
-              {STATUS_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
+            <Select
+              value={taskStatus}
+              onValueChange={(next) => setTaskStatus(next as TaskStatus)}
+              options={STATUS_OPTIONS}
+            />
           </Field>
           <Field label="Due date">
             <Input type="date" value={taskDueDate} onChange={(event) => setTaskDueDate(event.target.value)} />

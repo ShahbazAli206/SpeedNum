@@ -126,11 +126,32 @@ async def get_firm_linked_user(user: CurrentUserDep) -> CurrentUser:
     """Any authenticated user with a tenant — firm staff OR a client-portal
     account. This is the broad check; almost everything wants the stricter
     get_tenant_user below instead. It exists only for BookScope, which is the
-    one place both kinds of account are meant to land."""
+    one place both kinds of account are meant to land.
+
+    Also the choke point for the temporary-password rule, for the same reason
+    the portal/staff split lives here: every data-carrying dependency in this
+    module is built on top of it, so one check covers them all and no router
+    has to remember."""
     if user.tenant is None:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "No firm is linked to this account. Create one via POST /auth/bootstrap.",
+        )
+    if user.profile.must_change_password:
+        # An admin-generated temporary password is a shared secret: it was
+        # emailed in plaintext, and often read out or pasted into a chat. Until
+        # it is replaced the account can see nothing. The frontend forces the
+        # prompt, but a forced prompt in a browser is not a control — anyone
+        # holding the temp password can call this API directly.
+        #
+        # 428 rather than 403 so the client can tell "finish setting up" apart
+        # from "you lack the role" without matching on the message. The
+        # /auth/* endpoints take CurrentUserDep, so /auth/me and
+        # /auth/complete-password-change stay reachable and the user can
+        # actually get out of this state.
+        raise HTTPException(
+            status.HTTP_428_PRECONDITION_REQUIRED,
+            "Set a new password before continuing.",
         )
     return user
 

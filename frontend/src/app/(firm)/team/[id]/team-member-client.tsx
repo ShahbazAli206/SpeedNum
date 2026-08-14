@@ -18,6 +18,7 @@ import { useMemo, useState } from "react";
 
 import { useToast } from "@/components/toast";
 import { Button, Modal, Select, Textarea } from "@/components/ui";
+import { ApiError, patch } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { daysFromToday, TODAY } from "@/lib/firm-demo";
 import type { ClientRow, Task, TeamNote, TeamRow, TeamStatus } from "@/lib/firm-demo";
@@ -73,16 +74,20 @@ export function TeamMemberClient({
   allClients,
   allTasks,
   initialNotes,
+  isLive = false,
 }: {
   member: TeamRow;
   allClients: ClientRow[];
   allTasks: Task[];
   initialNotes: TeamNote[];
+  /** When true, edits and assignments are persisted through the API. */
+  isLive?: boolean;
 }) {
   const toast = useToast();
 
   const [profile, setProfile] = useState(member);
   const [editOpen, setEditOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<TabId>("overview");
 
   const [assignedClientIds, setAssignedClientIds] = useState(
@@ -129,6 +134,26 @@ export function TeamMemberClient({
     [allTasks, assignedTaskIds],
   );
 
+  /**
+   * Assignment is one field on the target row — `clients.owner_id` or
+   * `tasks.assignee_id` — so every action here is a PATCH on the client/task,
+   * not on the profile. Optimistic: the set is updated first and rolled back if
+   * the request fails, because these are cheap, reversible reassignments made in
+   * batches while looking at someone's workload.
+   */
+  const persist = async (path: string, body: unknown, undo: () => void, label: string) => {
+    if (!isLive) return;
+    try {
+      await patch(path, body);
+    } catch (error) {
+      undo();
+      toast.error(
+        `Could not ${label}`,
+        error instanceof ApiError ? error.message : "Please try again.",
+      );
+    }
+  };
+
   const unassignClient = (client: ClientRow) => {
     setAssignedClientIds((current) => {
       const next = new Set(current);
@@ -136,6 +161,12 @@ export function TeamMemberClient({
       return next;
     });
     toast.success(`${client.business_name} unassigned`, `No longer handled by ${profile.full_name}.`);
+    void persist(
+      `/clients/${client.id}`,
+      { owner_id: null },
+      () => setAssignedClientIds((current) => new Set(current).add(client.id)),
+      "unassign that client",
+    );
   };
 
   const assignClient = () => {
@@ -145,6 +176,17 @@ export function TeamMemberClient({
     toast.success(`${client.business_name} assigned`, `Now handled by ${profile.full_name}.`);
     setAssignClientOpen(false);
     setPickedClientId("");
+    void persist(
+      `/clients/${client.id}`,
+      { owner_id: member.id },
+      () =>
+        setAssignedClientIds((current) => {
+          const next = new Set(current);
+          next.delete(client.id);
+          return next;
+        }),
+      "assign that client",
+    );
   };
 
   const removeTask = (task: Task) => {
@@ -154,6 +196,12 @@ export function TeamMemberClient({
       return next;
     });
     toast.success(`"${task.title}" unassigned`, "Removed from this member's task list.");
+    void persist(
+      `/tasks/${task.id}`,
+      { assignee_id: null },
+      () => setAssignedTaskIds((current) => new Set(current).add(task.id)),
+      "unassign that task",
+    );
   };
 
   const assignTask = () => {
@@ -163,11 +211,29 @@ export function TeamMemberClient({
     toast.success(`"${task.title}" assigned`, `Now on ${profile.full_name}'s task list.`);
     setAssignTaskOpen(false);
     setPickedTaskId("");
+    void persist(
+      `/tasks/${task.id}`,
+      { assignee_id: member.id },
+      () =>
+        setAssignedTaskIds((current) => {
+          const next = new Set(current);
+          next.delete(task.id);
+          return next;
+        }),
+      "assign that task",
+    );
   };
 
   const changeTaskStatus = (task: Task, status: TaskStatus) => {
+    const previous = taskStatus[task.id] ?? task.status;
     setTaskStatus((current) => ({ ...current, [task.id]: status }));
     toast.success(`"${task.title}" updated`, `Status set to ${titleCase(status)}.`);
+    void persist(
+      `/tasks/${task.id}`,
+      { status },
+      () => setTaskStatus((current) => ({ ...current, [task.id]: previous })),
+      "update that task",
+    );
   };
 
   const addNote = () => {
@@ -181,7 +247,29 @@ export function TeamMemberClient({
     setNotes((current) => current.filter((note) => note.id !== id));
   };
 
-  const submitEdit = (values: AccountantFormValues) => {
+  const submitEdit = async (values: AccountantFormValues) => {
+    if (isLive) {
+      setSaving(true);
+      try {
+        await patch(`/team/${member.id}`, {
+          full_name: values.fullName,
+          title: values.title,
+          phone: values.phone || null,
+          role: values.role,
+          is_active: values.status !== "inactive",
+        });
+      } catch (error) {
+        toast.error(
+          "Could not save",
+          error instanceof ApiError ? error.message : "Please try again.",
+        );
+        setSaving(false);
+        return;
+      } finally {
+        setSaving(false);
+      }
+    }
+
     setProfile((current) => ({
       ...current,
       full_name: values.fullName,
@@ -190,6 +278,7 @@ export function TeamMemberClient({
       is_active: values.status !== "inactive",
       email: values.email || current.email,
       phone: values.phone || null,
+      role: values.role,
     }));
     toast.success(`${values.fullName} updated`, "Changes saved to their roster entry.");
     setEditOpen(false);
@@ -424,15 +513,13 @@ export function TeamMemberClient({
                         </span>
                         <Select
                           value={currentStatus}
-                          onChange={(event) => changeTaskStatus(task, event.target.value as TaskStatus)}
-                          className="!h-8 w-36 !py-1 text-[12.5px]"
-                        >
-                          {TASK_STATUSES.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </Select>
+                          onValueChange={(next) => changeTaskStatus(task, next as TaskStatus)}
+                          options={TASK_STATUSES}
+                          size="sm"
+                          variant="pill"
+                          className="w-36"
+                          aria-label={`Status for ${task.title}`}
+                        />
                         <button
                           type="button"
                           onClick={() => removeTask(task)}
@@ -505,14 +592,18 @@ export function TeamMemberClient({
       <AccountantModal
         open={editOpen}
         onClose={() => setEditOpen(false)}
+        pending={saving}
+        isLive={isLive}
         initial={{
           fullName: profile.full_name,
           title: profile.title,
           status: profile.status,
           email: profile.email,
           phone: profile.phone ?? "",
+          role: profile.role,
+          sendCredentials: false,
         }}
-        onSubmit={submitEdit}
+        onSubmit={(values) => void submitEdit(values)}
       />
 
       <Modal
@@ -531,14 +622,17 @@ export function TeamMemberClient({
           </>
         }
       >
-        <Select value={pickedClientId} onChange={(event) => setPickedClientId(event.target.value)}>
-          <option value="">Select a client…</option>
-          {availableClients.map((client) => (
-            <option key={client.id} value={client.id}>
-              {client.business_name}
-            </option>
-          ))}
-        </Select>
+        <Select
+          value={pickedClientId}
+          onValueChange={setPickedClientId}
+          placeholder="Select a client…"
+          searchPlaceholder="Search clients…"
+          aria-label="Client to assign"
+          options={availableClients.map((client) => ({
+            value: client.id,
+            label: client.business_name,
+          }))}
+        />
       </Modal>
 
       <Modal
@@ -557,14 +651,18 @@ export function TeamMemberClient({
           </>
         }
       >
-        <Select value={pickedTaskId} onChange={(event) => setPickedTaskId(event.target.value)}>
-          <option value="">Select a task…</option>
-          {availableTasks.map((task) => (
-            <option key={task.id} value={task.id}>
-              {task.title} · {task.client_name}
-            </option>
-          ))}
-        </Select>
+        <Select
+          value={pickedTaskId}
+          onValueChange={setPickedTaskId}
+          placeholder="Select a task…"
+          searchPlaceholder="Search tasks…"
+          aria-label="Task to assign"
+          options={availableTasks.map((task) => ({
+            value: task.id,
+            label: task.title,
+            description: task.client_name,
+          }))}
+        />
       </Modal>
     </>
   );

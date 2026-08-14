@@ -290,14 +290,17 @@ export function EngagementDetailClient({
                 </div>
                 <div className="p-5">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Select value={serviceToAdd} onChange={(event) => setServiceToAdd(event.target.value)} className="max-w-xs">
-                      <option value="">Add a service…</option>
-                      {services.map((service) => (
-                        <option key={service.id} value={service.id}>
-                          {service.name} — {formatMoney(service.default_price)}
-                        </option>
-                      ))}
-                    </Select>
+                    <Select
+                      value={serviceToAdd}
+                      onValueChange={setServiceToAdd}
+                      className="w-64"
+                      placeholder="Add a service…"
+                      options={services.map((service) => ({
+                        value: service.id,
+                        label: service.name,
+                        description: formatMoney(service.default_price),
+                      }))}
+                    />
                     <Button type="button" variant="secondary" size="sm" icon={<Plus className="size-3.5" />} onClick={addFromCatalogue} disabled={!serviceToAdd}>
                       Add
                     </Button>

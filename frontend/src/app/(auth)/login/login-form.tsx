@@ -6,13 +6,39 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { Alert, Button, Checkbox, Field, Input } from "@/components/ui";
+import { get } from "@/lib/api";
 import { SUPABASE_CONFIGURED, validateEmail, validatePassword } from "@/lib/auth";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import type { Me } from "@/lib/types";
+
+/** Where each kind of account lands. Mirrors src/proxy.ts. */
+const FIRM_HOME = "/overview";
+const PORTAL_HOME = "/dashboard";
+
+/**
+ * Resolve the signed-in account's home from the authoritative source.
+ *
+ * `profiles.client_id` decides which app someone belongs to, and only the API
+ * knows it — the JWT carries a routing hint but an account created before that
+ * hint existed (or via plain Supabase signup) has none. So ask, and fall back to
+ * the firm app: a member of staff sent to the portal sees another client's
+ * chrome and nothing of their own, whereas a portal user who briefly reaches a
+ * firm route is bounced straight back by the proxy. The safer wrong guess wins.
+ */
+async function resolveHome(): Promise<string> {
+  try {
+    const me = await get<Me>("/auth/me");
+    return me.profile.client_id ? PORTAL_HOME : FIRM_HOME;
+  } catch {
+    return FIRM_HOME;
+  }
+}
 
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get("next") ?? "/dashboard";
+  // A deep link captured by the proxy's redirect wins over the role default.
+  const requested = searchParams.get("next");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -34,9 +60,10 @@ export function LoginForm() {
 
     setPending(true);
 
-    // Demo mode: no Supabase project configured, so go straight to the portal.
+    // Demo mode: no Supabase project configured, so there is no role to read.
+    // The firm app is the fuller surface, so that is where a demo lands.
     if (!SUPABASE_CONFIGURED) {
-      router.push(next);
+      router.push(requested ?? FIRM_HOME);
       return;
     }
 
@@ -50,7 +77,7 @@ export function LoginForm() {
         setPending(false);
         return;
       }
-      router.push(next);
+      router.push(requested ?? (await resolveHome()));
       router.refresh();
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Could not sign in.");

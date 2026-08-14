@@ -11,16 +11,19 @@ import {
   Users,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { KpiTile } from "@/components/charts";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { DashboardHeader, KpiRow } from "@/components/dashboard/page-shell";
 import { useToast } from "@/components/toast";
-import { Button, ButtonLink, Modal } from "@/components/ui";
+import { Button, ButtonLink, Modal, Select, toOptions } from "@/components/ui";
+import { post } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import type { ClientRow } from "@/lib/firm-demo";
 import { formatDate, formatMoney } from "@/lib/format";
+import type { Client } from "@/lib/types";
 
 interface BulkRow {
   id: string;
@@ -65,12 +68,17 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 export function ClientsClient({
   clients,
   owners,
+  isLive,
 }: {
   clients: ClientRow[];
   owners: string[];
+  /** False when `/clients` was unreachable and these rows are sample data. */
+  isLive: boolean;
 }) {
   const toast = useToast();
+  const router = useRouter();
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkRows, setBulkRows] = useState<BulkRow[]>(() =>
     Array.from({ length: 5 }, blankBulkRow),
   );
@@ -101,6 +109,9 @@ export function ClientsClient({
         </Link>
       ),
       sortValue: (row) => row.business_name,
+      // Without exportValue the export falls back to the sort key, which for
+      // this column is fine but drops the client code — worth carrying.
+      exportValue: (row) => `${row.business_name}${row.code ? ` (${row.code})` : ""}`,
     },
     {
       key: "plan",
@@ -114,6 +125,8 @@ export function ClientsClient({
       align: "right",
       cell: (row) => (row.annual_fee > 0 ? formatMoney(row.monthly_fee) : "—"),
       sortValue: (row) => row.monthly_fee,
+      // A bare number so the spreadsheet can sum the column.
+      exportValue: (row) => row.monthly_fee,
     },
     {
       key: "owner",
@@ -126,6 +139,9 @@ export function ClientsClient({
       header: "Year-end",
       cell: (row) => `${MONTHS[row.year_end_month - 1]} ${row.year_end_day}`,
       sortValue: (row) => row.year_end_month * 100 + row.year_end_day,
+      // The sort key is a packed integer (1231). Exporting that would put
+      // "1231" in the spreadsheet instead of "Dec 31".
+      exportValue: (row) => `${MONTHS[row.year_end_month - 1]} ${row.year_end_day}`,
     },
     {
       key: "work",
@@ -143,14 +159,21 @@ export function ClientsClient({
           </span>
         </span>
       ),
+      // Same problem: the sort key packs two numbers into one.
       sortValue: (row) => row.overdue_deadlines * 1000 + row.open_tasks,
+      exportValue: (row) =>
+        row.overdue_deadlines > 0
+          ? `${row.open_tasks} open, ${row.overdue_deadlines} overdue`
+          : `${row.open_tasks} open`,
     },
     {
       key: "next",
       header: "Next due",
       align: "right",
       cell: (row) => (row.next_due_date ? formatDate(row.next_due_date) : "—"),
+      // "9999-99-99" is a sort sentinel, not a date anyone wants in a file.
       sortValue: (row) => row.next_due_date ?? "9999-99-99",
+      exportValue: (row) => row.next_due_date ?? "",
     },
     {
       key: "status",
@@ -188,12 +211,59 @@ export function ClientsClient({
     setBulkRows(Array.from({ length: 5 }, blankBulkRow));
   };
 
-  const createBulkClients = () => {
+  const createBulkClients = async () => {
     if (readyCount === 0) return;
-    toast.success(
-      `${readyCount} client${readyCount === 1 ? "" : "s"} created`,
-      "Added to the client book.",
-    );
+    const drafts = bulkRows.filter((row) => row.business.trim() !== "");
+
+    if (!isLive) {
+      toast.info(
+        `${readyCount} client${readyCount === 1 ? "" : "s"} staged (demo)`,
+        "No API is connected, so nothing was saved.",
+      );
+      setBulkOpen(false);
+      clearBulkRows();
+      return;
+    }
+
+    setBulkBusy(true);
+    // One POST per row rather than a batch endpoint: /clients has no bulk
+    // create, and a per-row loop lets a single duplicate fail on its own
+    // instead of rejecting the whole grid. The spreadsheet importer is the
+    // right tool past a handful of rows.
+    const failures: string[] = [];
+    let created = 0;
+    for (const row of drafts) {
+      try {
+        await post<Client>("/clients", {
+          legal_name: row.legalName.trim() || row.business.trim(),
+          business_name: row.business.trim(),
+          email: row.email.trim() || undefined,
+          phone: row.phone.trim() || undefined,
+          status: row.status,
+          tags: row.plan ? [row.plan] : [],
+        });
+        created += 1;
+      } catch (error) {
+        failures.push(
+          `${row.business.trim()}: ${error instanceof Error ? error.message : "failed"}`,
+        );
+      }
+    }
+    setBulkBusy(false);
+
+    if (created > 0) {
+      toast.success(
+        `${created} client${created === 1 ? "" : "s"} created`,
+        failures.length ? `${failures.length} row(s) failed.` : "Added to the client book.",
+      );
+      router.refresh();
+    }
+    if (failures.length > 0) {
+      toast.error("Some rows did not save", failures.slice(0, 3).join(" · "));
+      // Keep the failures on screen so they can be corrected and retried.
+      setBulkRows(drafts.filter((row) => failures.some((f) => f.startsWith(row.business.trim()))));
+      return;
+    }
     setBulkOpen(false);
     clearBulkRows();
   };
@@ -314,7 +384,8 @@ export function ClientsClient({
             <Button
               icon={<Plus className="size-4" />}
               disabled={readyCount === 0}
-              onClick={createBulkClients}
+              loading={bulkBusy}
+              onClick={() => void createBulkClients()}
             >
               Create {readyCount || ""} client{readyCount === 1 ? "" : "s"}
             </Button>
@@ -376,32 +447,25 @@ export function ClientsClient({
                     />
                   </td>
                   <td className="py-1 pr-2">
-                    <select
+                    <Select
                       value={row.plan}
-                      onChange={(event) => updateBulkRow(row.id, { plan: event.target.value })}
+                      onValueChange={(plan) => updateBulkRow(row.id, { plan })}
                       aria-label={`Plan, row ${index + 1}`}
-                      className={cn(BULK_CELL, "pr-6")}
-                    >
-                      {BULK_PLAN_OPTIONS.map((plan) => (
-                        <option key={plan} value={plan}>
-                          {plan}
-                        </option>
-                      ))}
-                    </select>
+                      options={toOptions(BULK_PLAN_OPTIONS)}
+                      size="sm"
+                      variant="pill"
+                    />
                   </td>
                   <td className="py-1 pr-2">
-                    <select
+                    <Select
                       value={row.status}
-                      onChange={(event) => updateBulkRow(row.id, { status: event.target.value })}
+                      onValueChange={(status) => updateBulkRow(row.id, { status })}
                       aria-label={`Status, row ${index + 1}`}
-                      className={cn(BULK_CELL, "pr-6 capitalize")}
-                    >
-                      {BULK_STATUS_OPTIONS.map((status) => (
-                        <option key={status} value={status} className="capitalize">
-                          {status}
-                        </option>
-                      ))}
-                    </select>
+                      options={toOptions(BULK_STATUS_OPTIONS)}
+                      size="sm"
+                      variant="pill"
+                      labelClassName="capitalize"
+                    />
                   </td>
                   <td className="py-1">
                     <button

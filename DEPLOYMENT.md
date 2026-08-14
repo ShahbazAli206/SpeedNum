@@ -38,7 +38,7 @@ Vercel (Next.js 16 frontend)  ──bearer JWT──▶  Render Web Service (Fas
 | Layer | Status | URL / location |
 |---|---|---|
 | Frontend (Vercel) | ✅ **Deployed** (demo mode until env vars added) | https://speed-num.vercel.app |
-| Database (Supabase) | ✅ **done** — migrations applied (22 tables, trigger + RLS); auth configured (Site/redirect URLs, ES256 signing, anon key captured) | `https://xftnqkmakeaqaandxyei.supabase.co` · Canada Central (`ca-central-1`) |
+| Database (Supabase) | ⚠️ **migrations `0005`–`0007` still to apply** (`0001`–`0004` done: 22 tables, trigger + RLS); auth configured (Site/redirect URLs, ES256 signing, anon key captured) | `https://xftnqkmakeaqaandxyei.supabase.co` · Canada Central (`ca-central-1`) |
 | Backend (Render) | ⬜ pending — Dockerfile is port-agnostic and ready to deploy | `https://<service>.onrender.com` (TBD) |
 
 ---
@@ -106,13 +106,45 @@ Extensions (both default-on in Supabase, created by `0001`): `pgcrypto`, `citext
 | `DATABASE_URL` | transaction-pooler string, **port 6543** (format below) | ✅ **fatal if missing** |
 | `SUPABASE_URL` | `https://xftnqkmakeaqaandxyei.supabase.co` | ✅ (JWT verification via JWKS) |
 | `PUBLIC_APP_URL` | `https://speed-num.vercel.app` | ✅ (else email/sign links point at localhost) |
-| `CORS_ORIGINS` | `https://speed-num.vercel.app` | recommended (see note) |
+| `CORS_ORIGINS` | `https://speed-num.vercel.app` | ✅ **required** (see note) |
+| `CORS_ORIGIN_REGEX` | blank, or `https://speed-num[a-z0-9-]*\.vercel\.app` | only if Vercel **preview** deploys must reach the API |
 | `ENVIRONMENT` | `production` | recommended |
 | `LOG_LEVEL` | `INFO` | optional |
 | `SUPABASE_JWT_SECRET` | **blank** | project is ES256/asymmetric (JWKS has an ES256 key). Only set if backend 401/500s on valid logins. |
-| `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` | blank OK | declared but unused by backend code |
-| `RESEND_API_KEY` / `EMAIL_FROM` | blank OK | blank → emails are logged, not sent |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Settings → API → `service_role` | ✅ **required to create any login.** See below. |
+| `SUPABASE_ANON_KEY` | blank OK | not read by the backend |
+| `RESEND_API_KEY` / `EMAIL_FROM` | blank OK, but see below | blank → emails are **logged, not sent** |
 | `JWT_AUDIENCE` | (unset) | defaults to `authenticated`; only set if changed in Supabase |
+| `REMINDER_SCHEDULER_ENABLED` | `true` | in-process daily reminder sweep. Set `false` only if an external cron drives `/admin/reminders/sweep`, or if you run >1 replica. |
+| `REMINDER_SWEEP_HOUR` | `6` | hour (UTC) of the daily sweep |
+| `REMINDER_SWEEP_ON_START` | `true` | also sweep ~30s after boot, so a fresh deploy populates the board immediately |
+
+> **`SUPABASE_SERVICE_ROLE_KEY` is load-bearing.** It was previously documented as
+> "declared but unused" — that is no longer true. `backend/app/services/supabase_admin.py`
+> uses it to create Supabase Auth users, so **without it every one of these returns
+> HTTP 424** and no account can be created at all:
+> `POST /team` (add accountant) · `POST /users` (add user) · `POST /clients/{id}/portal-invite`
+> · `POST /import/users/commit` (bulk user import) · every `resend-credentials` route.
+>
+> It also signs document storage: `POST /client-portal/documents/upload-url` and
+> `GET /client-portal/documents/{id}/download-url` both return 424 without it, so **no file
+> can be uploaded or opened**. See the storage note below.
+> It is a **secret** — it bypasses row-level security. Never expose it to the frontend.
+
+> **Document storage.** The `documents` bucket is created private by `0003_functions.sql`
+> with no policies on `storage.objects`, and Supabase enables RLS there by default — so a
+> browser holding only a user's anon-role session is denied every storage operation. The API
+> therefore signs upload and download URLs itself with the service-role key, after checking
+> the caller against the same tenant/portal rules the rest of the documents router uses;
+> the bytes still travel browser↔Supabase directly and never through the API. **No storage
+> policies need to be created.** If you add any later, they are defense-in-depth, not a
+> prerequisite.
+
+> **Email.** Without `RESEND_API_KEY` the API logs `[email:dry-run] to=… subject=…` and
+> `send_email` returns `False`. Nothing breaks — account creation still succeeds and the
+> UI shows the temporary password on screen so an admin can pass it on by hand — but no
+> credential emails, portal welcomes or reminder digests are delivered. Set it before
+> telling a real client to check their inbox.
 
 `DATABASE_URL` format (Supabase → Settings → Database → Connection string → **Transaction pooler**):
 ```
@@ -122,8 +154,12 @@ postgresql://postgres.xftnqkmakeaqaandxyei:<db-password>@aws-0-ca-central-1.pool
 > unreachable from most hosts). The backend auto-detects `:6543` and disables prepared statements.
 > Render allows outbound 6543 (only SMTP ports 25/465/587 are blocked).
 
-> **CORS note:** the backend also allows any `*.vercel.app` origin via a standing regex, so the
-> frontend works even if `CORS_ORIGINS` is unset. Setting it to your exact domain is tighter/safer.
+> **CORS note:** the backend used to carry a standing `https://.*\.vercel\.app` regex, which
+> made `CORS_ORIGINS` optional — at the cost of letting **anyone else's** Vercel project call
+> this API from a browser. That regex is gone. Set `CORS_ORIGINS` to the frontend's exact
+> origin. If preview deployments also need the API, set `CORS_ORIGIN_REGEX` scoped to your own
+> project name rather than to all of `vercel.app`. Leaving `CORS_ORIGINS` at its `*` default in
+> production still works but logs a warning at every boot.
 
 ---
 
@@ -145,10 +181,27 @@ There's a dependency cycle; this order breaks it:
 ### 1. Vercel — ✅ done
 Imported repo, Root Directory = `frontend`, deployed. Live at `speed-num.vercel.app` (demo mode).
 
-### 2. Supabase — ✅ done
+### 2. Supabase — ⚠️ partially done
 Project created; migrations `0001`–`0004` applied via SQL (22 tables, RLS, `on_auth_user_created`
 trigger, `documents` bucket); Email auth on, Site/redirect URLs set, Confirm-email off; anon +
 service-role keys and the port-6543 `DATABASE_URL` captured in the secrets file.
+
+**Still to apply — four migrations landed after that session and are not on the database yet.**
+Run them in the SQL Editor, in this order:
+
+| Migration | What breaks without it |
+|---|---|
+| `0005_client_portal_invite.sql` | 🔴 **Everything.** It adds `profiles.must_change_password` and the `clients.portal_invited_*` columns, which `app/models.py` already selects — so *any* request that loads a profile errors until this is applied, not just portal invites. |
+| `0006_engagement_letter_signing.sql` | Engagement-letter e-signature — the whole dual-signature flow and its stored signature data |
+| `0006_task_type.sql` | Task Master's task-type column (`internal` / `client` / `other`) |
+| `0007_reminders.sql` | `/reminders` errors into an empty board, and the daily sweep logs a failure every day |
+
+> Two files share the number `0006`. They touch different tables and alphabetical order is a
+> valid order, so applying them as listed is correct.
+>
+> All four are written with `add column if not exists` / `create ... if not exists`, so
+> re-running one is a no-op rather than an error — safe to apply again if you lose track of
+> which have been run.
 
 ### 3. Render — backend (current step)
 Prereq: the port-agnostic `backend/Dockerfile` must be pushed to `main` on GitHub.
@@ -161,7 +214,12 @@ Prereq: the port-agnostic `backend/Dockerfile` must be pushed to `main` on GitHu
    - **Instance Type:** **Free**
    - **Health Check Path:** `/health`
 4. Add **Environment** variables (see table above; values from the secrets file): `DATABASE_URL`,
-   `SUPABASE_URL`, `PUBLIC_APP_URL`, `CORS_ORIGINS`, `ENVIRONMENT=production`.
+   `SUPABASE_URL`, **`SUPABASE_SERVICE_ROLE_KEY`**, `PUBLIC_APP_URL`, `CORS_ORIGINS`,
+   `ENVIRONMENT=production`.
+   > Do not skip the service-role key. Without it the service boots and `/health` is green,
+   > but no login can be created and no document can be uploaded or opened — every one of
+   > those routes returns 424. The startup log warns about this and about a missing
+   > `RESEND_API_KEY`, a wildcard `CORS_ORIGINS`, and a localhost `PUBLIC_APP_URL`.
 5. **Create Web Service** → wait for the Docker build + first boot.
 6. Verify `https://<service>.onrender.com/health` returns `{"status":"ok","database":"ok",...}`.
    Interactive docs at `/docs`. (First request after idle takes ~30–60s to wake.)
@@ -207,6 +265,66 @@ Render connects to GitHub via in-browser OAuth — no personal access token need
   route through by design. Set the Supabase vars to switch auth on.
 - `db/migrations/0004` applied cleanly on 2026-08-10 (was previously untested).
 - Use the **port-6543 pooler** for `DATABASE_URL`, never the direct `db.<ref>` host (IPv6-only).
-- Backend `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` are declared but unused — don't block on them.
+- `SUPABASE_SERVICE_ROLE_KEY` **is** required now — see the env table. (This line previously
+  said it was unused; that was true only before the account-provisioning work landed.)
 - Render free tier sleeps after 15 min idle (~30–60s cold start) — expected, the app tolerates it.
+  **Note:** a sleeping instance also means the in-process reminder scheduler does not fire.
+  On a VPS this stops being a concern; on a sleeping free tier, drive
+  `POST /admin/reminders/sweep` from an external cron instead.
 - Hugging Face was ruled out: Docker Spaces now need PRO and block outbound port 6543.
+- `db/migrations/0007_reminders.sql` must be applied before the reminders board works.
+  Until then `/reminders` returns an error the frontend swallows into an empty board, and
+  the scheduler logs a failed sweep every day.
+
+---
+
+## Hostinger KVM VPS (current backend target)
+
+The Dockerfile is host-agnostic — non-root uid 1000, `CMD` expands `${PORT:-7860}`, and a
+`HEALTHCHECK` on `/health` — so it moves off Render unchanged. What differs on a VPS:
+
+1. **You supply `PORT`** and keep the container restarting yourself. Compose is enough:
+
+   ```yaml
+   # /opt/speednum/docker-compose.yml
+   services:
+     api:
+       build: ./backend            # or image: ghcr.io/<you>/speednum-api:latest
+       restart: unless-stopped     # the container is now your job, not a PaaS's
+       env_file: /opt/speednum/api.env
+       environment:
+         PORT: "8000"
+       ports:
+         - "127.0.0.1:8000:8000"   # bind to loopback; nginx terminates TLS
+   ```
+
+2. **Front it with nginx + certbot** for TLS. Vercel will not send a bearer token to an
+   untrusted certificate, and browsers block mixed content from an https frontend:
+
+   ```nginx
+   server {
+     server_name api.yourdomain.com;
+     location / {
+       proxy_pass http://127.0.0.1:8000;
+       proxy_set_header Host $host;
+       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+       proxy_set_header X-Forwarded-Proto $scheme;
+     }
+   }
+   ```
+   Then `certbot --nginx -d api.yourdomain.com`.
+
+3. **Set `NEXT_PUBLIC_API_URL`** on Vercel to `https://api.yourdomain.com` (no trailing
+   slash, no `/api/v1` — the client appends it) and redeploy. Leaving it unset silently
+   targets `localhost:8000` and the app shows demo data with no error.
+
+4. **Add the VPS origin to `CORS_ORIGINS`** — or rely on the standing `*.vercel.app` regex
+   if you only serve the Vercel domain.
+
+5. **The scheduler now works properly here.** A VPS container does not sleep, so the daily
+   sweep at `REMINDER_SWEEP_HOUR` fires reliably and no external cron is needed. If you
+   later scale to more than one replica, set `REMINDER_SCHEDULER_ENABLED=false` on all but
+   one — duplicate sweeps are harmless (the dedupe index absorbs them) but wasteful.
+
+6. **Outbound 6543 must be open** for the Supabase pooler. Hostinger does not block it by
+   default; if you add a firewall, allow it explicitly.

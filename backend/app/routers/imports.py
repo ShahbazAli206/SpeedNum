@@ -1,4 +1,12 @@
-"""CSV / XLSX client import with a review step before anything is written."""
+"""CSV / XLSX bulk import with a review step before anything is written.
+
+Two importers share the file-reading and column-detection machinery below:
+clients (the client book) and users (staff + client-portal logins). Both follow
+the same two-call shape — POST .../preview returns a row-by-row validation
+report and never writes, POST .../commit applies the rows the operator kept —
+because an accounting firm's spreadsheet is always messier than it looks and a
+half-applied import is worse than a rejected one.
+"""
 
 from __future__ import annotations
 
@@ -11,14 +19,26 @@ from typing import Any
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 
-from ..deps import SessionDep, TenantUserDep
-from ..models import Client
-from ..schemas import ImportCommitRequest, ImportPreview, ImportPreviewRow, ImportResult
-from ..services import audit
+from ..deps import AdminUserDep, SessionDep, TenantUserDep
+from ..models import Client, Profile
+from ..schemas import (
+    ImportCommitRequest,
+    ImportPreview,
+    ImportPreviewRow,
+    ImportResult,
+    UserImportResult,
+    UserImportRow,
+)
+from ..services import accounts, audit
+from ..services.accounts import AccountError
 
 router = APIRouter(prefix="/import", tags=["import"])
 
 MAX_PREVIEW_ROWS = 100
+
+# Bulk-provisioning logins is slow (one Supabase round-trip each) and mistakes
+# are expensive to undo, so a single commit is capped.
+MAX_USER_COMMIT_ROWS = 200
 
 FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "code": ("client code", "code", "client id", "client no", "account", "account number"),
@@ -26,8 +46,16 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "business_name": ("operating name", "trade name", "business name", "dba"),
     "client_type": ("type", "entity type", "client type"),
     "status": ("status", "client status"),
-    "email": ("email", "e-mail", "email address", "contact email"),
-    "phone": ("phone", "telephone", "phone number", "contact phone", "mobile"),
+    # "primary contact email/phone" is what the downloadable template calls
+    # these, so the template's own headers have to round-trip.
+    "email": (
+        "email", "e-mail", "email address", "contact email",
+        "primary contact email", "primary email", "main email",
+    ),
+    "phone": (
+        "phone", "telephone", "phone number", "contact phone", "mobile",
+        "primary contact phone", "primary phone", "main phone",
+    ),
     "business_number": ("bn", "business number", "cra bn", "cra business number", "sin"),
     "gst_number": ("gst", "gst number", "gst/hst", "hst number", "gst/hst number"),
     "payroll_number": ("payroll", "payroll number", "rp account"),
@@ -327,3 +355,241 @@ async def commit_clients(
         metadata={"created": created, "updated": updated, "failed": failed},
     )
     return ImportResult(created=created, updated=updated, failed=failed, errors=errors[:25])
+
+
+# -----------------------------------------------------------------------------
+# Users — staff and client-portal logins from a spreadsheet
+# -----------------------------------------------------------------------------
+USER_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "full_name": ("full name", "name", "user", "person", "employee", "accountant", "staff name"),
+    "email": ("email", "e-mail", "email address", "work email", "login", "username"),
+    "role": ("role", "access", "permission", "access level", "user role"),
+    "title": ("title", "job title", "position", "designation"),
+    "phone": ("phone", "telephone", "phone number", "mobile", "cell"),
+    "client": ("client", "client name", "linked client", "company", "portal client"),
+}
+
+# What a firm is likely to write in a "role" column, mapped onto our four roles.
+ROLE_MAP = {
+    "owner": "owner", "partner": "owner", "principal": "owner",
+    "admin": "admin", "administrator": "admin", "manager": "admin", "office manager": "admin",
+    "member": "member", "staff": "member", "accountant": "member", "cpa": "member",
+    "bookkeeper": "member", "associate": "member", "user": "member",
+    "viewer": "viewer", "read only": "viewer", "read-only": "viewer", "guest": "viewer",
+    # A client-portal login is expressed by naming a client, not by this column;
+    # accepting the word here keeps the sheet readable and is harmless.
+    "client": "member", "portal": "member",
+}
+
+
+def detect_user_mapping(columns: list[str]) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    taken: set[str] = set()
+    for column in columns:
+        key = _normalise(column)
+        for field, aliases in USER_FIELD_ALIASES.items():
+            if field in taken:
+                continue
+            if key == field or key == field.replace("_", " ") or key in aliases:
+                mapping[column] = field
+                taken.add(field)
+                break
+    return mapping
+
+
+def parse_user_row(
+    raw: dict[str, Any], mapping: dict[str, str], clients_by_name: dict[str, str]
+) -> tuple[dict[str, Any], list[str]]:
+    data: dict[str, Any] = {"role": "member"}
+    errors: list[str] = []
+
+    for column, field in mapping.items():
+        value = raw.get(column)
+        text = "" if value is None else str(value).strip()
+        if not text:
+            continue
+
+        if field == "email":
+            lowered = text.lower()
+            if "@" not in lowered or "." not in lowered.split("@")[-1]:
+                errors.append(f"'{text}' is not a valid email")
+            else:
+                data["email"] = lowered
+        elif field == "role":
+            resolved = ROLE_MAP.get(text.lower())
+            if resolved is None:
+                errors.append(f"'{text}' is not a role we recognise — defaulting to member")
+                data["role"] = "member"
+            else:
+                data["role"] = resolved
+        elif field == "client":
+            matched = clients_by_name.get(text.strip().lower())
+            if matched is None:
+                errors.append(f"No client matches '{text}' — the account will be firm staff")
+            else:
+                data["client_id"] = matched
+        else:
+            data[field] = text
+
+    if not data.get("email"):
+        errors.append("Email is required")
+    if not data.get("full_name"):
+        # Derive something usable rather than rejecting the row outright: the
+        # local part of the address is a better default than a blank name.
+        local = str(data.get("email", "")).split("@")[0]
+        derived = local.replace(".", " ").replace("_", " ").replace("-", " ").strip().title()
+        if derived:
+            data["full_name"] = derived
+        else:
+            errors.append("Full name is required")
+
+    return data, errors
+
+
+async def _client_lookup(session: SessionDep, tenant_id: Any) -> dict[str, str]:
+    """Every way a spreadsheet might name one of this firm's clients."""
+    rows = (
+        await session.execute(
+            select(Client.id, Client.legal_name, Client.business_name, Client.code).where(
+                Client.tenant_id == tenant_id
+            )
+        )
+    ).all()
+    lookup: dict[str, str] = {}
+    for client_id, legal_name, business_name, code in rows:
+        for label in (legal_name, business_name, code):
+            if label:
+                lookup[str(label).strip().lower()] = str(client_id)
+    return lookup
+
+
+@router.post("/users/preview", response_model=ImportPreview)
+async def preview_users(
+    session: SessionDep, user: AdminUserDep, file: UploadFile = File(...)
+) -> ImportPreview:
+    """Validate a user spreadsheet without creating a single login."""
+    columns, records = await _read_table(file)
+    mapping = detect_user_mapping(columns)
+    if "email" not in mapping.values():
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "No email column was recognised. Rename a column to 'Email' and try again.",
+        )
+
+    clients_by_name = await _client_lookup(session, user.tenant_id)
+    existing_emails = {
+        row.lower()
+        for row in (
+            await session.scalars(select(Profile.email).where(Profile.tenant_id == user.tenant_id))
+        ).all()
+    }
+
+    rows: list[ImportPreviewRow] = []
+    valid = 0
+    seen: set[str] = set()
+    for index, record in enumerate(records[:MAX_PREVIEW_ROWS], start=2):
+        data, errors = parse_user_row(record, mapping, clients_by_name)
+        email = str(data.get("email", ""))
+        if email:
+            if email in existing_emails:
+                errors.append("An account already exists for this email")
+            elif email in seen:
+                errors.append("This email is duplicated earlier in the file")
+            seen.add(email)
+        if not errors:
+            valid += 1
+        rows.append(ImportPreviewRow(row=index, data=data, errors=errors))
+
+    return ImportPreview(
+        columns=columns,
+        detected_mapping=mapping,
+        rows=rows,
+        total_rows=len(records),
+        valid_rows=valid,
+    )
+
+
+@router.post("/users/commit", response_model=UserImportResult)
+async def commit_users(
+    rows: list[UserImportRow],
+    session: SessionDep,
+    user: AdminUserDep,
+    send_email: bool = True,
+) -> UserImportResult:
+    """Provision a login per row and email each person their credentials.
+
+    Every row is attempted independently: one duplicate email or one Supabase
+    rejection reports itself and the rest still land, because re-running a
+    partially applied import would trip over the accounts that did succeed.
+    """
+    if len(rows) > MAX_USER_COMMIT_ROWS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Import at most {MAX_USER_COMMIT_ROWS} users at a time — split the file.",
+        )
+
+    outcomes: list[Any] = []
+    created = failed = emailed = 0
+    errors: list[str] = []
+
+    for index, row in enumerate(rows, start=1):
+        email = str(row.email).strip().lower()
+        try:
+            # A savepoint per row: a failure rolls back only that account's
+            # profile insert, leaving the successful ones committed.
+            async with session.begin_nested():
+                result = await accounts.provision(
+                    session,
+                    tenant=user.tenant,
+                    email=email,
+                    full_name=row.full_name,
+                    role=row.role,
+                    client_id=row.client_id,
+                    title=row.title,
+                    phone=row.phone,
+                    send_welcome=send_email,
+                    reply_to=user.profile.email,
+                )
+        except AccountError as exc:
+            failed += 1
+            errors.append(f"Row {index} ({email}): {exc}")
+            outcomes.append({"email": email, "full_name": row.full_name, "created": False, "error": str(exc)})
+            continue
+        except Exception as exc:  # noqa: BLE001 - surface the row that failed
+            failed += 1
+            errors.append(f"Row {index} ({email}): {type(exc).__name__}")
+            outcomes.append(
+                {"email": email, "full_name": row.full_name, "created": False, "error": type(exc).__name__}
+            )
+            continue
+
+        created += 1
+        if result.email_sent:
+            emailed += 1
+        outcomes.append(
+            {
+                "email": email,
+                "full_name": result.profile.full_name,
+                "created": True,
+                "temp_password": result.temp_password,
+                "email_sent": result.email_sent,
+            }
+        )
+
+    await audit.record(
+        session,
+        tenant_id=user.tenant_id,
+        actor_id=user.profile.id,
+        actor_email=user.profile.email,
+        action="imported",
+        entity="profile",
+        summary=f"Imported {created} user account(s)",
+        metadata={"created": created, "failed": failed, "emailed": emailed},
+    )
+    return UserImportResult(
+        created=created,
+        failed=failed,
+        emailed=emailed,
+        accounts=outcomes,
+        errors=errors[:25],
+    )

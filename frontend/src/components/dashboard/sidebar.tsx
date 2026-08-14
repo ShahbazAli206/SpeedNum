@@ -1,6 +1,6 @@
 "use client";
 
-import { LogOut, PanelLeftClose, X } from "lucide-react";
+import { PanelLeftClose, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -8,7 +8,10 @@ import { Icon } from "@/components/icon";
 import { Logo } from "@/components/logo";
 import { cn } from "@/lib/cn";
 import { DEMO_ACCOUNT } from "@/lib/demo";
+import { useSession } from "@/lib/session";
 import { DASHBOARD_NAV } from "@/lib/site";
+
+import { SignOutButton } from "./sign-out-button";
 
 export function Sidebar({
   collapsed,
@@ -22,6 +25,15 @@ export function Sidebar({
   onCloseMobile: () => void;
 }) {
   const pathname = usePathname();
+  const session = useSession();
+
+  // Real identity when signed in; the demo account only stands in when no API
+  // is reachable, so a live client never sees someone else's name in the rail.
+  const name = session.isLive ? session.displayName : DEMO_ACCOUNT.fullName;
+  const email = session.isLive ? (session.email ?? "") : DEMO_ACCOUNT.email;
+  const initials = session.isLive
+    ? session.initials
+    : `${DEMO_ACCOUNT.firstName[0]}${DEMO_ACCOUNT.lastName[0]}`;
 
   // `/dashboard` must match exactly, or every child route would light it up too.
   const isActive = (href: string) =>
@@ -93,35 +105,21 @@ export function Sidebar({
         {!collapsed ? (
           <div className="flex items-center gap-2.5 rounded-xl bg-surface-2 p-2.5">
             <span className="grid size-9 shrink-0 place-items-center rounded-full bg-brand-soft text-[12px] font-bold text-brand">
-              {DEMO_ACCOUNT.firstName[0]}
-              {DEMO_ACCOUNT.lastName[0]}
+              {initials}
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[13.5px] font-semibold text-ink">
-                {DEMO_ACCOUNT.fullName}
+                {name}
               </span>
-              <span className="block truncate text-[11.5px] text-muted">
-                {DEMO_ACCOUNT.email}
-              </span>
+              <span className="block truncate text-[11.5px] text-muted">{email}</span>
             </span>
-            <Link
-              href="/login"
-              className="shrink-0 rounded-lg p-1.5 text-muted transition hover:bg-surface hover:text-danger"
-              aria-label="Sign out"
-              title="Sign out"
-            >
-              <LogOut className="size-4" />
-            </Link>
+            {/* SignOutButton, not <Link href="/login">: a link never ended the
+                session, and the proxy bounces a signed-in user away from
+                /login — so "Sign out" put you straight back in the app. */}
+            <SignOutButton className="shrink-0 rounded-lg p-1.5 text-muted transition hover:bg-surface hover:text-danger" />
           </div>
         ) : (
-          <Link
-            href="/login"
-            className="mx-auto grid size-9 place-items-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-danger"
-            aria-label="Sign out"
-            title="Sign out"
-          >
-            <LogOut className="size-4" />
-          </Link>
+          <SignOutButton className="mx-auto grid size-9 place-items-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-danger" />
         )}
 
         <button

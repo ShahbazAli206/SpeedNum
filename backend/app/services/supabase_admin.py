@@ -1,4 +1,9 @@
-"""Supabase Auth (GoTrue) admin calls: provisioning client-portal logins.
+"""Supabase Auth (GoTrue) admin calls: provisioning logins.
+
+Used for both kinds of account the app creates on someone's behalf — a
+client-portal login pinned to one client, and a firm staff (accountant) login.
+The Supabase call is identical for both; what differs is the `profiles` row the
+caller writes afterwards and the email that goes out.
 
 Separate from services/email.py because this talks to Supabase's auth server
 with the service-role key, not a mail provider — and the failure mode is
@@ -31,9 +36,15 @@ class SupabaseAdminError(RuntimeError):
 
 def generate_temp_password() -> str:
     """A one-time password shown to the admin in the response and emailed to
-    the client. Not persisted anywhere in our own database — Supabase Auth
+    the new account. Not persisted anywhere in our own database — Supabase Auth
     stores only its hash, so a lost password can only be reset, never re-sent."""
     return "".join(secrets.choice(_PASSWORD_ALPHABET) for _ in range(_PASSWORD_LENGTH))
+
+
+def is_configured() -> bool:
+    """Whether logins can be provisioned at all. Routers use this to return a
+    clear 424 up front instead of failing halfway through a multi-step create."""
+    return _configured()
 
 
 def _configured() -> bool:
@@ -59,13 +70,25 @@ def _admin_url(path: str) -> str:
     return f"{settings.supabase_url.rstrip('/')}/auth/v1/admin{path}"
 
 
-async def create_portal_user(*, email: str, password: str, full_name: str | None) -> uuid.UUID:
+async def create_auth_user(
+    *,
+    email: str,
+    password: str,
+    full_name: str | None,
+    metadata: dict[str, object] | None = None,
+) -> uuid.UUID:
     """Creates a new Supabase Auth user and returns its id.
 
     Deliberately does not attempt to pre-assign the id (older GoTrue releases
     don't accept a caller-supplied one) — the caller creates the matching
     `profiles` row afterwards, keyed off whatever id Supabase actually hands
     back.
+
+    `metadata` is merged into `user_metadata`, which Supabase copies into the
+    JWT. That is how the Next.js proxy learns whether a token belongs on the firm
+    surface or in the client portal without a database round trip on every
+    request — see frontend/src/proxy.ts. `profiles.client_id` remains the
+    authority; this is a routing hint, never an authorisation decision.
     """
     _require_configured()
     payload: dict[str, object] = {
@@ -73,24 +96,31 @@ async def create_portal_user(*, email: str, password: str, full_name: str | None
         "password": password,
         "email_confirm": True,
     }
+    user_metadata: dict[str, object] = dict(metadata or {})
     if full_name:
-        payload["user_metadata"] = {"full_name": full_name}
+        user_metadata["full_name"] = full_name
+    if user_metadata:
+        payload["user_metadata"] = user_metadata
 
     async with httpx.AsyncClient(timeout=15) as client:
         response = await client.post(_admin_url("/users"), json=payload, headers=_headers())
 
     if response.status_code >= 400:
         log.warning("Supabase admin createUser failed: %s %s", response.status_code, response.text)
-        raise SupabaseAdminError("Could not create the client portal login. Check the email address.")
+        if response.status_code in (409, 422) or "already" in response.text.lower():
+            raise SupabaseAdminError(
+                f"A login already exists for {email}. Use the existing account, or a different address."
+            )
+        raise SupabaseAdminError("Could not create the login. Check the email address.")
 
     data = response.json()
     raw_id = data.get("id") or (data.get("user") or {}).get("id")
     if not raw_id:
-        raise SupabaseAdminError("Supabase did not return an id for the new portal login.")
+        raise SupabaseAdminError("Supabase did not return an id for the new login.")
     return uuid.UUID(raw_id)
 
 
-async def reset_portal_password(*, user_id: uuid.UUID, password: str) -> None:
+async def reset_password(*, user_id: uuid.UUID, password: str) -> None:
     """Used on resend: the existing login is kept (same id, same profile row),
     only its password is rotated to a new one-time value."""
     _require_configured()
@@ -100,7 +130,25 @@ async def reset_portal_password(*, user_id: uuid.UUID, password: str) -> None:
         )
     if response.status_code >= 400:
         log.warning("Supabase admin updateUser failed: %s %s", response.status_code, response.text)
-        raise SupabaseAdminError("Could not reset the client portal password.")
+        raise SupabaseAdminError("Could not reset the password for that login.")
+
+
+async def delete_auth_user(*, user_id: uuid.UUID) -> None:
+    """Removes the Supabase Auth user behind a profile.
+
+    Called when an admin deletes a platform account. Tolerant of a 404: if the
+    auth user is already gone, deleting the profile row is still the right
+    outcome, and refusing would leave an orphan the admin cannot clear.
+    """
+    _require_configured()
+    async with httpx.AsyncClient(timeout=15) as client:
+        response = await client.delete(_admin_url(f"/users/{user_id}"), headers=_headers())
+    if response.status_code == 404:
+        log.info("Supabase auth user %s was already gone", user_id)
+        return
+    if response.status_code >= 400:
+        log.warning("Supabase admin deleteUser failed: %s %s", response.status_code, response.text)
+        raise SupabaseAdminError("Could not delete that login from Supabase Auth.")
 
 
 async def generate_magic_link(*, email: str) -> str | None:

@@ -123,13 +123,17 @@ export function IntegrationsClient({ recentEmails }: { recentEmails: RecentEmail
 
         <div className="p-5">
           <Field label="Transport">
-            <Select value="gmail" disabled>
-              <option value="gmail">Gmail (live email via app password)</option>
-            </Select>
+            <Select
+              value="resend"
+              onValueChange={() => {}}
+              disabled
+              options={[{ value: "resend", label: "Resend (transactional email API)" }]}
+            />
           </Field>
           <p className="mt-1.5 text-[12px] text-muted">
-            Gmail uses the GMAIL_USER / GMAIL_APP_PASSWORD set on the server. Mail is sent from
-            that address.
+            Mail goes out through Resend using the RESEND_API_KEY / EMAIL_FROM set on the server.
+            Without a key the API logs each message instead of sending it, so nothing is lost —
+            but nothing is delivered either.
           </p>
 
           <div className="mt-4 grid gap-4 sm:grid-cols-2">

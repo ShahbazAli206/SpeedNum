@@ -182,46 +182,52 @@ export function TaskDetailClient({
               </Field>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Type">
-                  <Select value={taskType} onChange={(event) => setTaskType(event.target.value as TaskType)}>
-                    {TYPE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </Select>
+                  <Select
+                    value={taskType}
+                    onValueChange={(next) => setTaskType(next as TaskType)}
+                    options={TYPE_OPTIONS}
+                  />
                 </Field>
                 <Field label="Assign to">
-                  <Select value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)}>
-                    <option value="">Unassigned</option>
-                    {team.map((member) => (
-                      <option key={member.id} value={member.id}>
-                        {member.full_name}
-                      </option>
-                    ))}
-                  </Select>
+                  <Select
+                    value={assigneeId}
+                    onValueChange={setAssigneeId}
+                    placeholder="Unassigned"
+                    options={[
+                      { value: "", label: "Unassigned" },
+                      ...team.map((member) => ({
+                        value: member.id,
+                        label: member.full_name,
+                        description: member.email,
+                      })),
+                    ]}
+                  />
                 </Field>
 
                 {taskType === "client" ? (
                   <Field label="Client" className="sm:col-span-2">
-                    <Select value={clientId} onChange={(event) => setClientId(event.target.value)}>
-                      <option value="">No specific client</option>
-                      {clients.map((row) => (
-                        <option key={row.id} value={row.id}>
-                          {row.business_name}
-                        </option>
-                      ))}
-                    </Select>
+                    <Select
+                      value={clientId}
+                      onValueChange={setClientId}
+                      placeholder="No specific client"
+                      searchPlaceholder="Search clients…"
+                      options={[
+                        { value: "", label: "No specific client" },
+                        ...clients.map((row) => ({
+                          value: row.id,
+                          label: row.business_name,
+                        })),
+                      ]}
+                    />
                   </Field>
                 ) : null}
 
                 <Field label="Priority">
-                  <Select value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)}>
-                    {PRIORITY_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </Select>
+                  <Select
+                    value={priority}
+                    onValueChange={(next) => setPriority(next as TaskPriority)}
+                    options={PRIORITY_OPTIONS}
+                  />
                 </Field>
                 <Field label="Due date">
                   <Input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
@@ -284,13 +290,11 @@ export function TaskDetailClient({
           </div>
           <div className="space-y-4 p-5">
             <Field label="Status">
-              <Select value={status} onChange={(event) => changeStatus(event.target.value as TaskStatus)}>
-                {STATUS_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
+              <Select
+                value={status}
+                onValueChange={(next) => changeStatus(next as TaskStatus)}
+                options={STATUS_OPTIONS}
+              />
             </Field>
             <Button
               variant="danger"

@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
-from sqlalchemy import Date, and_, cast, func, or_, select
+from sqlalchemy import func, or_, select
 
-from ..config import settings
 from ..deps import SessionDep, TenantUserDep, client_ip
 from ..models import Client, ClientService, Contact, Deadline, Profile, Service, Task
 from ..schemas import (
@@ -24,15 +22,8 @@ from ..schemas import (
     Ok,
     PortalInviteResult,
 )
-from ..services import audit
-from ..services.email import portal_welcome_html, send_email
-from ..services.supabase_admin import (
-    SupabaseAdminError,
-    create_portal_user,
-    generate_magic_link,
-    generate_temp_password,
-    reset_portal_password,
-)
+from ..services import accounts, audit
+from ..services.accounts import AccountError
 from ..utils import apply_updates, ensure_found, now_utc, profile_names, read, today_utc
 
 router = APIRouter(tags=["clients"])
@@ -266,54 +257,29 @@ async def invite_to_portal(
 
     email = client.email.strip().lower()
     existing_profile = await session.scalar(select(Profile).where(Profile.client_id == client_id))
-    temp_password = generate_temp_password()
 
     try:
         if existing_profile is None:
-            new_id = await create_portal_user(
-                email=email, password=temp_password, full_name=client.legal_name
-            )
-            session.add(
-                Profile(
-                    id=new_id,
-                    tenant_id=user.tenant_id,
-                    client_id=client_id,
-                    email=email,
-                    full_name=client.business_name or client.legal_name,
-                    role="member",
-                    must_change_password=True,
-                )
+            result = await accounts.provision(
+                session,
+                tenant=user.tenant,
+                email=email,
+                full_name=client.business_name or client.legal_name,
+                client_id=client_id,
+                reply_to=user.profile.email,
             )
         else:
-            await reset_portal_password(user_id=existing_profile.id, password=temp_password)
             existing_profile.email = email
-            existing_profile.must_change_password = True
-            existing_profile.is_active = True
-    except SupabaseAdminError as exc:
-        raise HTTPException(status.HTTP_424_FAILED_DEPENDENCY, str(exc)) from exc
+            result = await accounts.reissue(
+                session,
+                tenant=user.tenant,
+                profile=existing_profile,
+                reply_to=user.profile.email,
+            )
+    except AccountError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
 
-    magic_token = await generate_magic_link(email=email)
-    login_url = f"{settings.public_app_url.rstrip('/')}/login"
-    magic_url = (
-        f"{settings.public_app_url.rstrip('/')}/portal-login?token_hash={magic_token}&email={quote(email)}"
-        if magic_token
-        else None
-    )
-
-    email_sent = await send_email(
-        to=email,
-        subject=f"Welcome to {user.tenant.name} — your client portal is ready",
-        html=portal_welcome_html(
-            firm_name=user.tenant.name,
-            client_name=client.business_name or client.legal_name,
-            email=email,
-            temp_password=temp_password,
-            login_url=login_url,
-            magic_url=magic_url,
-            brand_color=user.tenant.brand_color,
-        ),
-        reply_to=user.profile.email,
-    )
+    email_sent = result.email_sent
 
     client.portal_enabled = True
     client.portal_invited_at = now_utc()

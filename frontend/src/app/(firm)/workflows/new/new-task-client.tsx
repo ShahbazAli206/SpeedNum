@@ -127,23 +127,26 @@ export function NewTaskClient({ clients, team }: { clients: ClientRow[]; team: T
 
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Type">
-                <Select value={taskType} onChange={(event) => setTaskType(event.target.value as TaskType)}>
-                  {TYPE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
+                <Select
+                  value={taskType}
+                  onValueChange={(next) => setTaskType(next as TaskType)}
+                  options={TYPE_OPTIONS}
+                />
               </Field>
               <Field label="Assign to">
-                <Select value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)}>
-                  <option value="">Unassigned</option>
-                  {team.map((member) => (
-                    <option key={member.id} value={member.id}>
-                      {member.full_name}
-                    </option>
-                  ))}
-                </Select>
+                <Select
+                  value={assigneeId}
+                  onValueChange={setAssigneeId}
+                  placeholder="Unassigned"
+                  options={[
+                    { value: "", label: "Unassigned" },
+                    ...team.map((member) => ({
+                      value: member.id,
+                      label: member.full_name,
+                      description: member.email,
+                    })),
+                  ]}
+                />
               </Field>
 
               {taskType === "client" ? (
@@ -152,34 +155,35 @@ export function NewTaskClient({ clients, team }: { clients: ClientRow[]; team: T
                   hint="Optional — leave unselected for client work not tied to one record."
                   className="sm:col-span-2"
                 >
-                  <Select value={clientId} onChange={(event) => setClientId(event.target.value)}>
-                    <option value="">No specific client</option>
-                    {clients.map((client) => (
-                      <option key={client.id} value={client.id}>
-                        {client.business_name}
-                      </option>
-                    ))}
-                  </Select>
+                  <Select
+                    value={clientId}
+                    onValueChange={setClientId}
+                    placeholder="No specific client"
+                    searchPlaceholder="Search clients…"
+                    options={[
+                      { value: "", label: "No specific client" },
+                      ...clients.map((client) => ({
+                        value: client.id,
+                        label: client.business_name,
+                      })),
+                    ]}
+                  />
                 </Field>
               ) : null}
 
               <Field label="Priority">
-                <Select value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)}>
-                  {PRIORITY_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
+                <Select
+                  value={priority}
+                  onValueChange={(next) => setPriority(next as TaskPriority)}
+                  options={PRIORITY_OPTIONS}
+                />
               </Field>
               <Field label="Status">
-                <Select value={status} onChange={(event) => setStatus(event.target.value as TaskStatus)}>
-                  {STATUS_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
+                <Select
+                  value={status}
+                  onValueChange={(next) => setStatus(next as TaskStatus)}
+                  options={STATUS_OPTIONS}
+                />
               </Field>
               <Field label="Due date">
                 <Input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />

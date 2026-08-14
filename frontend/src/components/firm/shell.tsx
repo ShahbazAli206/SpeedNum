@@ -1,25 +1,32 @@
 "use client";
 
 import {
-  Bell,
+  BellRing,
   ChevronRight,
   LogOut,
-  Menu,
+  Menu as MenuIcon,
   PanelLeftClose,
   Plus,
   Search,
+  Settings,
+  UserRound,
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 
+import { AlertBell, UnreadDot } from "@/components/dashboard/alert-bell";
 import { CommandPalette } from "@/components/dashboard/command-palette";
+import { ForcePasswordModal } from "@/components/dashboard/force-password-modal";
+import { SignOutButton, useSignOut } from "@/components/dashboard/sign-out-button";
 import { Icon } from "@/components/icon";
 import { Logo } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Menu } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { FIRM, getFirmOverview } from "@/lib/firm-demo";
+import { getFirmOverview } from "@/lib/firm-demo";
+import { SessionProvider, useSession } from "@/lib/session";
 import { FIRM_NAV, FIRM_NAV_FLAT } from "@/lib/site";
 
 import { FirmBrandingProvider, useBranding } from "./branding";
@@ -35,15 +42,20 @@ const COLLAPSE_KEY = "speednum-firm-collapsed";
  */
 export function FirmShell({ children }: { children: ReactNode }) {
   return (
-    <FirmBrandingProvider>
-      <FirmShellInner>{children}</FirmShellInner>
-    </FirmBrandingProvider>
+    <SessionProvider>
+      <FirmBrandingProvider>
+        <FirmShellInner>{children}</FirmShellInner>
+      </FirmBrandingProvider>
+    </SessionProvider>
   );
 }
 
 function FirmShellInner({ children }: { children: ReactNode }) {
   const { branding } = useBranding();
+  const session = useSession();
   const pathname = usePathname();
+  const router = useRouter();
+  const signOut = useSignOut();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -87,8 +99,23 @@ function FirmShellInner({ children }: { children: ReactNode }) {
     });
   };
 
+  // Demo fixtures stand in only for the badges the API hasn't been asked for
+  // yet (overdue deadlines); notifications and reminders come from the session.
   const overview = useMemo(() => getFirmOverview(), []);
   const current = FIRM_NAV_FLAT.find((item) => pathname.startsWith(item.href));
+
+  const badgeFor = (href: string): number => {
+    switch (href) {
+      case "/deadlines":
+        return session.isLive ? session.reminders.overdue : overview.deadlines.overdue;
+      case "/reminders":
+        return session.isLive ? session.reminders.unacknowledged : 0;
+      case "/notifications":
+        return session.isLive ? session.unread : overview.unread_notifications;
+      default:
+        return 0;
+    }
+  };
 
   const rail = (
     <>
@@ -147,12 +174,9 @@ function FirmShellInner({ children }: { children: ReactNode }) {
             <ul className="space-y-0.5">
               {group.items.map((item) => {
                 const active = pathname.startsWith(item.href);
-                const badge =
-                  item.href === "/deadlines"
-                    ? overview.deadlines.overdue
-                    : item.href === "/notifications"
-                      ? overview.unread_notifications
-                      : 0;
+                const badge = badgeFor(item.href);
+                // Alert counts blink; a plain "3 clients" style count would not.
+                const alerting = badge > 0 && item.href !== "/clients";
 
                 return (
                   <li key={item.href}>
@@ -170,9 +194,7 @@ function FirmShellInner({ children }: { children: ReactNode }) {
                     >
                       <span className="relative">
                         <Icon name={item.icon} className="size-4.5 shrink-0" />
-                        {collapsed && badge > 0 ? (
-                          <span className="absolute -top-1 -right-1 size-2 rounded-full bg-danger" />
-                        ) : null}
+                        <UnreadDot show={collapsed && alerting} />
                       </span>
                       {!collapsed ? (
                         <>
@@ -182,6 +204,7 @@ function FirmShellInner({ children }: { children: ReactNode }) {
                               className={cn(
                                 "rounded-full px-1.5 py-0.5 text-[10.5px] font-bold tabular-nums",
                                 active ? "bg-white/20 text-white" : "bg-danger text-white",
+                                alerting && !active && "animate-blink",
                               )}
                             >
                               {badge}
@@ -200,35 +223,21 @@ function FirmShellInner({ children }: { children: ReactNode }) {
 
       <div className="border-t border-line p-3">
         {collapsed ? (
-          <Link
-            href="/login"
-            className="mx-auto grid size-9 place-items-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-danger"
-            aria-label="Sign out"
-            title="Sign out"
-          >
-            <LogOut className="size-4" />
-          </Link>
+          <SignOutButton className="mx-auto grid size-9 place-items-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-danger" />
         ) : (
           <div className="flex items-center gap-2.5 rounded-xl bg-surface-2 p-2.5">
             <span className="grid size-9 shrink-0 place-items-center rounded-full bg-brand-soft text-[12px] font-bold text-brand">
-              SJ
+              {session.initials}
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[13.5px] font-semibold text-ink">
-                {FIRM.signedInAs.name}
+                {session.displayName}
               </span>
               <span className="block truncate text-[11.5px] text-muted">
-                {FIRM.signedInAs.title}
+                {session.displayTitle}
               </span>
             </span>
-            <Link
-              href="/login"
-              className="shrink-0 rounded-lg p-1.5 text-muted transition hover:bg-surface hover:text-danger"
-              aria-label="Sign out"
-              title="Sign out"
-            >
-              <LogOut className="size-4" />
-            </Link>
+            <SignOutButton />
           </div>
         )}
 
@@ -282,7 +291,7 @@ function FirmShellInner({ children }: { children: ReactNode }) {
             className="grid size-9 shrink-0 place-items-center rounded-lg border border-line text-ink-soft transition hover:bg-surface-2 lg:hidden"
             aria-label="Open navigation"
           >
-            <Menu className="size-5" />
+            <MenuIcon className="size-5" />
           </button>
 
           <nav aria-label="Breadcrumb" className="min-w-0">
@@ -327,25 +336,42 @@ function FirmShellInner({ children }: { children: ReactNode }) {
 
             <ThemeToggle className="hidden md:inline-flex" />
 
-            <Link
-              href="/notifications"
-              className="relative grid size-9 place-items-center rounded-lg border border-line text-ink-soft transition hover:bg-surface-2"
-              aria-label={`Notifications, ${overview.unread_notifications} unread`}
-            >
-              <Bell className="size-4" />
-              {overview.unread_notifications > 0 ? (
-                <span className="absolute -top-1 -right-1 grid size-4.5 place-items-center rounded-full bg-danger text-[9.5px] font-bold text-white">
-                  {overview.unread_notifications}
-                </span>
-              ) : null}
-            </Link>
+            <AlertBell />
 
-            <span
-              className="grid size-9 place-items-center rounded-full bg-brand-soft text-[12px] font-bold text-brand"
-              title={FIRM.signedInAs.name}
-            >
-              SJ
-            </span>
+            {/* Was a static chip with no menu — the only way to reach settings
+                or sign out from the header was the rail at the far left. */}
+            <Menu
+              label="Account menu"
+              minWidth={230}
+              className="grid size-9 place-items-center rounded-full bg-brand-soft text-[12px] font-bold text-brand transition hover:brightness-95"
+              trigger={<span aria-hidden>{session.initials}</span>}
+              items={[
+                {
+                  label: session.displayName,
+                  description: session.email || session.displayTitle,
+                  icon: <UserRound className="size-3.5" />,
+                  disabled: true,
+                },
+                {
+                  label: "Firm settings",
+                  icon: <Settings className="size-3.5" />,
+                  separated: true,
+                  onSelect: () => router.push("/settings"),
+                },
+                {
+                  label: "Notifications",
+                  icon: <BellRing className="size-3.5" />,
+                  onSelect: () => router.push("/notifications"),
+                },
+                {
+                  label: "Sign out",
+                  icon: <LogOut className="size-3.5" />,
+                  danger: true,
+                  separated: true,
+                  onSelect: signOut,
+                },
+              ]}
+            />
           </div>
         </header>
 
@@ -357,6 +383,15 @@ function FirmShellInner({ children }: { children: ReactNode }) {
       {paletteOpen ? (
         <CommandPalette onClose={() => setPaletteOpen(false)} items={FIRM_NAV_FLAT} />
       ) : null}
+
+      {/* Staff arrive here on a temporary password too — from the credentials
+          email's one-click link, which lands on /overview. Previously this was
+          mounted only in the client-portal shell, so an accountant was never
+          asked to replace the password an admin had generated for them.
+          Suspense because it reads useSearchParams. */}
+      <Suspense fallback={null}>
+        <ForcePasswordModal />
+      </Suspense>
     </div>
   );
 }

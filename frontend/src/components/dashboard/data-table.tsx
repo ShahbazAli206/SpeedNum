@@ -1,10 +1,19 @@
 "use client";
 
-import { ArrowDown, ArrowUp, ChevronDown, ChevronsUpDown, Download, Search } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  ChevronsUpDown,
+  Download,
+  FileText,
+  Search,
+  Sheet,
+} from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { useToast } from "@/components/toast";
-import { EmptyState, Pagination } from "@/components/ui";
+import { EmptyState, Menu, Pagination, Select } from "@/components/ui";
 import { cn } from "@/lib/cn";
 
 export interface Column<T> {
@@ -114,25 +123,8 @@ export function DataTable<T extends { id: string }>({
     });
   };
 
-  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  // Outside-click and Escape used to be hand-rolled here; `Menu` owns both now.
   const [exporting, setExporting] = useState(false);
-  const exportMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!exportMenuOpen) return;
-    const onClick = (event: MouseEvent) => {
-      if (!exportMenuRef.current?.contains(event.target as Node)) setExportMenuOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setExportMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [exportMenuOpen]);
 
   // Read exportValue (falling back to sortValue) so the file carries raw
   // values rather than the rendered React nodes.
@@ -215,70 +207,53 @@ export function DataTable<T extends { id: string }>({
           />
         </div>
 
-        {/* A plain <select> rather than the shared <Select>: that one is
-            width-full by design, and clsx cannot override a Tailwind width
-            utility with another one — both land in the stylesheet and source
-            order decides, which made this row wrap. */}
         {filters.map((filter) => (
-          <select
+          <Select
             key={filter.label}
             aria-label={filter.label}
             value={filterValues[filter.label] ?? "all"}
-            onChange={(event) => {
-              setFilterValues((current) => ({ ...current, [filter.label]: event.target.value }));
+            onValueChange={(value) => {
+              setFilterValues((current) => ({ ...current, [filter.label]: value }));
               setPage(1);
             }}
-            className="h-9 min-w-36 shrink-0 rounded-lg border border-line-strong bg-surface pr-8 pl-3 text-[13.5px] text-ink transition focus:border-brand"
-          >
-            <option value="all">All {filter.label.toLowerCase()}</option>
-            {filter.options.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+            fullWidth={false}
+            className="min-w-36 shrink-0"
+            options={[
+              { value: "all", label: `All ${filter.label.toLowerCase()}` },
+              ...filter.options,
+            ]}
+          />
         ))}
 
         {exportName ? (
-          <div ref={exportMenuRef} className="relative">
-            <button
-              type="button"
-              onClick={() => setExportMenuOpen((current) => !current)}
-              disabled={exporting}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-[13px] font-medium text-muted transition hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <Download className="size-3.5" />
-              Export
-              <ChevronDown className="size-3.5" />
-            </button>
-
-            {exportMenuOpen ? (
-              <div
-                role="menu"
-                className="absolute top-full right-0 z-30 mt-1.5 w-36 overflow-hidden rounded-lg border border-line bg-surface py-1 shadow-[var(--shadow-lift)]"
-              >
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    exportCsv();
-                    setExportMenuOpen(false);
-                  }}
-                  className="block w-full px-3.5 py-2 text-left text-[13px] text-ink-soft transition hover:bg-surface-2 hover:text-ink"
-                >
-                  CSV
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => void exportXlsx().then(() => setExportMenuOpen(false))}
-                  className="block w-full px-3.5 py-2 text-left text-[13px] text-ink-soft transition hover:bg-surface-2 hover:text-ink"
-                >
-                  Excel
-                </button>
-              </div>
-            ) : null}
-          </div>
+          <Menu
+            label="Export rows"
+            minWidth={200}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-[13px] font-medium text-muted transition hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-60"
+            trigger={
+              <>
+                <Download className="size-3.5" />
+                Export
+                <ChevronDown className="size-3.5" />
+              </>
+            }
+            items={[
+              {
+                label: "CSV",
+                description: "Opens in any spreadsheet",
+                icon: <FileText className="size-3.5" />,
+                disabled: exporting,
+                onSelect: exportCsv,
+              },
+              {
+                label: "Excel",
+                description: "Formatted .xlsx workbook",
+                icon: <Sheet className="size-3.5" />,
+                disabled: exporting,
+                onSelect: () => void exportXlsx(),
+              },
+            ]}
+          />
         ) : null}
       </div>
 

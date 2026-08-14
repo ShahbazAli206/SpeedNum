@@ -21,7 +21,7 @@ import { SUPABASE_CONFIGURED } from "@/lib/auth";
 import { cn } from "@/lib/cn";
 import type { DocumentFile } from "@/lib/demo";
 import { formatBytes, formatDate } from "@/lib/format";
-import { UploadError, uploadDocument } from "@/lib/storage";
+import { UploadError, documentUrl, uploadDocument } from "@/lib/storage";
 
 const KIND_LABEL: Record<string, string> = {
   invoice: "Invoice",
@@ -51,6 +51,7 @@ export function DocumentsClient({
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [downloading, setDownloading] = useState<string | null>(null);
 
   const acknowledge = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -91,6 +92,30 @@ export function DocumentsClient({
         "Your accountant can now see it in this workspace.",
       );
       router.refresh();
+    }
+  };
+
+  const download = async (row: DocumentFile) => {
+    if (!SUPABASE_CONFIGURED) {
+      toast.info("Demo file", `${row.name} isn't a real document — connect Supabase to store files.`);
+      return;
+    }
+
+    setDownloading(row.id);
+    try {
+      // Opened only once the signed URL is in hand. Opening a window first and
+      // navigating it later is the usual way to keep the popup blocker happy,
+      // but Safari blocks the deferred navigation instead — and this is a
+      // direct click, so the blocker is not in play either way.
+      const url = await documentUrl(row.id);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      toast.error(
+        `Couldn't open ${row.name}`,
+        error instanceof ApiError ? error.message : "Please try again.",
+      );
+    } finally {
+      setDownloading(null);
     }
   };
 
@@ -149,11 +174,12 @@ export function DocumentsClient({
       cell: (row) => (
         <button
           type="button"
+          disabled={downloading === row.id}
           onClick={(event) => {
             event.stopPropagation();
-            toast.info("Download queued", `${row.name} will download once storage is connected.`);
+            void download(row);
           }}
-          className="rounded-lg p-1.5 text-muted transition hover:bg-surface-2 hover:text-ink"
+          className="rounded-lg p-1.5 text-muted transition hover:bg-surface-2 hover:text-ink disabled:opacity-50"
           aria-label={`Download ${row.name}`}
         >
           <Download className="size-4" />

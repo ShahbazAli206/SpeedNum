@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,12 +34,15 @@ from .routers import (
     notifications,
     portal,
     public,
+    reminders,
     reporting,
     services,
     settings as settings_router,
     team,
+    users,
     workflows,
 )
+from .services import scheduler
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -49,15 +53,57 @@ log = logging.getLogger("speednum")
 API_PREFIX = "/api/v1"
 
 
+def _warn_about_configuration() -> None:
+    """Shout about the settings that are merely sloppy in development but are a
+    real exposure in production. Warnings, not failures: a deploy that refuses
+    to boot over CORS would be worse than one that works and says so, and the
+    operator can only read these once the service is actually up."""
+    if settings.is_production and settings.cors_is_wildcard:
+        log.warning(
+            "CORS_ORIGINS is '*' in production — any website can call this API with a "
+            "user's token. Set it to the frontend's exact origin, e.g. "
+            "CORS_ORIGINS=https://your-app.vercel.app"
+        )
+    if settings.is_production and not settings.supabase_service_role_key:
+        log.warning(
+            "SUPABASE_SERVICE_ROLE_KEY is unset — creating logins and signing document "
+            "uploads/downloads will fail with HTTP 424."
+        )
+    if settings.is_production and not settings.resend_api_key:
+        log.warning(
+            "RESEND_API_KEY is unset — credential emails, portal welcomes and reminder "
+            "digests will be logged instead of delivered."
+        )
+    if settings.is_production and settings.public_app_url.startswith("http://localhost"):
+        log.warning(
+            "PUBLIC_APP_URL still points at localhost — sign-in and e-signature links "
+            "sent by email will not work."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _warn_about_configuration()
+
     try:
         async with engine.connect() as connection:
             await connection.execute(text("select 1"))
         log.info("Connected to Supabase Postgres")
     except Exception as exc:  # noqa: BLE001 - the Space should still boot and report why
         log.error("Database connection failed at startup: %s", exc)
+
+    # Generates reminders (and their emails) on a daily timer. Without this the
+    # "10 days left" warnings only ever appear when someone presses Check now.
+    sweep_task = scheduler.start(app.state)
+
     yield
+
+    if sweep_task is not None:
+        sweep_task.cancel()
+        # Let the task observe the cancellation so it can unwind its session
+        # instead of being torn down mid-transaction.
+        with suppress(asyncio.CancelledError):
+            await sweep_task
     await engine.dispose()
 
 
@@ -77,7 +123,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
-    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_origin_regex=settings.cors_origin_regex or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -105,8 +151,10 @@ for router in (
     deadlines.router,
     engagements.router,
     team.router,
+    users.router,
     reporting.router,
     notifications.router,
+    reminders.router,
     custom_fields.router,
     imports.router,
     settings_router.router,

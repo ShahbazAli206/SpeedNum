@@ -46,6 +46,11 @@ LETTER_STATUSES = ("draft", "sent", "viewed", "signed", "declined", "void")
 FIELD_TYPES = ("text", "number", "date", "select", "checkbox", "email", "phone")
 CUSTOM_ENTITIES = ("client", "task", "project")
 
+# Reminders (db/migrations/0007_reminders.sql)
+REMINDER_STATUSES = ("open", "acknowledged", "snoozed", "done", "dismissed")
+REMINDER_SEVERITIES = ("info", "warning", "critical")
+REMINDER_KINDS = ("deadline", "task", "letter", "portal")
+
 # Client-portal "books" (db/migrations/0004_client_books.sql)
 INVOICE_STATUSES = ("draft", "sent", "paid", "overdue", "void")
 EXPENSE_STATUSES = ("pending", "approved", "rejected")
@@ -572,6 +577,55 @@ class Notification(Base):
     link: Mapped[str | None] = mapped_column(Text)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Reminder(Base):
+    """A countdown crossing a threshold — "10 days left", "3 days overdue".
+
+    Separate from Notification: a notification is a one-shot feed entry that is
+    either read or not, whereas a reminder is a work item the firm acknowledges,
+    snoozes or dismisses while the underlying deadline stays open. The sweep in
+    services/reminders.py writes both — one reminder row per (source, threshold),
+    deduplicated on `dedupe_key`, plus a notification so it shows in the bell.
+    See db/migrations/0007_reminders.sql.
+    """
+
+    __tablename__ = "reminders"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    dedupe_key: Mapped[str] = mapped_column(Text, nullable=False)
+    deadline_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("deadlines.id", ondelete="CASCADE")
+    )
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE")
+    )
+    letter_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("engagement_letters.id", ondelete="CASCADE")
+    )
+    client_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE")
+    )
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id"))
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str | None] = mapped_column(Text)
+    link: Mapped[str | None] = mapped_column(Text)
+    due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    days_before: Mapped[int] = mapped_column(Integer, nullable=False)
+    severity: Mapped[str] = mapped_column(
+        pg_enum("reminder_severity", *REMINDER_SEVERITIES), default="info"
+    )
+    status: Mapped[str] = mapped_column(pg_enum("reminder_status", *REMINDER_STATUSES), default="open")
+    snoozed_until: Mapped[date | None] = mapped_column(Date)
+    emailed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    acknowledged_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class CustomField(Base):

@@ -2,7 +2,9 @@
 
 import {
   Clock,
+  KeyRound,
   LogIn,
+  MoreHorizontal,
   Pencil,
   ShieldCheck,
   Trash2,
@@ -11,16 +13,20 @@ import {
   UserRound,
   Users,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { KpiTile } from "@/components/charts";
+import { CredentialsModal } from "@/components/dashboard/credentials-modal";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { DashboardHeader } from "@/components/dashboard/page-shell";
 import { useToast } from "@/components/toast";
-import { Button, Checkbox, Field, Input, Modal, Select } from "@/components/ui";
+import { Button, Checkbox, Field, Input, Menu, Modal, Select } from "@/components/ui";
+import { del, patch, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { TODAY, type PlatformRole, type PlatformUser } from "@/lib/firm-demo";
 import { formatDate, initials } from "@/lib/format";
+import type { CredentialResult } from "@/lib/types";
 
 const ROLE_OPTIONS: { value: PlatformRole; label: string }[] = [
   { value: "owner", label: "Owner" },
@@ -62,14 +68,23 @@ function nextLocalId() {
   return `local-user-${localSeq}`;
 }
 
+/** Pull a human-readable reason out of an ApiError without leaking `[object]`. */
+function message(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 export function UsersClient({
   initialUsers,
   clients,
+  isLive,
 }: {
   initialUsers: PlatformUser[];
   clients: { id: string; business_name: string }[];
+  /** False when `/users` was unreachable and these rows are sample data. */
+  isLive: boolean;
 }) {
   const toast = useToast();
+  const router = useRouter();
 
   const [users, setUsers] = useState(initialUsers);
   const [modalOpen, setModalOpen] = useState(false);
@@ -77,6 +92,8 @@ export function UsersClient({
   const [form, setForm] = useState<FormValues>(BLANK_FORM);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<PlatformUser | null>(null);
+  const [pending, setPending] = useState(false);
+  const [credentials, setCredentials] = useState<CredentialResult | null>(null);
 
   const onboarded = (user: PlatformUser) => user.last_sign_in !== null && !user.must_change_password;
   const admins = users.filter((user) => user.role === "owner" || user.role === "admin");
@@ -105,7 +122,7 @@ export function UsersClient({
     setModalOpen(true);
   };
 
-  const submit = () => {
+  const submit = async () => {
     const fullName = form.fullName.trim();
     const email = form.email.trim();
     if (!fullName) {
@@ -114,6 +131,49 @@ export function UsersClient({
     }
     if (!email || !email.includes("@")) {
       setError("A valid email is required.");
+      return;
+    }
+    if (isLive && !editing && form.role === "client" && !form.clientId) {
+      setError("Pick which client this portal login belongs to.");
+      return;
+    }
+
+    if (isLive) {
+      setPending(true);
+      try {
+        if (editing) {
+          await patch(`/users/${editing.id}`, {
+            full_name: fullName,
+            phone: form.phone || null,
+            // A portal login is always "member" server-side; sending "client"
+            // (a UI-only label) would be rejected by the role guard.
+            role: editing.source === "client" ? undefined : form.role,
+            must_change_password: form.requirePasswordChange,
+          });
+          toast.success(`${fullName} updated`, "Changes saved to their account.");
+          setModalOpen(false);
+        } else {
+          const result = await post<CredentialResult>("/users", {
+            email,
+            full_name: fullName,
+            role: form.role === "client" ? "member" : form.role,
+            phone: form.phone || null,
+            client_id: form.role === "client" ? form.clientId : null,
+            send_email: true,
+          });
+          setModalOpen(false);
+          // The password exists in plaintext exactly once — show it before
+          // anything can navigate away.
+          setCredentials(result);
+        }
+        router.refresh();
+      } catch (caught) {
+        const detail = message(caught, "Please try again.");
+        setError(detail);
+        toast.error(editing ? "Could not save changes" : "Could not create the account", detail);
+      } finally {
+        setPending(false);
+      }
       return;
     }
 
@@ -145,21 +205,44 @@ export function UsersClient({
         source_id: form.role === "client" ? form.clientId : "",
       };
       setUsers((current) => [...current, created]);
-      toast.success(
-        `${fullName} added`,
-        form.requirePasswordChange
-          ? "Invited — they'll be asked to set a password on first sign-in."
-          : "Account created.",
+      toast.info(
+        `${fullName} added (demo)`,
+        "No API is connected, so this account only exists in your browser.",
       );
     }
     setModalOpen(false);
   };
 
-  const confirmDelete = () => {
+  const resendCredentials = async (user: PlatformUser) => {
+    if (!isLive) {
+      toast.info("Demo mode", "Connect the API to issue and email a new password.");
+      return;
+    }
+    try {
+      setCredentials(await post<CredentialResult>(`/users/${user.id}/resend-credentials`));
+    } catch (caught) {
+      toast.error("Could not reset their password", message(caught, "Please try again."));
+    }
+  };
+
+  const confirmDelete = async () => {
     if (!deleting) return;
-    setUsers((current) => current.filter((user) => user.id !== deleting.id));
-    toast.success(`${deleting.full_name} removed`, "Their account and access have been revoked.");
+    const user = deleting;
     setDeleting(null);
+
+    if (isLive) {
+      try {
+        const result = await del<{ message: string }>(`/users/${user.id}`);
+        toast.success(`${user.full_name} removed`, result.message);
+        router.refresh();
+      } catch (caught) {
+        toast.error("Could not remove them", message(caught, "Please try again."));
+      }
+      return;
+    }
+
+    setUsers((current) => current.filter((row) => row.id !== user.id));
+    toast.info(`${user.full_name} removed (demo)`, "Nothing was changed on the server.");
   };
 
   const columns: Column<PlatformUser>[] = [
@@ -221,24 +304,31 @@ export function UsersClient({
       header: "Actions",
       align: "right",
       cell: (row) => (
-        <span className="inline-flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => openEdit(row)}
-            className="grid size-8 place-items-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-ink"
-            aria-label={`Edit ${row.full_name}`}
-          >
-            <Pencil className="size-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setDeleting(row)}
-            className="grid size-8 place-items-center rounded-lg text-muted transition hover:bg-danger-soft hover:text-danger"
-            aria-label={`Delete ${row.full_name}`}
-          >
-            <Trash2 className="size-4" />
-          </button>
-        </span>
+        <Menu
+          label={`Actions for ${row.full_name}`}
+          className="grid size-8 place-items-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-ink"
+          trigger={<MoreHorizontal className="size-4" />}
+          items={[
+            {
+              label: "Edit details",
+              icon: <Pencil className="size-3.5" />,
+              onSelect: () => openEdit(row),
+            },
+            {
+              label: "Resend credentials",
+              description: "Issues a new temporary password",
+              icon: <KeyRound className="size-3.5" />,
+              onSelect: () => void resendCredentials(row),
+            },
+            {
+              label: "Remove access",
+              icon: <Trash2 className="size-3.5" />,
+              danger: true,
+              separated: true,
+              onSelect: () => setDeleting(row),
+            },
+          ]}
+        />
       ),
     },
   ];
@@ -327,7 +417,11 @@ export function UsersClient({
             <Button variant="secondary" onClick={() => setModalOpen(false)}>
               Cancel
             </Button>
-            <Button icon={<UserPlus className="size-4" />} onClick={submit}>
+            <Button
+              icon={<UserPlus className="size-4" />}
+              onClick={() => void submit()}
+              loading={pending}
+            >
               {editing ? "Save changes" : "Add user"}
             </Button>
           </>
@@ -358,16 +452,14 @@ export function UsersClient({
             <Field label="Role">
               <Select
                 value={form.role}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, role: event.target.value as PlatformRole }))
+                onValueChange={(next) =>
+                  setForm((current) => ({ ...current, role: next as PlatformRole }))
                 }
-              >
-                {ROLE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
+                // A portal login's role is fixed server-side; offering to change
+                // it here would only produce a 422.
+                disabled={editing?.source === "client"}
+                options={ROLE_OPTIONS}
+              />
             </Field>
             <Field label="Phone">
               <Input
@@ -380,15 +472,14 @@ export function UsersClient({
               <Field label="Linked client" hint="Which client record this login belongs to.">
                 <Select
                   value={form.clientId}
-                  onChange={(event) => setForm((current) => ({ ...current, clientId: event.target.value }))}
-                >
-                  <option value="">Select a client…</option>
-                  {clients.map((client) => (
-                    <option key={client.id} value={client.id}>
-                      {client.business_name}
-                    </option>
-                  ))}
-                </Select>
+                  onValueChange={(clientId) => setForm((current) => ({ ...current, clientId }))}
+                  placeholder="Select a client…"
+                  searchPlaceholder="Search clients…"
+                  options={clients.map((client) => ({
+                    value: client.id,
+                    label: client.business_name,
+                  }))}
+                />
               </Field>
             ) : null}
           </div>
@@ -405,15 +496,19 @@ export function UsersClient({
       <Modal
         open={deleting !== null}
         onClose={() => setDeleting(null)}
-        title="Delete user"
-        description="This permanently revokes their access — it can't be undone."
+        title="Remove access"
+        description="They will no longer be able to sign in."
         footer={
           <>
             <Button variant="secondary" onClick={() => setDeleting(null)}>
               Cancel
             </Button>
-            <Button variant="danger" icon={<Trash2 className="size-4" />} onClick={confirmDelete}>
-              Delete user
+            <Button
+              variant="danger"
+              icon={<Trash2 className="size-4" />}
+              onClick={() => void confirmDelete()}
+            >
+              Remove access
             </Button>
           </>
         }
@@ -421,15 +516,26 @@ export function UsersClient({
         {deleting ? (
           <div className="flex items-start gap-3 rounded-lg bg-danger-soft/60 p-3.5">
             <TriangleAlert className="mt-0.5 size-4.5 shrink-0 text-danger" />
+            {/* Wording matches what the server actually does (users.py:234):
+                staff are deactivated because clients and tasks reference them
+                as owner/assignee; only portal logins are deleted outright. */}
             <p className="text-[13.5px] leading-relaxed text-ink-soft">
-              You&apos;re about to delete{" "}
+              You&apos;re about to revoke access for{" "}
               <strong className="font-semibold text-ink">{deleting.full_name}</strong>{" "}
-              ({deleting.email}). All sensitive data tied to this login — sessions, saved preferences and
-              portal access — will be removed along with the account.
+              ({deleting.email}).{" "}
+              {deleting.source === "client"
+                ? "Their portal login is deleted and the client record loses portal access. The client record itself is kept."
+                : "Their staff account is deactivated rather than deleted, so the clients and tasks they own keep their assignment. Their sign-in is revoked immediately."}
             </p>
           </div>
         ) : null}
       </Modal>
+
+      <CredentialsModal
+        result={credentials}
+        onClose={() => setCredentials(null)}
+        kind={credentials?.role === "member" ? "account" : "platform"}
+      />
     </>
   );
 }

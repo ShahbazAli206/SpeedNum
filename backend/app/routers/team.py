@@ -10,10 +10,21 @@ from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import func, select
 
 from ..config import settings
-from ..deps import AdminUserDep, SessionDep, TenantUserDep, client_ip
+from ..deps import AdminUserDep, CurrentUserDep, SessionDep, TenantUserDep, client_ip
 from ..models import Client, Deadline, Invitation, Profile, Task
-from ..schemas import InvitationCreate, InvitationRead, Ok, ProfileUpdate, TeamMemberRead
-from ..services import audit
+from ..schemas import (
+    CredentialResult,
+    InvitationAccept,
+    InvitationCreate,
+    InvitationRead,
+    Ok,
+    ProfileRead,
+    ProfileUpdate,
+    StaffCreate,
+    TeamMemberRead,
+)
+from ..services import accounts, audit
+from ..services.accounts import ROLE_LABELS, AccountError
 from ..services.email import invite_html, send_email
 from ..utils import apply_updates, ensure_found, now_utc, read, today_utc
 
@@ -28,10 +39,12 @@ def _invite_url(token: str) -> str:
 
 @router.get("", response_model=list[TeamMemberRead])
 async def list_team(session: SessionDep, user: TenantUserDep) -> list[TeamMemberRead]:
+    # client_id is null = firm staff. Client-portal logins share the tenant but
+    # belong on /users, not on the accountant roster.
     members = (
         await session.scalars(
             select(Profile)
-            .where(Profile.tenant_id == user.tenant_id)
+            .where(Profile.tenant_id == user.tenant_id, Profile.client_id.is_(None))
             .order_by(Profile.is_active.desc(), Profile.full_name)
         )
     ).all()
@@ -80,6 +93,128 @@ async def list_team(session: SessionDep, user: TenantUserDep) -> list[TeamMember
     ]
 
 
+@router.post("", response_model=CredentialResult, status_code=status.HTTP_201_CREATED)
+async def create_member(
+    payload: StaffCreate, session: SessionDep, user: AdminUserDep, request: Request
+) -> CredentialResult:
+    """Create an accountant's login and email them their credentials.
+
+    The alternative flow — POST /team/invitations — mails a signup link and
+    waits for the person to choose their own password. This one is for the
+    common case where the firm admin is onboarding staff directly and wants the
+    account to exist immediately, so the temporary password is generated here
+    and `must_change_password` forces a reset on first sign-in.
+    """
+    email = str(payload.email).strip().lower()
+
+    try:
+        result = await accounts.provision(
+            session,
+            tenant=user.tenant,
+            email=email,
+            full_name=payload.full_name,
+            role=payload.role,
+            title=payload.title,
+            phone=payload.phone,
+            weekly_capacity=payload.weekly_capacity,
+            send_welcome=payload.send_email,
+            reply_to=user.profile.email,
+        )
+    except AccountError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+
+    member = result.profile
+
+    await audit.record(
+        session,
+        tenant_id=user.tenant_id,
+        actor_id=user.profile.id,
+        actor_email=user.profile.email,
+        action="created",
+        entity="profile",
+        entity_id=member.id,
+        summary=f"Created {payload.role} account for {member.full_name} ({email})",
+        ip_address=client_ip(request),
+    )
+    await audit.notify(
+        session,
+        tenant_id=user.tenant_id,
+        type="team",
+        title=f"{member.full_name} joined the team",
+        body=f"Added as {ROLE_LABELS.get(payload.role, 'a team member')} by {user.profile.full_name or user.profile.email}.",
+        link=f"/team/{member.id}",
+    )
+
+    return CredentialResult(
+        profile_id=member.id,
+        email=email,
+        full_name=member.full_name,
+        role=payload.role,
+        temp_password=result.temp_password,
+        login_url=accounts.login_url(),
+        email_sent=result.email_sent,
+        message=(
+            "Credentials emailed."
+            if result.email_sent
+            else "Account created, but email delivery isn't configured — share the password below."
+        ),
+    )
+
+
+@router.post("/{profile_id}/resend-credentials", response_model=CredentialResult)
+async def resend_credentials(
+    profile_id: uuid.UUID, session: SessionDep, user: AdminUserDep, request: Request
+) -> CredentialResult:
+    """Rotate a staff member's password to a fresh one-time value and re-send it.
+
+    The original is unrecoverable once Supabase has hashed it, so "resend" is
+    necessarily "reset and send" — the same shape as the client-portal resend in
+    routers/clients.py.
+    """
+    member = await session.scalar(
+        select(Profile).where(
+            Profile.id == profile_id,
+            Profile.tenant_id == user.tenant_id,
+            Profile.client_id.is_(None),
+        )
+    )
+    ensure_found(member, "Team member")
+
+    try:
+        result = await accounts.reissue(
+            session, tenant=user.tenant, profile=member, reply_to=user.profile.email
+        )
+    except AccountError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+
+    await audit.record(
+        session,
+        tenant_id=user.tenant_id,
+        actor_id=user.profile.id,
+        actor_email=user.profile.email,
+        action="password_reset",
+        entity="profile",
+        entity_id=member.id,
+        summary=f"Issued a new temporary password for {member.full_name or member.email}",
+        ip_address=client_ip(request),
+    )
+
+    return CredentialResult(
+        profile_id=member.id,
+        email=member.email,
+        full_name=member.full_name,
+        role=member.role,
+        temp_password=result.temp_password,
+        login_url=accounts.login_url(),
+        email_sent=result.email_sent,
+        message=(
+            "New credentials emailed."
+            if result.email_sent
+            else "Password reset, but email delivery isn't configured — share the password below."
+        ),
+    )
+
+
 @router.patch("/{profile_id}", response_model=TeamMemberRead)
 async def update_member(
     profile_id: uuid.UUID,
@@ -118,6 +253,74 @@ async def update_member(
             ip_address=client_ip(request),
         )
     return read(TeamMemberRead, member)
+
+
+@router.delete("/{profile_id}", response_model=Ok)
+async def remove_member(
+    profile_id: uuid.UUID,
+    session: SessionDep,
+    user: AdminUserDep,
+    request: Request,
+    revoke_login: bool = True,
+) -> Ok:
+    """Remove an accountant from the firm.
+
+    The `profiles` row is deactivated, not deleted: the clients, tasks and
+    deadlines they own reference this id, and a hard delete would null those
+    assignments out and lose the audit trail. Deactivating is enough to lock
+    them out — get_current_user refuses an inactive profile's token — and the
+    Supabase Auth login is revoked as well so the credentials themselves stop
+    working rather than merely being rejected by us.
+    """
+    member = await session.scalar(
+        select(Profile).where(
+            Profile.id == profile_id,
+            Profile.tenant_id == user.tenant_id,
+            Profile.client_id.is_(None),
+        )
+    )
+    ensure_found(member, "Team member")
+
+    if member.id == user.profile.id:
+        raise HTTPException(status.HTTP_409_CONFLICT, "You cannot remove your own account.")
+
+    if member.role == "owner":
+        owners = await session.scalar(
+            select(func.count(Profile.id)).where(
+                Profile.tenant_id == user.tenant_id,
+                Profile.role == "owner",
+                Profile.is_active.is_(True),
+            )
+        )
+        if (owners or 0) <= 1:
+            raise HTTPException(status.HTTP_409_CONFLICT, "A firm must keep at least one owner.")
+
+    member.is_active = False
+    await session.flush()
+
+    # The profile is already deactivated, so access is blocked either way —
+    # accounts.revoke reports a shortfall rather than failing the request.
+    login_revoked = await accounts.revoke(member) if revoke_login else False
+
+    await audit.record(
+        session,
+        tenant_id=user.tenant_id,
+        actor_id=user.profile.id,
+        actor_email=user.profile.email,
+        action="deactivated",
+        entity="profile",
+        entity_id=member.id,
+        summary=f"Removed {member.full_name or member.email} from the team",
+        metadata={"login_revoked": login_revoked},
+        ip_address=client_ip(request),
+    )
+    return Ok(
+        message=(
+            f"{member.full_name or member.email} removed and their login revoked."
+            if login_revoked
+            else f"{member.full_name or member.email} deactivated — they can no longer sign in."
+        )
+    )
 
 
 @router.get("/invitations", response_model=list[InvitationRead])
@@ -189,6 +392,62 @@ async def invite_member(
         ip_address=client_ip(request),
     )
     return read(InvitationRead, invitation, invite_url=_invite_url(invitation.token))
+
+
+@router.post("/invitations/accept", response_model=ProfileRead)
+async def accept_invitation(
+    payload: InvitationAccept, session: SessionDep, user: CurrentUserDep
+) -> ProfileRead:
+    """Attach the signed-in account to the firm that invited it.
+
+    Called by the signup form when it was reached from an invitation link. It has
+    to run *after* Supabase has created the auth user, because until then there
+    is no profile to attach — which is also why it takes CurrentUserDep rather
+    than TenantUserDep: the caller has no tenant yet, that is the point.
+    """
+    invitation = await session.scalar(
+        select(Invitation).where(Invitation.token == payload.token)
+    )
+    if invitation is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "That invitation link is not valid.")
+    if invitation.accepted_at is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "That invitation has already been used.")
+    if invitation.expires_at < now_utc():
+        raise HTTPException(
+            status.HTTP_410_GONE, "That invitation has expired — ask your firm to send a new one."
+        )
+    if user.profile.tenant_id is not None and user.profile.tenant_id != invitation.tenant_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "This account already belongs to a different firm."
+        )
+
+    user.profile.tenant_id = invitation.tenant_id
+    user.profile.role = invitation.role
+    user.profile.client_id = None
+    if payload.full_name:
+        user.profile.full_name = payload.full_name.strip()
+    invitation.accepted_at = now_utc()
+    await session.flush()
+
+    await audit.record(
+        session,
+        tenant_id=invitation.tenant_id,
+        actor_id=user.profile.id,
+        actor_email=user.profile.email,
+        action="accepted",
+        entity="invitation",
+        entity_id=invitation.id,
+        summary=f"{user.profile.full_name or user.profile.email} joined as {invitation.role}",
+    )
+    await audit.notify(
+        session,
+        tenant_id=invitation.tenant_id,
+        type="team",
+        title=f"{user.profile.full_name or user.profile.email} accepted their invitation",
+        body=f"They joined as {ROLE_LABELS.get(invitation.role, 'a team member')}.",
+        link=f"/team/{user.profile.id}",
+    )
+    return ProfileRead.model_validate(user.profile)
 
 
 @router.delete("/invitations/{invitation_id}", response_model=Ok)

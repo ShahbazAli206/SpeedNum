@@ -21,7 +21,7 @@ import { KpiTile } from "@/components/charts";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { DashboardHeader } from "@/components/dashboard/page-shell";
 import { useToast } from "@/components/toast";
-import { ButtonLink } from "@/components/ui";
+import { ButtonLink, Select } from "@/components/ui";
 import { del, patch } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { daysFromToday, type Task } from "@/lib/firm-demo";
@@ -219,22 +219,20 @@ export function WorkflowsClient({
       key: "status",
       header: "Status",
       cell: (row) => (
-        <select
-          value={statusOf(row)}
-          onClick={(event) => event.stopPropagation()}
-          onChange={(event) => move(row, event.target.value as TaskStatus)}
-          aria-label={`Status for ${row.title}`}
-          className={cn(
-            "h-7 rounded-full border-0 py-0 pr-6 pl-2.5 text-[11.5px] font-semibold transition",
-            STATUS_TONE[statusOf(row)],
-          )}
-        >
-          {STATUS_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        // The row itself is clickable — swallow the click so opening the menu
+        // doesn't also navigate to the task.
+        <span onClick={(event) => event.stopPropagation()}>
+          <Select
+            value={statusOf(row)}
+            onValueChange={(next) => move(row, next as TaskStatus)}
+            aria-label={`Status for ${row.title}`}
+            options={STATUS_OPTIONS}
+            size="xs"
+            variant="unstyled"
+            fullWidth={false}
+            className={cn("rounded-full font-semibold", STATUS_TONE[statusOf(row)])}
+          />
+        </span>
       ),
       sortValue: (row) => statusOf(row),
     },
@@ -323,22 +321,17 @@ export function WorkflowsClient({
           />
         ) : null}
 
-        <select
+        <Select
           value={assignee}
-          onChange={(event) => setAssignee(event.target.value)}
+          onValueChange={setAssignee}
           aria-label="Assignee"
-          className={cn(
-            "h-9 min-w-40 rounded-lg border border-line-strong bg-surface pr-8 pl-3 text-[13.5px] text-ink transition focus:border-brand",
-            view === "board" ? "" : "ml-auto",
-          )}
-        >
-          <option value="all">All assignees</option>
-          {assignees.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
+          fullWidth={false}
+          className={cn("min-w-40", view === "board" ? "" : "ml-auto")}
+          options={[
+            { value: "all", label: "All assignees" },
+            ...assignees.map((name) => ({ value: name, label: name })),
+          ]}
+        />
 
         <div className="inline-flex rounded-lg border border-line bg-surface p-0.5">
           <button
@@ -419,19 +412,23 @@ export function WorkflowsClient({
                         </div>
 
                         {/* Inline status change — no need to open the card */}
-                        <select
-                          value={statusOf(task)}
+                        <span
+                          className="mt-2.5 block"
                           onClick={(event) => event.stopPropagation()}
-                          onChange={(event) => move(task, event.target.value as TaskStatus)}
-                          aria-label={`Status for ${task.title}`}
-                          className="mt-2.5 h-7 w-full rounded-md border border-line bg-surface-2/60 px-2 text-[11.5px] text-ink-soft transition focus:border-brand"
                         >
-                          {COLUMNS.map((option) => (
-                            <option key={option.status} value={option.status}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
+                          <Select
+                            value={statusOf(task)}
+                            onValueChange={(next) => move(task, next as TaskStatus)}
+                            aria-label={`Status for ${task.title}`}
+                            options={COLUMNS.map((option) => ({
+                              value: option.status,
+                              label: option.label,
+                            }))}
+                            size="xs"
+                            variant="pill"
+                            className="rounded-md"
+                          />
+                        </span>
                       </li>
                     ))}
                     {columnTasks.length === 0 ? (

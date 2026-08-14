@@ -136,6 +136,12 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         icon: "calendar-clock",
         description: "The SLA board — overdue, due soon, upcoming",
       },
+      {
+        label: "Reminders",
+        href: "/reminders",
+        icon: "bell-ring",
+        description: "Countdown alerts — 10 days left, due today, overdue",
+      },
     ],
   },
   {

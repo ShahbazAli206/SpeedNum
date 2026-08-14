@@ -172,14 +172,17 @@ export function NewEngagementClient({ clients, services }: { clients: Client[]; 
         >
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Client" required>
-              <Select value={clientId} onChange={(event) => onSelectClient(event.target.value)}>
-                <option value="">Select client…</option>
-                {clients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.business_name || client.legal_name}
-                  </option>
-                ))}
-              </Select>
+              <Select
+                value={clientId}
+                onValueChange={onSelectClient}
+                placeholder="Select client…"
+                searchPlaceholder="Search clients…"
+                options={clients.map((client) => ({
+                  value: client.id,
+                  label: client.business_name || client.legal_name,
+                  description: client.email ?? undefined,
+                }))}
+              />
             </Field>
             <Field label="Letter title">
               <Input value={title} onChange={(event) => setTitle(event.target.value)} />
@@ -210,14 +213,17 @@ export function NewEngagementClient({ clients, services }: { clients: Client[]; 
           description="Add services from your catalogue or custom lines."
         >
           <div className="flex flex-wrap items-center gap-2">
-            <Select value={serviceToAdd} onChange={(event) => setServiceToAdd(event.target.value)} className="max-w-xs">
-              <option value="">Add a service…</option>
-              {services.map((service) => (
-                <option key={service.id} value={service.id}>
-                  {service.name} — {formatMoney(service.default_price)}
-                </option>
-              ))}
-            </Select>
+            <Select
+              value={serviceToAdd}
+              onValueChange={setServiceToAdd}
+              className="w-64"
+              placeholder="Add a service…"
+              options={services.map((service) => ({
+                value: service.id,
+                label: service.name,
+                description: formatMoney(service.default_price),
+              }))}
+            />
             <Button type="button" variant="secondary" size="sm" icon={<Plus className="size-3.5" />} onClick={addFromCatalogue} disabled={!serviceToAdd}>
               Add
             </Button>

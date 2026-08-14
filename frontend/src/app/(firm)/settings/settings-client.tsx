@@ -4,7 +4,7 @@ import { ImagePlus, Mail, Palette, Save } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useToast } from "@/components/toast";
-import { Button, Checkbox, Field, Input } from "@/components/ui";
+import { Button, Checkbox, Field, Input, Select } from "@/components/ui";
 import { cn } from "@/lib/cn";
 
 import {
@@ -147,17 +147,11 @@ export function SettingsClient() {
             placeholder={DEFAULT_BRANDING.primaryDark}
           />
           <Field label="Font family">
-            <select
+            <Select
               value={form.font}
-              onChange={(event) => update("font", event.target.value)}
-              className="h-9.5 w-full rounded-lg border border-line-strong bg-surface px-3 pr-8 text-sm text-ink transition focus:border-brand"
-            >
-              {FONT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+              onValueChange={(next) => update("font", next)}
+              options={FONT_OPTIONS}
+            />
           </Field>
           <Field label="Phone">
             <Input value={form.phone} onChange={(event) => update("phone", event.target.value)} />

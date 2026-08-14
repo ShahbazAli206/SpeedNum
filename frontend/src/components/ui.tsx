@@ -198,13 +198,26 @@ export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTex
   return <textarea {...props} className={cn(CONTROL, "min-h-24 resize-y leading-relaxed", className)} />;
 }
 
-export function Select({ className, children, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+/**
+ * The styled native `<select>`. Kept only for the rare case where the OS
+ * picker is genuinely wanted (very long unfiltered lists on mobile). Everything
+ * else should use `Select` from `@/components/select`, re-exported below — it
+ * renders a real listbox, so the options obey our tokens and dark mode.
+ */
+export function NativeSelect({
+  className,
+  children,
+  ...props
+}: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select {...props} className={cn(CONTROL, "h-9.5 pr-8", className)}>
       {children}
     </select>
   );
 }
+
+export { Select, Menu, toOptions } from "./select";
+export type { SelectOption, SelectGroup, SelectProps, MenuItem } from "./select";
 
 export function Field({
   label,
@@ -444,11 +457,14 @@ export function Alert({
   title,
   children,
   onDismiss,
+  className,
 }: {
   tone?: "info" | "success" | "warn" | "danger";
   title?: string;
   children?: ReactNode;
   onDismiss?: () => void;
+  /** Layout only — spacing against neighbouring blocks. */
+  className?: string;
 }) {
   const icons = {
     info: <Info className="size-4" />,
@@ -463,7 +479,13 @@ export function Alert({
     danger: "bg-danger-soft text-danger",
   };
   return (
-    <div className={cn("flex items-start gap-2.5 rounded-lg px-3.5 py-2.5 text-sm", tones[tone])}>
+    <div
+      className={cn(
+        "flex items-start gap-2.5 rounded-lg px-3.5 py-2.5 text-sm",
+        tones[tone],
+        className,
+      )}
+    >
       <span className="mt-0.5 shrink-0">{icons[tone]}</span>
       <div className="min-w-0 flex-1">
         {title ? <p className="font-medium">{title}</p> : null}
@@ -522,6 +544,7 @@ export function Modal({
   children,
   footer,
   width = "md",
+  dismissible = true,
 }: {
   open: boolean;
   onClose: () => void;
@@ -530,11 +553,18 @@ export function Modal({
   children: ReactNode;
   footer?: ReactNode;
   width?: "sm" | "md" | "lg" | "xl";
+  /**
+   * When false, Escape, the backdrop and the close button all stop working —
+   * for the rare modal the user genuinely must complete, where the API will
+   * refuse everything else anyway (see ForcePasswordModal). Escaping such a
+   * dialog only produces a wall of errors with no way back to it.
+   */
+  dismissible?: boolean;
 }) {
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && dismissible) onClose();
     };
     document.addEventListener("keydown", onKey);
     const previous = document.body.style.overflow;
@@ -543,7 +573,7 @@ export function Modal({
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = previous;
     };
-  }, [open, onClose]);
+  }, [open, onClose, dismissible]);
 
   if (!open) return null;
 
@@ -551,7 +581,7 @@ export function Modal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/45 p-4 backdrop-blur-[2px] sm:p-8">
-      <div className="absolute inset-0" onClick={onClose} aria-hidden />
+      <div className="absolute inset-0" onClick={dismissible ? onClose : undefined} aria-hidden />
       <div
         role="dialog"
         aria-modal="true"
@@ -566,14 +596,16 @@ export function Modal({
             <h2 className="text-base font-semibold text-ink">{title}</h2>
             {description ? <p className="mt-0.5 text-[13px] text-muted">{description}</p> : null}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="-m-1 rounded-lg p-1 text-muted transition hover:bg-surface-2 hover:text-ink"
-            aria-label="Close"
-          >
-            <X className="size-4.5" />
-          </button>
+          {dismissible ? (
+            <button
+              type="button"
+              onClick={onClose}
+              className="-m-1 rounded-lg p-1 text-muted transition hover:bg-surface-2 hover:text-ink"
+              aria-label="Close"
+            >
+              <X className="size-4.5" />
+            </button>
+          ) : null}
         </div>
         <div className="scroll-thin max-h-[70vh] overflow-y-auto px-5 py-4">{children}</div>
         {footer ? (

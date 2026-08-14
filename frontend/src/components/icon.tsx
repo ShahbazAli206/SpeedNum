@@ -1,6 +1,7 @@
 import {
   ArrowRight,
   Bell,
+  BellRing,
   CalendarCheck,
   CalendarClock,
   ChartColumn,
@@ -39,6 +40,7 @@ const ICONS: Record<string, LucideIcon> = {
   "arrow-right": ArrowRight,
   "bar-chart-3": ChartColumn,
   bell: Bell,
+  "bell-ring": BellRing,
   "calendar-check": CalendarCheck,
   "calendar-clock": CalendarClock,
   "file-signature": Signature,

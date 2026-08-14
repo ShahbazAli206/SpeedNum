@@ -21,7 +21,8 @@ All public pages share a common header/footer and are mostly static content. Ele
 
 ## Authentication Flow (Login)
 
-We have credentials (email **sa38299793@gmail.com**, password **test**). In a live testing setup, we would automate login (e.g. with Selenium or Playwright) by navigating to `/login`, filling the form, and capturing the network requests. In practice, the environment here could not render that dynamic page. Based on standard patterns and the Privacy/Terms text, we infer that the app uses a session or token-based login. For example, the Security page mentions “JWT-verified portals” and “signed tenant sessions”, implying that upon login, the server issues a JWT or cookie for session management. Cookies are used to keep the user signed in. CSRF tokens likely protect form submissions, though specifics are not documented.
+We have credentials for the reference site (kept out of this document — see
+`DEPLOYMENT.secrets.local.md`, which is gitignored). In a live testing setup, we would automate login (e.g. with Selenium or Playwright) by navigating to `/login`, filling the form, and capturing the network requests. In practice, the environment here could not render that dynamic page. Based on standard patterns and the Privacy/Terms text, we infer that the app uses a session or token-based login. For example, the Security page mentions “JWT-verified portals” and “signed tenant sessions”, implying that upon login, the server issues a JWT or cookie for session management. Cookies are used to keep the user signed in. CSRF tokens likely protect form submissions, though specifics are not documented.
 
 A typical login sequence (not observed directly) would be:
 

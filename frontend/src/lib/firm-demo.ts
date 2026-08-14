@@ -19,6 +19,10 @@ import type {
   Frequency,
   LetterStatus,
   ProjectStatus,
+  Reminder,
+  ReminderCounts,
+  ReminderSeverity,
+  ReminderUrgency,
   TaskPriority,
   TaskStatus,
   TaskType,
@@ -559,6 +563,174 @@ const TENANTS: AdminTenant[] = [
 ];
 
 /* -------------------------------------------------------------------------- */
+/* Reminders                                                                   */
+/*                                                                             */
+/* Derived from the demo deadlines and tasks by the same ladder the backend     */
+/* uses (backend/app/services/reminders.py), so the demo page and the live one  */
+/* group and word things identically. Kept as a function rather than a fixture  */
+/* because the counts have to follow TODAY, and a hand-written list would drift */
+/* out of step with the deadlines above the moment either is edited.            */
+/* -------------------------------------------------------------------------- */
+
+/** Lead times in days. Mirrors DEFAULT_REMINDER_DAYS in the backend engine. */
+const REMINDER_LADDER = [30, 14, 10, 7, 3, 1, 0];
+const OVERDUE_LADDER = [-1, -3, -7, -14, -30];
+
+function reminderRung(daysRemaining: number): number | null {
+  if (daysRemaining < 0) {
+    const reached = OVERDUE_LADDER.filter((day) => day >= daysRemaining);
+    return reached.length > 0 ? Math.min(...reached) : null;
+  }
+  const candidates = REMINDER_LADDER.filter((day) => day >= daysRemaining);
+  return candidates.length > 0 ? Math.min(...candidates) : null;
+}
+
+function reminderSeverity(daysRemaining: number): ReminderSeverity {
+  if (daysRemaining <= 3) return "critical";
+  if (daysRemaining <= 10) return "warning";
+  return "info";
+}
+
+function countdownPhrase(daysRemaining: number): string {
+  if (daysRemaining < -1) return `${Math.abs(daysRemaining)} days overdue`;
+  if (daysRemaining === -1) return "1 day overdue";
+  if (daysRemaining === 0) return "due today";
+  if (daysRemaining === 1) return "1 day left";
+  return `${daysRemaining} days left`;
+}
+
+function reminderUrgency(daysRemaining: number): ReminderUrgency {
+  if (daysRemaining < 0) return "overdue";
+  if (daysRemaining === 0) return "due_today";
+  if (daysRemaining <= 10) return "due_soon";
+  return "upcoming";
+}
+
+function buildReminders(): Reminder[] {
+  const out: Reminder[] = [];
+
+  for (const deadline of DEADLINES) {
+    if (deadline.status !== "open") continue;
+    const rung = reminderRung(deadline.days_remaining);
+    if (rung === null) continue;
+    const phrase = countdownPhrase(deadline.days_remaining);
+    out.push({
+      id: `rem-${deadline.id}-${rung}`,
+      kind: "deadline",
+      title: `${phrase}: ${deadline.title} for ${deadline.client_name}`,
+      body: `${deadline.title} — ${deadline.period_label} is due ${deadline.due_date} (${phrase}).`,
+      link: "/deadlines",
+      due_date: deadline.due_date,
+      days_before: rung,
+      severity: reminderSeverity(deadline.days_remaining),
+      // A couple of the tightest ones are pre-acknowledged so the demo shows
+      // both states rather than a wall of untouched rows.
+      status: deadline.days_remaining < 0 ? "acknowledged" : "open",
+      snoozed_until: null,
+      emailed_at: offsetDate(TODAY, 0),
+      acknowledged_at: deadline.days_remaining < 0 ? offsetDate(TODAY, -1) : null,
+      client_id: deadline.client_id,
+      deadline_id: deadline.id,
+      task_id: null,
+      letter_id: null,
+      assignee_id: deadline.assignee_id,
+      created_at: offsetDate(TODAY, 0),
+      client_name: deadline.client_name,
+      assignee_name: deadline.assignee_name,
+      days_remaining: deadline.days_remaining,
+      urgency: reminderUrgency(deadline.days_remaining),
+    });
+  }
+
+  for (const task of TASKS) {
+    if (task.status === "complete" || !task.due_date) continue;
+    const days = daysFromToday(task.due_date);
+    const rung = reminderRung(days);
+    if (rung === null) continue;
+    const phrase = countdownPhrase(days);
+    out.push({
+      id: `rem-${task.id}-${rung}`,
+      kind: "task",
+      title: `${phrase}: ${task.title}${task.client_name !== "—" ? ` · ${task.client_name}` : ""}`,
+      body: `Task '${task.title}' is due ${task.due_date} (${phrase}).`,
+      link: `/workflows/${task.id}`,
+      due_date: task.due_date,
+      days_before: rung,
+      severity: reminderSeverity(days),
+      status: "open",
+      snoozed_until: null,
+      emailed_at: offsetDate(TODAY, 0),
+      acknowledged_at: null,
+      client_id: task.client_id,
+      deadline_id: null,
+      task_id: task.id,
+      letter_id: null,
+      assignee_id: task.assignee_id,
+      created_at: offsetDate(TODAY, 0),
+      client_name: task.client_name === "—" ? null : task.client_name,
+      assignee_name: task.assignee_name,
+      days_remaining: days,
+      urgency: reminderUrgency(days),
+    });
+  }
+
+  for (const letter of LETTERS) {
+    if (letter.status !== "sent" && letter.status !== "viewed") continue;
+    // The demo letters have no expiry column; treat 30 days from sending as the
+    // signing window, which is what the backend's `expires_at` holds.
+    const due = offsetDate(letter.sent_at ?? TODAY, 30);
+    const days = daysFromToday(due);
+    const rung = reminderRung(days);
+    if (rung === null) continue;
+    const phrase = countdownPhrase(days);
+    out.push({
+      id: `rem-${letter.id}-${rung}`,
+      kind: "letter",
+      title: `${phrase}: signature outstanding on ${letter.title}`,
+      body: `${letter.client_name} has not signed '${letter.title}' yet — ${phrase} before it expires.`,
+      link: `/engagements/${letter.id}`,
+      due_date: due,
+      days_before: rung,
+      severity: reminderSeverity(days),
+      status: "open",
+      snoozed_until: null,
+      emailed_at: null,
+      acknowledged_at: null,
+      client_id: letter.client_id,
+      deadline_id: null,
+      task_id: null,
+      letter_id: letter.id,
+      assignee_id: null,
+      created_at: offsetDate(TODAY, 0),
+      client_name: letter.client_name,
+      assignee_name: null,
+      days_remaining: days,
+      urgency: reminderUrgency(days),
+    });
+  }
+
+  return out.sort((a, b) => a.days_remaining - b.days_remaining);
+}
+
+const REMINDERS: Reminder[] = buildReminders();
+
+export const getReminders = (): Reminder[] => REMINDERS;
+
+export function getReminderCounts(rows: Reminder[] = REMINDERS): ReminderCounts {
+  const live = rows.filter(
+    (row) => row.status === "open" || row.status === "acknowledged" || row.status === "snoozed",
+  );
+  return {
+    open: live.length,
+    unacknowledged: rows.filter((row) => row.status === "open").length,
+    overdue: live.filter((row) => row.urgency === "overdue").length,
+    due_today: live.filter((row) => row.urgency === "due_today").length,
+    due_soon: live.filter((row) => row.urgency === "due_soon").length,
+    upcoming: live.filter((row) => row.urgency === "upcoming").length,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
 /* Accessors                                                                   */
 /* -------------------------------------------------------------------------- */
 
@@ -626,6 +798,12 @@ export interface TeamRow extends TeamMember {
   open_tasks: number;
   overdue: number;
   estimated_hours: number;
+  /**
+   * True while the account is still on the temporary password from its welcome
+   * email — the roster shows a "pending" hint so an admin can tell who has not
+   * signed in yet. Absent on demo rows, which have no credentials at all.
+   */
+  must_change_password?: boolean;
 }
 
 export function getTeam(): TeamRow[] {

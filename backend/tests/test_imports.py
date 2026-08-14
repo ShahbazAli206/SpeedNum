@@ -1,0 +1,225 @@
+"""Unit tests for the bulk importer's parsing layer (app/routers/imports.py).
+
+The importer had no tests at all, which is uncomfortable for the one feature
+that writes many rows at once from a file a human typed by hand. Everything
+here is the pure part — column detection and row parsing — so no database or
+HTTP client is needed.
+
+The properties that matter:
+
+* A messy real-world header ("Business Name", "CRA BN", "Year End") still finds
+  its field, because firms export from whatever they already use.
+* A bad cell reports an error and does **not** silently invent a value. The
+  commit path only sends rows with zero errors, so a parser that "helpfully"
+  substitutes a default would import wrong data under a clean preview.
+"""
+
+from __future__ import annotations
+
+from app.routers.imports import (
+    ROLE_MAP,
+    _parse_year_end,
+    _to_float,
+    detect_mapping,
+    detect_user_mapping,
+    parse_row,
+    parse_user_row,
+)
+
+
+# --- column detection ---------------------------------------------------------
+def test_detect_mapping_matches_exact_field_names():
+    mapping = detect_mapping(["legal_name", "email", "province"])
+    assert mapping == {"legal_name": "legal_name", "email": "email", "province": "province"}
+
+
+def test_detect_mapping_matches_human_headers():
+    mapping = detect_mapping(["Legal Name", "Business Name", "Primary Contact Email"])
+    assert mapping["Legal Name"] == "legal_name"
+    assert mapping["Business Name"] == "business_name"
+    assert mapping["Primary Contact Email"] == "email"
+
+
+def test_detect_mapping_ignores_unknown_columns():
+    mapping = detect_mapping(["Legal Name", "Favourite Colour"])
+    assert "Favourite Colour" not in mapping
+
+
+def test_each_field_is_claimed_once():
+    """Two columns that both look like the same field: the first one wins.
+
+    Otherwise the later column would overwrite the earlier one's value during
+    parse_row, and which column won would depend on dict ordering.
+    """
+    mapping = detect_mapping(["Legal Name", "Registered Name"])
+    assert list(mapping.values()).count("legal_name") == 1
+
+
+# --- year end -----------------------------------------------------------------
+def test_year_end_iso():
+    assert _parse_year_end("2026-06-30") == (6, 30)
+
+
+def test_year_end_month_day_pair():
+    assert _parse_year_end("6/30") == (6, 30)
+
+
+def test_year_end_pair_is_reordered_when_the_first_number_cannot_be_a_month():
+    # "30/6" is unambiguous — there is no 30th month.
+    assert _parse_year_end("30/6") == (6, 30)
+
+
+def test_year_end_named_month():
+    assert _parse_year_end("Dec 31") == (12, 31)
+    assert _parse_year_end("31 December") == (12, 31)
+
+
+def test_year_end_rejects_nonsense():
+    assert _parse_year_end("whenever") is None
+    assert _parse_year_end("") is None
+
+
+# --- numbers ------------------------------------------------------------------
+def test_to_float_strips_currency_formatting():
+    assert _to_float("$9,600.00") == 9600.0
+    assert _to_float("11 400") == 11400.0
+
+
+def test_to_float_returns_none_for_text():
+    assert _to_float("n/a") is None
+    assert _to_float("") is None
+
+
+# --- client rows --------------------------------------------------------------
+def mapping_for(**columns: str) -> dict[str, str]:
+    return dict(columns)
+
+
+def test_parse_row_happy_path():
+    data, errors = parse_row(
+        {"Legal Name": "Lakeview Dental Corp.", "Province": "ON", "Annual Fee": "$9,600"},
+        {"Legal Name": "legal_name", "Province": "province", "Annual Fee": "annual_fee"},
+    )
+    assert errors == []
+    assert data["legal_name"] == "Lakeview Dental Corp."
+    assert data["annual_fee"] == 9600.0
+
+
+def test_parse_row_requires_a_legal_name():
+    data, errors = parse_row({"Legal Name": ""}, {"Legal Name": "legal_name"})
+    assert any("Legal name is required" in error for error in errors)
+    assert "legal_name" not in data
+
+
+def test_parse_row_rejects_a_bad_email_rather_than_importing_it():
+    _, errors = parse_row({"Email": "not-an-email"}, {"Email": "email"})
+    assert any("not a valid email" in error for error in errors)
+
+
+def test_parse_row_lowercases_email():
+    data, _ = parse_row(
+        {"Legal Name": "X", "Email": "Hello@Lakeview.CA"},
+        {"Legal Name": "legal_name", "Email": "email"},
+    )
+    assert data["email"] == "hello@lakeview.ca"
+
+
+def test_parse_row_flags_an_impossible_month():
+    _, errors = parse_row(
+        {"Legal Name": "X", "Year End Month": "13"},
+        {"Legal Name": "legal_name", "Year End Month": "year_end_month"},
+    )
+    assert any("between 1 and 12" in error for error in errors)
+
+
+def test_parse_row_flags_an_impossible_day():
+    _, errors = parse_row(
+        {"Legal Name": "X", "Year End Month": "2", "Year End Day": "31"},
+        {
+            "Legal Name": "legal_name",
+            "Year End Month": "year_end_month",
+            "Year End Day": "year_end_day",
+        },
+    )
+    assert any("not a real date" in error for error in errors)
+
+
+def test_parse_row_splits_tags():
+    data, _ = parse_row(
+        {"Legal Name": "X", "Tags": "Growth; Priority, VIP"},
+        {"Legal Name": "legal_name", "Tags": "tags"},
+    )
+    assert data["tags"] == ["Growth", "Priority", "VIP"]
+
+
+def test_parse_row_normalises_status_and_type():
+    data, _ = parse_row(
+        {"Legal Name": "X", "Status": "Prospect", "Type": "Corporation"},
+        {"Legal Name": "legal_name", "Status": "status", "Type": "client_type"},
+    )
+    assert data["status"] == "prospect"
+    assert data["client_type"] == "corporation"
+
+
+# --- user rows ----------------------------------------------------------------
+def test_detect_user_mapping_matches_human_headers():
+    mapping = detect_user_mapping(["Email Address", "Full Name", "Role", "Linked Client"])
+    assert mapping["Email Address"] == "email"
+    assert mapping["Full Name"] == "full_name"
+    assert mapping["Role"] == "role"
+    assert mapping["Linked Client"] == "client"
+
+
+def test_parse_user_row_maps_practice_job_titles_onto_roles():
+    for written, expected in [("Partner", "owner"), ("Accountant", "member"), ("Read only", "viewer")]:
+        data, errors = parse_user_row(
+            {"Email": "a@b.co", "Role": written}, {"Email": "email", "Role": "role"}, {}
+        )
+        assert data["role"] == expected, written
+        assert errors == []
+
+
+def test_every_role_alias_resolves_to_a_real_role():
+    assert set(ROLE_MAP.values()) <= {"owner", "admin", "member", "viewer"}
+
+
+def test_parse_user_row_derives_a_name_from_the_email_when_blank():
+    data, errors = parse_user_row({"Email": "jane.doe@harrisoncpa.ca"}, {"Email": "email"}, {})
+    assert data["full_name"] == "Jane Doe"
+    assert errors == []
+
+
+def test_parse_user_row_requires_an_email():
+    _, errors = parse_user_row({"Full Name": "Jane"}, {"Full Name": "full_name"}, {})
+    assert any("Email is required" in error for error in errors)
+
+
+def test_parse_user_row_resolves_a_client_to_a_portal_login():
+    data, errors = parse_user_row(
+        {"Email": "ap@lakeview.ca", "Client": "Lakeview Dental"},
+        {"Email": "email", "Client": "client"},
+        {"lakeview dental": "11111111-1111-1111-1111-111111111111"},
+    )
+    assert data["client_id"] == "11111111-1111-1111-1111-111111111111"
+    assert errors == []
+
+
+def test_unmatched_client_warns_rather_than_silently_creating_staff():
+    """An unmatched client name is the difference between a portal login and a
+    firm-staff login — i.e. between seeing one client's books and seeing all of
+    them. It must never pass validation quietly."""
+    data, errors = parse_user_row(
+        {"Email": "ap@lakeview.ca", "Client": "Lakeview Dentl"},
+        {"Email": "email", "Client": "client"},
+        {"lakeview dental": "11111111-1111-1111-1111-111111111111"},
+    )
+    assert "client_id" not in data
+    assert any("No client matches" in error for error in errors)
+
+
+def test_unrecognised_role_is_reported_and_defaults_to_the_least_privilege_it_can():
+    data, errors = parse_user_row(
+        {"Email": "a@b.co", "Role": "Grand Poobah"}, {"Email": "email", "Role": "role"}, {}
+    )
+    assert data["role"] == "member"
+    assert any("not a role we recognise" in error for error in errors)

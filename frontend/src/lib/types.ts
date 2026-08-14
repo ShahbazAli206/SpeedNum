@@ -51,6 +51,12 @@ export interface Tenant {
 export interface Profile {
   id: string;
   tenant_id: string | null;
+  /**
+   * Set = this login is a client-portal account pinned to that client; null =
+   * firm staff. The one field that decides which app a user belongs in, so
+   * routing and shell selection both read it (see lib/session.tsx).
+   */
+  client_id: string | null;
   email: string;
   full_name: string | null;
   title: string | null;
@@ -332,6 +338,103 @@ export interface Notification {
   link: string | null;
   is_read: boolean;
   created_at: string;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reminders — GET /reminders. Mirrors backend/app/schemas.py ReminderRead.     */
+/* -------------------------------------------------------------------------- */
+export type ReminderKind = "deadline" | "task" | "letter" | "portal";
+export type ReminderStatus = "open" | "acknowledged" | "snoozed" | "done" | "dismissed";
+export type ReminderSeverity = "info" | "warning" | "critical";
+export type ReminderUrgency = "overdue" | "due_today" | "due_soon" | "upcoming";
+
+export interface Reminder {
+  id: string;
+  kind: ReminderKind;
+  title: string;
+  body: string | null;
+  link: string | null;
+  due_date: string;
+  /** The lead-time rung that fired: 10 = "10 days left", -3 = "3 days overdue". */
+  days_before: number;
+  severity: ReminderSeverity;
+  status: ReminderStatus;
+  snoozed_until: string | null;
+  emailed_at: string | null;
+  acknowledged_at: string | null;
+  client_id: string | null;
+  deadline_id: string | null;
+  task_id: string | null;
+  letter_id: string | null;
+  assignee_id: string | null;
+  created_at: string;
+  client_name: string | null;
+  assignee_name: string | null;
+  days_remaining: number;
+  urgency: ReminderUrgency;
+}
+
+export interface ReminderCounts {
+  open: number;
+  overdue: number;
+  due_today: number;
+  due_soon: number;
+  upcoming: number;
+  /** Still status "open" — nobody has looked at it yet. */
+  unacknowledged: number;
+}
+
+export interface ReminderBoard {
+  generated_at: string;
+  counts: ReminderCounts;
+  reminders: Reminder[];
+}
+
+export interface ReminderSweepResult {
+  created: number;
+  skipped: number;
+  emailed: number;
+  scanned: number;
+  message: string;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Platform accounts — GET /users                                              */
+/* -------------------------------------------------------------------------- */
+export interface PlatformAccount extends Profile {
+  source: "team" | "client";
+  client_name: string | null;
+  last_sign_in: string | null;
+}
+
+/** POST /team, POST /users, POST /users/{id}/resend-credentials. */
+export interface CredentialResult {
+  profile_id: string;
+  email: string;
+  full_name: string | null;
+  role: UserRole;
+  /** Shown once so an admin can pass it on when email isn't configured. */
+  temp_password: string;
+  login_url: string;
+  email_sent: boolean;
+  message: string;
+}
+
+export interface UserImportOutcome {
+  email: string;
+  full_name: string | null;
+  created: boolean;
+  temp_password: string | null;
+  email_sent: boolean;
+  error: string | null;
+}
+
+export interface UserImportResult {
+  created: number;
+  failed: number;
+  emailed: number;
+  accounts: UserImportOutcome[];
+  errors: string[];
 }
 
 export interface CustomField {

@@ -27,6 +27,9 @@ EmploymentType = Literal["full_time", "part_time", "contract"]
 PayRunStatus = Literal["draft", "scheduled", "processed"]
 TaxFilingStatus = Literal["open", "filed", "overdue"]
 DocumentKind = Literal["invoice", "receipt", "tax", "contract", "statement", "other"]
+ReminderKind = Literal["deadline", "task", "letter", "portal"]
+ReminderStatus = Literal["open", "acknowledged", "snoozed", "done", "dismissed"]
+ReminderSeverity = Literal["info", "warning", "critical"]
 
 
 class ORMModel(BaseModel):
@@ -117,6 +120,70 @@ class TeamMemberRead(ProfileRead):
     overdue: int = 0
 
 
+class StaffCreate(BaseModel):
+    """Create a firm staff (accountant) login directly, rather than emailing an
+    invitation link and waiting for them to sign themselves up."""
+
+    email: EmailStr
+    full_name: str = Field(min_length=1, max_length=120)
+    role: UserRole = "member"
+    title: str | None = Field(default=None, max_length=80)
+    phone: str | None = Field(default=None, max_length=40)
+    weekly_capacity: int = Field(default=40, ge=0, le=168)
+    send_email: bool = True
+
+
+class CredentialResult(BaseModel):
+    """The outcome of provisioning (or re-provisioning) a login.
+
+    `temp_password` is echoed back exactly once, so an admin can pass it on by
+    hand when mail delivery is not configured. It is never stored — Supabase
+    keeps only its hash.
+    """
+
+    profile_id: uuid.UUID
+    email: str
+    full_name: str | None = None
+    role: UserRole = "member"
+    temp_password: str
+    login_url: str
+    email_sent: bool = False
+    message: str = ""
+
+
+class PlatformUserRead(ProfileRead):
+    """A row on the Users page: every login in the firm, staff and client alike.
+
+    `source` distinguishes them so the UI can label and filter without
+    re-deriving the rule from client_id everywhere.
+    """
+
+    source: Literal["team", "client"] = "team"
+    client_name: str | None = None
+    last_sign_in: datetime | None = None
+
+
+class PlatformUserCreate(BaseModel):
+    email: EmailStr
+    full_name: str = Field(min_length=1, max_length=120)
+    role: UserRole = "member"
+    title: str | None = Field(default=None, max_length=80)
+    phone: str | None = Field(default=None, max_length=40)
+    # Set to create a client-portal login pinned to that client instead of firm
+    # staff. The role is then forced to "member" — see services/accounts.py.
+    client_id: uuid.UUID | None = None
+    send_email: bool = True
+
+
+class PlatformUserUpdate(BaseModel):
+    full_name: str | None = None
+    title: str | None = None
+    phone: str | None = None
+    role: UserRole | None = None
+    is_active: bool | None = None
+    must_change_password: bool | None = None
+
+
 class MeResponse(BaseModel):
     profile: ProfileRead
     tenant: TenantRead | None = None
@@ -131,6 +198,11 @@ class BootstrapRequest(BaseModel):
 class InvitationCreate(BaseModel):
     email: EmailStr
     role: UserRole = "member"
+
+
+class InvitationAccept(BaseModel):
+    token: str = Field(min_length=8)
+    full_name: str | None = None
 
 
 class InvitationRead(ORMModel):
@@ -694,6 +766,66 @@ class NotificationRead(ORMModel):
     created_at: datetime
 
 
+class NotificationCounts(BaseModel):
+    """Badge-only payload for GET /notifications/unread-count."""
+
+    unread: int = 0
+
+
+# --- Reminders ----------------------------------------------------------------
+class ReminderRead(ORMModel):
+    id: uuid.UUID
+    kind: ReminderKind
+    title: str
+    body: str | None = None
+    link: str | None = None
+    due_date: date
+    days_before: int
+    severity: ReminderSeverity
+    status: ReminderStatus
+    snoozed_until: date | None = None
+    emailed_at: datetime | None = None
+    acknowledged_at: datetime | None = None
+    client_id: uuid.UUID | None = None
+    deadline_id: uuid.UUID | None = None
+    task_id: uuid.UUID | None = None
+    letter_id: uuid.UUID | None = None
+    assignee_id: uuid.UUID | None = None
+    created_at: datetime
+    # Layered on at read time by the router.
+    client_name: str | None = None
+    assignee_name: str | None = None
+    days_remaining: int = 0
+    urgency: Literal["overdue", "due_today", "due_soon", "upcoming"] = "upcoming"
+
+
+class ReminderSnoozeRequest(BaseModel):
+    until: date
+
+
+class ReminderCounts(BaseModel):
+    open: int = 0
+    overdue: int = 0
+    due_today: int = 0
+    due_soon: int = 0
+    upcoming: int = 0
+    unacknowledged: int = 0
+
+
+class ReminderBoard(BaseModel):
+    generated_at: datetime
+    counts: ReminderCounts
+    reminders: list[ReminderRead]
+
+
+class ReminderSweepResult(BaseModel):
+    created: int = 0
+    skipped: int = 0
+    emailed: int = 0
+    scanned: int = 0
+    message: str = ""
+
+
 class CustomFieldCreate(BaseModel):
     entity: CustomEntity = "client"
     key: str = Field(min_length=1, max_length=48, pattern=r"^[a-z0-9_]+$")
@@ -797,6 +929,37 @@ class ImportResult(BaseModel):
     created: int
     updated: int
     failed: int
+    errors: list[str] = Field(default_factory=list)
+
+
+class UserImportRow(BaseModel):
+    """One row of the bulk user import, after the operator has reviewed it."""
+
+    email: EmailStr
+    full_name: str = Field(min_length=1, max_length=120)
+    role: UserRole = "member"
+    title: str | None = None
+    phone: str | None = None
+    # Either resolves a client by name/code in the sheet, or is set directly.
+    client_id: uuid.UUID | None = None
+
+
+class UserImportOutcome(BaseModel):
+    email: str
+    full_name: str | None = None
+    created: bool
+    # Echoed once so the operator can hand it over when mail is unconfigured;
+    # never stored (see services/supabase_admin.generate_temp_password).
+    temp_password: str | None = None
+    email_sent: bool = False
+    error: str | None = None
+
+
+class UserImportResult(BaseModel):
+    created: int
+    failed: int
+    emailed: int
+    accounts: list[UserImportOutcome] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
 
 
@@ -1073,6 +1236,31 @@ class ClientDocumentCreate(BaseModel):
     mime_type: str | None = None
     size_bytes: int | None = Field(default=None, ge=0)
     is_client_visible: bool = False
+
+
+class DocumentUploadUrlRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=260)
+
+
+class DocumentUploadUrl(BaseModel):
+    """A signed slot to upload into.
+
+    The server picks `storage_path` — the browser never does. Every path is
+    minted under `{tenant_id}/{client_id}/`, and `register_document` refuses any
+    path outside the caller's own prefix, so a forged value cannot be pointed at
+    another firm's or another client's object.
+    """
+
+    storage_path: str
+    #: For supabase-js `uploadToSignedUrl(path, token, file)`.
+    token: str
+    #: The same signed slot as an absolute URL, for a plain PUT.
+    url: str
+
+
+class DocumentDownloadUrl(BaseModel):
+    url: str
+    expires_in: int
 
 
 class ClientDocumentRead(BaseModel):

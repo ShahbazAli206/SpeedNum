@@ -2,10 +2,11 @@
 
 import { ArrowRight, Eye, EyeOff, TriangleAlert } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { Alert, Button, Checkbox, Field, Input } from "@/components/ui";
+import { post } from "@/lib/api";
 import {
   SUPABASE_CONFIGURED,
   passwordStrength,
@@ -35,6 +36,15 @@ const STRENGTH_BAR = [
 
 export function SignupForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  /**
+   * Set when the visitor arrived from a "You have been invited" email
+   * (`/signup?invite=<token>`). They are joining an existing firm, so the form
+   * must NOT create a second one — see the two branches in `submit` below.
+   */
+  const inviteToken = searchParams.get("invite");
+  const isInvited = Boolean(inviteToken);
+
   const [values, setValues] = useState({
     firstName: "",
     lastName: "",
@@ -60,7 +70,8 @@ export function SignupForm() {
     const next: Errors = {
       firstName: values.firstName.trim() ? undefined : "Enter your first name.",
       lastName: values.lastName.trim() ? undefined : "Enter your last name.",
-      business: values.business.trim() ? undefined : "Enter your business name.",
+      business:
+        isInvited || values.business.trim() ? undefined : "Enter your firm's name.",
       email: validateEmail(values.email),
       password: validatePassword(values.password),
       terms: agreed ? undefined : "Please accept the terms to continue.",
@@ -69,9 +80,10 @@ export function SignupForm() {
     if (Object.values(next).some(Boolean)) return;
 
     setPending(true);
+    const fullName = `${values.firstName.trim()} ${values.lastName.trim()}`.trim();
 
     if (!SUPABASE_CONFIGURED) {
-      router.push("/dashboard");
+      router.push("/overview");
       return;
     }
 
@@ -81,8 +93,13 @@ export function SignupForm() {
         password: values.password,
         options: {
           data: {
-            full_name: `${values.firstName.trim()} ${values.lastName.trim()}`.trim(),
-            business_name: values.business.trim(),
+            full_name: fullName,
+            // `firm_name` is what the API reads to create the tenant and make
+            // this account its owner (backend/app/deps.py `_provision_profile`).
+            // An invited user must not carry it — they are joining a firm that
+            // already exists, and a stray value here would spin up a second one.
+            ...(isInvited ? {} : { firm_name: values.business.trim() }),
+            is_staff: true,
           },
         },
       });
@@ -91,7 +108,25 @@ export function SignupForm() {
         setPending(false);
         return;
       }
-      router.push("/dashboard");
+
+      if (isInvited) {
+        // Attaches the brand-new profile to the inviting firm with the role the
+        // invitation carried. Until this lands the account has no tenant, so
+        // every firm page would refuse it.
+        try {
+          await post("/team/invitations/accept", { token: inviteToken, full_name: fullName });
+        } catch (caught) {
+          setFormError(
+            caught instanceof Error
+              ? `Your account was created, but the invitation could not be applied: ${caught.message}`
+              : "Your account was created, but the invitation could not be applied.",
+          );
+          setPending(false);
+          return;
+        }
+      }
+
+      router.push("/overview");
       router.refresh();
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Could not create the account.");
@@ -102,10 +137,12 @@ export function SignupForm() {
   return (
     <div>
       <h1 className="text-[1.75rem] font-extrabold tracking-tight text-ink">
-        Create your account
+        {isInvited ? "Accept your invitation" : "Create your account"}
       </h1>
       <p className="mt-1.5 text-[14.5px] text-muted">
-        Start your {PRICING.trialDays}-day free trial — no credit card required.
+        {isInvited
+          ? "Set a password and you'll join your firm's workspace with the role you were invited for."
+          : `Start your ${PRICING.trialDays}-day free trial — no credit card required.`}
       </p>
 
       {!SUPABASE_CONFIGURED ? (
@@ -145,14 +182,21 @@ export function SignupForm() {
           </Field>
         </div>
 
-        <Field label="Business name" error={errors.business} className="mt-4">
-          <Input
-            autoComplete="organization"
-            placeholder="Maple Retail Co."
-            value={values.business}
-            onChange={set("business")}
-          />
-        </Field>
+        {isInvited ? null : (
+          <Field
+            label="Firm name"
+            hint="Creates your practice workspace — you become its owner."
+            error={errors.business}
+            className="mt-4"
+          >
+            <Input
+              autoComplete="organization"
+              placeholder="Harrison CPA Professional Corporation"
+              value={values.business}
+              onChange={set("business")}
+            />
+          </Field>
+        )}
 
         <Field label="Work email" error={errors.email} className="mt-4">
           <Input

@@ -14,8 +14,8 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { useToast } from "@/components/toast";
-import { Button, Checkbox, Field, Input, Select, Textarea } from "@/components/ui";
-import { post } from "@/lib/api";
+import { Button, Checkbox, Field, Input, Select, Textarea, toOptions } from "@/components/ui";
+import { ApiError, post } from "@/lib/api";
 import type { CustomField, TeamRow } from "@/lib/firm-demo";
 import type { Client, PortalInviteResult } from "@/lib/types";
 
@@ -35,7 +35,14 @@ const STATUS_OPTIONS = [
   { value: "archived", label: "Archived" },
 ];
 
-const PLAN_OPTIONS = ["Starter", "Professional", "Growth"];
+const PLAN_OPTIONS = toOptions(["Starter", "Professional", "Growth"]);
+
+/**
+ * The team list is demo rows when the API is unreachable, and those ids are
+ * slugs rather than UUIDs — posting one back would 422. Only a real UUID is
+ * sent as `owner_id`.
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 let contactSeq = 0;
 function nextContactId() {
@@ -123,11 +130,14 @@ export function NewClientClient({
     const willInvite = sendWelcomeEmail && Boolean(primaryEmail.trim());
 
     try {
-      // Real backend + Supabase configured: create the client for real, add
-      // its contacts, and — if checked — actually send the portal welcome
-      // email. Any failure along the way (most commonly: no backend reachable
-      // yet, which is the case for most setups today) falls back to the demo
-      // acknowledgement below rather than leaving the admin with an error.
+      // Create the client for real, add its contacts, and — if checked — send
+      // the portal welcome email.
+      //
+      // Only an *unreachable* API (ApiError.status === 0, i.e. demo mode with
+      // no backend deployed) falls through to the demo acknowledgement. A real
+      // rejection — duplicate code, validation failure, no permission — is
+      // shown to the admin. Reporting a green "added" toast for a 422 used to
+      // make a failed create indistinguishable from a successful one.
       const [, yearEndMonth, yearEndDay] = /^\d{4}-(\d{2})-(\d{2})/.exec(fiscalYearEnd) ?? [];
       const custom = Object.fromEntries(
         customFields
@@ -148,6 +158,10 @@ export function NewClientClient({
         year_end_month: yearEndMonth ? Number(yearEndMonth) : undefined,
         year_end_day: yearEndDay ? Number(yearEndDay) : undefined,
         annual_fee: Number(annualFee) || 0,
+        // The plan lives in `tags` — there is no plan column; `lib/adapt.ts`
+        // reads it back out of the same place.
+        tags: plan ? [plan] : [],
+        owner_id: UUID_RE.test(ownerId) ? ownerId : undefined,
         custom,
       });
 
@@ -178,12 +192,19 @@ export function NewClientClient({
           : "Client record created — you'll find them in the client book.",
       );
       router.push("/clients");
-    } catch {
-      toast.success(
-        `${trimmedName} added`,
-        willInvite
-          ? "Client record created and a portal invite is queued to send."
-          : "Client record created — you'll find them in the client book.",
+    } catch (caught) {
+      const unreachable = caught instanceof ApiError && caught.status === 0;
+      if (!unreachable) {
+        const message =
+          caught instanceof Error ? caught.message : "Something went wrong creating the client.";
+        setError(message);
+        toast.error("Could not add client", message);
+        return;
+      }
+      // No backend deployed — demo mode. Acknowledge and move on.
+      toast.info(
+        `${trimmedName} added (demo)`,
+        "No API is connected, so this record only exists in your browser.",
       );
       router.push("/clients");
     } finally {
@@ -237,22 +258,10 @@ export function NewClientClient({
               />
             </Field>
             <Field label="Status">
-              <Select value={status} onChange={(event) => setStatus(event.target.value)}>
-                {STATUS_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
+              <Select value={status} onValueChange={setStatus} options={STATUS_OPTIONS} />
             </Field>
             <Field label="Plan">
-              <Select value={plan} onChange={(event) => setPlan(event.target.value)}>
-                {PLAN_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </Select>
+              <Select value={plan} onValueChange={setPlan} options={PLAN_OPTIONS} />
             </Field>
             <Field label="Annual fee ($)" hint="Shown on the client list as a monthly figure.">
               <Input
@@ -264,14 +273,19 @@ export function NewClientClient({
               />
             </Field>
             <Field label="Assigned accountant / manager">
-              <Select value={ownerId} onChange={(event) => setOwnerId(event.target.value)}>
-                <option value="">Unassigned</option>
-                {team.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.full_name}
-                  </option>
-                ))}
-              </Select>
+              <Select
+                value={ownerId}
+                onValueChange={setOwnerId}
+                placeholder="Unassigned"
+                options={[
+                  { value: "", label: "Unassigned" },
+                  ...team.map((member) => ({
+                    value: member.id,
+                    label: member.full_name,
+                    description: member.email,
+                  })),
+                ]}
+              />
             </Field>
           </div>
         </Section>
@@ -521,14 +535,7 @@ function CustomFieldInput({
   return (
     <Field label={field.label} required={field.is_required} hint={field.help_text}>
       {field.field_type === "select" ? (
-        <Select value={value} onChange={(event) => onChange(event.target.value)}>
-          <option value="">Select…</option>
-          {field.options.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </Select>
+        <Select value={value} onValueChange={onChange} options={toOptions(field.options)} />
       ) : (
         <Input
           type={field.field_type === "date" ? "date" : field.field_type === "number" ? "number" : "text"}
