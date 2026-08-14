@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useState, type ReactNode } from "react";
 
 import { CommandPalette } from "./command-palette";
+import { ForcePasswordModal } from "./force-password-modal";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 
@@ -76,6 +77,11 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
       {/* Mounted only while open, so its query state resets for free. */}
       {paletteOpen ? <CommandPalette onClose={() => setPaletteOpen(false)} /> : null}
+
+      {/* useSearchParams needs a Suspense boundary so the shell can still prerender. */}
+      <Suspense fallback={null}>
+        <ForcePasswordModal />
+      </Suspense>
     </div>
   );
 }

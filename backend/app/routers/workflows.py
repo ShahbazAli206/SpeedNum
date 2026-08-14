@@ -243,6 +243,15 @@ async def create_task(
     return await _hydrate_task(session, user, task)
 
 
+@router.get("/tasks/{task_id}", response_model=TaskRead)
+async def get_task(task_id: uuid.UUID, session: SessionDep, user: TenantUserDep) -> TaskRead:
+    task = await session.scalar(
+        select(Task).where(Task.id == task_id, Task.tenant_id == user.tenant_id)
+    )
+    ensure_found(task, "Task")
+    return await _hydrate_task(session, user, task)
+
+
 @router.patch("/tasks/{task_id}", response_model=TaskRead)
 async def update_task(
     task_id: uuid.UUID, payload: TaskUpdate, session: SessionDep, user: TenantUserDep

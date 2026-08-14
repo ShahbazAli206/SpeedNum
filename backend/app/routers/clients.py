@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import uuid
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from sqlalchemy import Date, and_, cast, func, or_, select
 
+from ..config import settings
 from ..deps import SessionDep, TenantUserDep, client_ip
 from ..models import Client, ClientService, Contact, Deadline, Profile, Service, Task
 from ..schemas import (
@@ -18,9 +20,18 @@ from ..schemas import (
     ContactRead,
     ContactUpdate,
     Ok,
+    PortalInviteResult,
 )
 from ..services import audit
-from ..utils import apply_updates, ensure_found, profile_names, read, today_utc
+from ..services.email import portal_welcome_html, send_email
+from ..services.supabase_admin import (
+    SupabaseAdminError,
+    create_portal_user,
+    generate_magic_link,
+    generate_temp_password,
+    reset_portal_password,
+)
+from ..utils import apply_updates, ensure_found, now_utc, profile_names, read, today_utc
 
 router = APIRouter(tags=["clients"])
 
@@ -227,6 +238,108 @@ async def delete_client(
         ip_address=client_ip(request),
     )
     return Ok(message=f"Deleted {name}")
+
+
+@router.post("/clients/{client_id}/portal-invite", response_model=PortalInviteResult)
+async def invite_to_portal(
+    client_id: uuid.UUID, session: SessionDep, user: TenantUserDep, request: Request
+) -> PortalInviteResult:
+    """Send (or resend) the client's portal welcome email.
+
+    First call: creates a Supabase Auth user and a `profiles` row pinned to
+    this client. Later calls — the client record's "Resend welcome email"
+    button — reuse that same login and only rotate its password, since the
+    original is never retrievable once Supabase hashes it; a magic sign-in
+    link is regenerated too, as the previous one may have expired.
+    """
+    client = await session.scalar(
+        select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
+    )
+    ensure_found(client, "Client")
+    if not client.email:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Add a primary email to this client before inviting them to the portal.",
+        )
+
+    email = client.email.strip().lower()
+    existing_profile = await session.scalar(select(Profile).where(Profile.client_id == client_id))
+    temp_password = generate_temp_password()
+
+    try:
+        if existing_profile is None:
+            new_id = await create_portal_user(
+                email=email, password=temp_password, full_name=client.legal_name
+            )
+            session.add(
+                Profile(
+                    id=new_id,
+                    tenant_id=user.tenant_id,
+                    client_id=client_id,
+                    email=email,
+                    full_name=client.business_name or client.legal_name,
+                    role="member",
+                    must_change_password=True,
+                )
+            )
+        else:
+            await reset_portal_password(user_id=existing_profile.id, password=temp_password)
+            existing_profile.email = email
+            existing_profile.must_change_password = True
+            existing_profile.is_active = True
+    except SupabaseAdminError as exc:
+        raise HTTPException(status.HTTP_424_FAILED_DEPENDENCY, str(exc)) from exc
+
+    magic_token = await generate_magic_link(email=email)
+    login_url = f"{settings.public_app_url.rstrip('/')}/login"
+    magic_url = (
+        f"{settings.public_app_url.rstrip('/')}/portal-login?token_hash={magic_token}&email={quote(email)}"
+        if magic_token
+        else None
+    )
+
+    email_sent = await send_email(
+        to=email,
+        subject=f"Welcome to {user.tenant.name} — your client portal is ready",
+        html=portal_welcome_html(
+            firm_name=user.tenant.name,
+            client_name=client.business_name or client.legal_name,
+            email=email,
+            temp_password=temp_password,
+            login_url=login_url,
+            magic_url=magic_url,
+            brand_color=user.tenant.brand_color,
+        ),
+        reply_to=user.profile.email,
+    )
+
+    client.portal_enabled = True
+    client.portal_invited_at = now_utc()
+    client.portal_invited_by = user.profile.id
+    await session.flush()
+
+    await audit.record(
+        session,
+        tenant_id=user.tenant_id,
+        actor_id=user.profile.id,
+        actor_email=user.profile.email,
+        action="invited" if existing_profile is None else "reinvited",
+        entity="client_portal",
+        entity_id=client.id,
+        summary=f"{'Invited' if existing_profile is None else 'Resent portal invite to'} {client.legal_name}",
+        ip_address=client_ip(request),
+    )
+
+    return PortalInviteResult(
+        email=email,
+        invited_at=client.portal_invited_at,
+        email_sent=email_sent,
+        message=(
+            "Welcome email sent."
+            if email_sent
+            else "Portal login is ready, but email delivery isn't configured — share the credentials manually."
+        ),
+    )
 
 
 # --- contacts -----------------------------------------------------------------

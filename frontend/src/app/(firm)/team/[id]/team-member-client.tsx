@@ -388,7 +388,7 @@ export function TeamMemberClient({
             ) : (
               <ul className="divide-y divide-line">
                 {assignedTasks.map((task) => {
-                  const days = daysFromToday(task.due_date);
+                  const days = task.due_date ? daysFromToday(task.due_date) : null;
                   const currentStatus = taskStatus[task.id] ?? task.status;
                   return (
                     <li
@@ -411,14 +411,16 @@ export function TeamMemberClient({
                         <span
                           className={cn(
                             "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
-                            days < 0
-                              ? "bg-danger-soft text-danger"
-                              : days <= 3
-                                ? "bg-warn-soft text-warn"
-                                : "bg-success-soft text-success",
+                            days === null
+                              ? "bg-surface-2 text-muted"
+                              : days < 0
+                                ? "bg-danger-soft text-danger"
+                                : days <= 3
+                                  ? "bg-warn-soft text-warn"
+                                  : "bg-success-soft text-success",
                           )}
                         >
-                          {dueLabel(days)}
+                          {days === null ? "No due date" : dueLabel(days)}
                         </span>
                         <Select
                           value={currentStatus}

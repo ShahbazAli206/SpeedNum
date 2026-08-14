@@ -42,6 +42,17 @@ async def update_me(payload: ProfileUpdate, session: SessionDep, user: CurrentUs
     return ProfileRead.model_validate(user.profile)
 
 
+@router.post("/complete-password-change", response_model=ProfileRead)
+async def complete_password_change(session: SessionDep, user: CurrentUserDep) -> ProfileRead:
+    """Called after the client (or any user) has set a real password to
+    replace a temporary one, so the forced "set a new password" prompt does
+    not keep reappearing. Uses CurrentUserDep, not TenantUserDep — a
+    client-portal account must be able to call this about itself."""
+    user.profile.must_change_password = False
+    await session.flush()
+    return ProfileRead.model_validate(user.profile)
+
+
 @router.post("/bootstrap", response_model=MeResponse, status_code=status.HTTP_201_CREATED)
 async def bootstrap_firm(
     payload: BootstrapRequest, session: SessionDep, user: CurrentUserDep

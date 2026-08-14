@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { getProjects, getTasks } from "@/lib/firm-demo";
+import { getTasks } from "@/lib/firm-demo";
 
 import { WorkflowsClient } from "./workflows-client";
 
@@ -10,5 +10,5 @@ export default function WorkflowsPage() {
   const tasks = getTasks();
   const assignees = [...new Set(tasks.map((task) => task.assignee_name))].sort();
 
-  return <WorkflowsClient projects={getProjects()} tasks={tasks} assignees={assignees} />;
+  return <WorkflowsClient tasks={tasks} assignees={assignees} />;
 }

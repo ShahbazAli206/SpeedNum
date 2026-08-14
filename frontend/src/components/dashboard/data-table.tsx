@@ -37,6 +37,7 @@ export function DataTable<T extends { id: string }>({
   rows,
   columns,
   searchKeys,
+  searchPlaceholder = "Search…",
   filters = [],
   emptyTitle,
   emptyDescription,
@@ -47,6 +48,7 @@ export function DataTable<T extends { id: string }>({
   columns: Column<T>[];
   /** Fields concatenated for the search box. */
   searchKeys: (row: T) => string;
+  searchPlaceholder?: string;
   filters?: FilterSpec<T>[];
   emptyTitle: string;
   emptyDescription: string;
@@ -141,7 +143,7 @@ export function DataTable<T extends { id: string }>({
               setQuery(event.target.value);
               setPage(1);
             }}
-            placeholder="Search…"
+            placeholder={searchPlaceholder}
             aria-label="Search rows"
             className="h-9 w-full rounded-lg border border-line bg-surface pr-3 pl-9 text-[13.5px] text-ink transition placeholder:text-muted/70 focus:border-brand"
           />

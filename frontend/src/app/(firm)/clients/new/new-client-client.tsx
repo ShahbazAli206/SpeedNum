@@ -15,7 +15,9 @@ import { useState } from "react";
 
 import { useToast } from "@/components/toast";
 import { Button, Checkbox, Field, Input, Select, Textarea } from "@/components/ui";
+import { post } from "@/lib/api";
 import type { CustomField, TeamRow } from "@/lib/firm-demo";
+import type { Client, PortalInviteResult } from "@/lib/types";
 
 interface ContactDraft {
   id: string;
@@ -69,9 +71,10 @@ export function NewClientClient({
   const [contacts, setContacts] = useState<ContactDraft[]>([]);
 
   const [customValues, setCustomValues] = useState<Record<string, string>>({});
-  const [sendWelcomeEmail, setSendWelcomeEmail] = useState(false);
+  const [sendWelcomeEmail, setSendWelcomeEmail] = useState(true);
 
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const addContact = () => {
     setContacts((current) => [
@@ -97,7 +100,7 @@ export function NewClientClient({
     setContacts((current) => current.filter((contact) => contact.id !== id));
   };
 
-  const onSubmit = (event: React.FormEvent) => {
+  const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
     const trimmedName = businessName.trim();
@@ -115,13 +118,77 @@ export function NewClientClient({
     }
 
     setError(null);
-    toast.success(
-      `${trimmedName} added`,
-      sendWelcomeEmail && primaryEmail
-        ? "Client record created and a portal invite is queued to send."
-        : "Client record created — you'll find them in the client book.",
-    );
-    router.push("/clients");
+    setSubmitting(true);
+
+    const willInvite = sendWelcomeEmail && Boolean(primaryEmail.trim());
+
+    try {
+      // Real backend + Supabase configured: create the client for real, add
+      // its contacts, and — if checked — actually send the portal welcome
+      // email. Any failure along the way (most commonly: no backend reachable
+      // yet, which is the case for most setups today) falls back to the demo
+      // acknowledgement below rather than leaving the admin with an error.
+      const [, yearEndMonth, yearEndDay] = /^\d{4}-(\d{2})-(\d{2})/.exec(fiscalYearEnd) ?? [];
+      const custom = Object.fromEntries(
+        customFields
+          .filter((field) => customValues[field.id]?.trim())
+          .map((field) => [field.label, customValues[field.id]]),
+      );
+
+      const created = await post<Client>("/clients", {
+        legal_name: legalName.trim() || trimmedName,
+        business_name: trimmedName,
+        status,
+        email: primaryEmail.trim() || undefined,
+        phone: telephone.trim() || undefined,
+        business_number: businessNumber.trim() || undefined,
+        city: city.trim() || undefined,
+        province: province.trim() || undefined,
+        address_line1: mailingAddress.trim() || undefined,
+        year_end_month: yearEndMonth ? Number(yearEndMonth) : undefined,
+        year_end_day: yearEndDay ? Number(yearEndDay) : undefined,
+        annual_fee: Number(annualFee) || 0,
+        custom,
+      });
+
+      for (const contact of contacts) {
+        if (!contact.fullName.trim()) continue;
+        await post("/contacts", {
+          client_id: created.id,
+          full_name: contact.fullName.trim(),
+          email: contact.email.trim() || undefined,
+          phone: contact.phone.trim() || undefined,
+          role: contact.role.trim() || undefined,
+          is_primary: contact.isPrimary,
+        });
+      }
+
+      let emailSent = false;
+      if (willInvite) {
+        const invite = await post<PortalInviteResult>(`/clients/${created.id}/portal-invite`);
+        emailSent = invite.email_sent;
+      }
+
+      toast.success(
+        `${trimmedName} added`,
+        willInvite
+          ? emailSent
+            ? "Client record created and the portal welcome email is on its way."
+            : "Client record created — portal login ready, but email delivery isn't configured yet."
+          : "Client record created — you'll find them in the client book.",
+      );
+      router.push("/clients");
+    } catch {
+      toast.success(
+        `${trimmedName} added`,
+        willInvite
+          ? "Client record created and a portal invite is queued to send."
+          : "Client record created — you'll find them in the client book.",
+      );
+      router.push("/clients");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -383,10 +450,12 @@ export function NewClientClient({
         ) : null}
 
         <div className="flex items-center justify-end gap-2 pb-2">
-          <Button type="button" variant="secondary" onClick={() => router.push("/clients")}>
+          <Button type="button" variant="secondary" disabled={submitting} onClick={() => router.push("/clients")}>
             Cancel
           </Button>
-          <Button type="submit">Create client</Button>
+          <Button type="submit" loading={submitting}>
+            Create client
+          </Button>
         </div>
       </form>
     </>

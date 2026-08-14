@@ -21,6 +21,7 @@ import type {
   ProjectStatus,
   TaskPriority,
   TaskStatus,
+  TaskType,
   Urgency,
   UserRole,
 } from "./types";
@@ -38,6 +39,12 @@ function parse(date: string): number {
 /** Whole days from TODAY to `date`. Negative means the date has passed. */
 export function daysFromToday(date: string): number {
   return Math.round((parse(date) - parse(TODAY)) / MS_PER_DAY);
+}
+
+/** `date` shifted by `days` (negative = earlier), as "YYYY-MM-DD". */
+function offsetDate(date: string, days: number): string {
+  const shifted = new Date(parse(date) + days * MS_PER_DAY);
+  return shifted.toISOString().slice(0, 10);
 }
 
 function urgencyFor(days: number, status: DeadlineStatus): Urgency {
@@ -290,16 +297,21 @@ const DEADLINES: Deadline[] = RAW_DEADLINES.map((deadline) => {
 
 export interface Task {
   id: string;
-  project_id: string;
-  client_id: string;
+  project_id: string | null;
+  client_id: string | null;
   client_name: string;
   title: string;
+  description: string | null;
+  /** Independent of client_id — a "client" task doesn't require one specific
+   * client on record, and vice versa. Drives the Task Master type tabs. */
+  task_type: TaskType;
   status: TaskStatus;
   priority: TaskPriority;
   assignee_id: string;
   assignee_name: string;
-  due_date: string;
+  due_date: string | null;
   estimate_hours: number;
+  created_at: string;
 }
 
 export interface Project {
@@ -319,12 +331,15 @@ export interface Project {
 
 interface RawTask {
   id: string;
-  project_id: string;
+  project_id: string | null;
   title: string;
+  description?: string;
+  /** Omitted = "client" — true of every task that hangs off a project today. */
+  task_type?: TaskType;
   status: TaskStatus;
   priority: TaskPriority;
   assignee_id: string;
-  due_date: string;
+  due_date: string | null;
   estimate_hours: number;
 }
 
@@ -377,17 +392,27 @@ const RAW_TASKS: RawTask[] = [
   { id: "t20", project_id: "p12", title: "Manager review", status: "review", priority: "medium", assignee_id: "u7", due_date: "2026-08-04", estimate_hours: 1.5 },
   { id: "t21", project_id: "p12", title: "Post adjusting entries", status: "complete", priority: "medium", assignee_id: "u7", due_date: "2026-08-01", estimate_hours: 2 },
   { id: "t22", project_id: "p3", title: "Accrual review", status: "review", priority: "high", assignee_id: "u4", due_date: "2026-08-20", estimate_hours: 3 },
+  // Standalone tasks — no project, so no client either. Internal/Other work
+  // still needs a home on the Task Master board, same as the reference.
+  { id: "t23", project_id: null, title: "Monthly payroll cutoff & standup", description: "Confirm hours with the payroll team before Friday's run.", task_type: "internal", status: "todo", priority: "medium", assignee_id: "u4", due_date: "2026-08-06", estimate_hours: 1 },
+  { id: "t24", project_id: null, title: "Order office supplies", description: "Printer paper and toner are low again.", task_type: "other", status: "todo", priority: "low", assignee_id: "u6", due_date: "2026-08-11", estimate_hours: 0.5 },
+  { id: "t25", project_id: null, title: "Refresh engagement letter templates", description: "Update the standard wording for the 2026-27 season.", task_type: "internal", status: "blocked", priority: "low", assignee_id: "u3", due_date: null, estimate_hours: 3 },
 ];
 
 const PROJECT_CLIENT = new Map(RAW_PROJECTS.map((project) => [project.id, project.client_id]));
 
 const TASKS: Task[] = RAW_TASKS.map((task) => {
-  const clientId = PROJECT_CLIENT.get(task.project_id) ?? "";
+  const clientId = task.project_id ? (PROJECT_CLIENT.get(task.project_id) ?? null) : null;
   return {
     ...task,
+    description: task.description ?? null,
+    task_type: task.task_type ?? "client",
     client_id: clientId,
-    client_name: CLIENT_NAME.get(clientId) ?? "—",
+    client_name: clientId ? (CLIENT_NAME.get(clientId) ?? "—") : "—",
     assignee_name: NAME_BY_ID.get(task.assignee_id) ?? "Unassigned",
+    // A plausible creation date rather than a hand-typed one per row — two
+    // weeks before it's due, or a month back for the one task with no date.
+    created_at: task.due_date ? offsetDate(task.due_date, -14) : offsetDate(TODAY, -30),
   };
 });
 
@@ -542,6 +567,8 @@ export const getContacts = (): Contact[] => CONTACTS;
 export const getDeadlines = (): Deadline[] => DEADLINES;
 export const getProjects = (): Project[] => PROJECTS;
 export const getTasks = (): Task[] => TASKS;
+export const getTask = (id: string): Task | undefined => TASKS.find((task) => task.id === id);
+export const TASK_IDS = TASKS.map((task) => task.id);
 export const getLetters = (): Letter[] => LETTERS;
 export const getNotifications = (): Notification[] => NOTIFICATIONS;
 export const getCustomFields = (): CustomField[] => CUSTOM_FIELDS;
@@ -557,6 +584,10 @@ export interface ClientRow extends Client {
   next_due_date: string | null;
   service_count: number;
   monthly_fee: number;
+  /** Mirrors clients.portal_invited_at — null until "Send/resend welcome
+   * email" has been used. Demo clients treat "portal enabled" as "invited
+   * the day they joined", since there is no separate invite record here. */
+  portal_invited_at: string | null;
 }
 
 export function getClients(): ClientRow[] {
@@ -578,6 +609,7 @@ export function getClients(): ClientRow[] {
       next_due_date: upcoming[0]?.due_date ?? null,
       service_count: client.service_ids.length,
       monthly_fee: Math.round(client.annual_fee / 12),
+      portal_invited_at: client.portal_enabled ? client.joined : null,
     };
   });
 }
@@ -733,4 +765,130 @@ export function getRevenueByCategory() {
   return [...totals.entries()]
     .map(([label, value]) => ({ label, value }))
     .sort((a, b) => b.value - a.value);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Platform users — every login on the tenant, staff and client-portal alike   */
+/* -------------------------------------------------------------------------- */
+
+export type PlatformRole = UserRole | "client";
+
+export interface PlatformUser {
+  id: string;
+  full_name: string;
+  email: string;
+  role: PlatformRole;
+  created_at: string;
+  /** null = has never signed in. */
+  last_sign_in: string | null;
+  /** True until they've changed the temporary password they were invited with. */
+  must_change_password: boolean;
+  source: "team" | "client";
+  /** id of the underlying team member or client this account belongs to. */
+  source_id: string;
+}
+
+function slug(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+/**
+ * Every account on the tenant: the internal team plus one login per
+ * portal-enabled client. Staff and client-portal users share one `profiles`
+ * table in the backend (`client_id` set = portal login), so the Users page —
+ * unlike Accountants, which is staff-only — lists both.
+ */
+export function getPlatformUsers(): PlatformUser[] {
+  const staff: PlatformUser[] = TEAM.map((member) => ({
+    id: `user-${member.id}`,
+    full_name: member.full_name,
+    email: member.email,
+    role: member.role,
+    created_at: member.joined,
+    last_sign_in: member.status === "inactive" ? null : offsetDate(TODAY, -3),
+    must_change_password: member.status === "inactive",
+    source: "team",
+    source_id: member.id,
+  }));
+
+  const clientUsers: PlatformUser[] = CLIENTS.filter((client) => client.portal_enabled).map(
+    (client, index) => {
+      const contact = CONTACTS.find((c) => c.client_id === client.id && c.is_primary);
+      // Two illustrative edge cases: a portal invite nobody has opened yet,
+      // and one that was opened but the temporary password was never rotated.
+      const neverSignedIn = client.id === "c18";
+      const pendingPasswordChange = client.id === "c17";
+      return {
+        id: `user-${client.id}`,
+        full_name: contact?.full_name ?? client.business_name,
+        email: contact?.email ?? `${slug(client.business_name)}@portal.speednum.ca`,
+        role: "client" as const,
+        created_at: client.joined,
+        last_sign_in: neverSignedIn ? null : offsetDate(TODAY, -(2 + ((index * 3) % 20))),
+        must_change_password: neverSignedIn || pendingPasswordChange,
+        source: "client",
+        source_id: client.id,
+      };
+    },
+  );
+
+  return [...staff, ...clientUsers];
+}
+
+/** Headline counts for the Users page KPI row. */
+export function getUsersSummary() {
+  const users = getPlatformUsers();
+  // "Signed in" means fully onboarded: logged in at least once *and* rotated
+  // the temporary password — not just "clicked the invite link once".
+  const onboarded = (user: PlatformUser) => user.last_sign_in !== null && !user.must_change_password;
+  return {
+    total: users.length,
+    admins: users.filter((user) => user.role === "owner" || user.role === "admin").length,
+    clients: users.filter((user) => user.role === "client").length,
+    signed_in: users.filter(onboarded).length,
+    never_signed_in: users.filter((user) => !onboarded(user)).length,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Recent emails — for the Integrations page                                  */
+/* -------------------------------------------------------------------------- */
+
+export interface RecentEmail {
+  id: string;
+  subject: string;
+  recipient: string;
+  when: string;
+  status: "sent" | "failed";
+}
+
+/** Every email the firm's Email integration has sent, newest first. */
+export function getRecentEmails(): RecentEmail[] {
+  const letters = getLetters()
+    .filter((letter) => letter.sent_at)
+    .map((letter) => ({
+      id: `email-letter-${letter.id}`,
+      subject: `Engagement letter — ${letter.client_name}`,
+      recipient: letter.recipient_email,
+      when: letter.sent_at as string,
+      status: "sent" as const,
+    }));
+
+  const invites = getClients()
+    .filter((client) => client.portal_invited_at)
+    .map((client) => {
+      const contact = CONTACTS.find((c) => c.client_id === client.id && c.is_primary);
+      return {
+        id: `email-invite-${client.id}`,
+        subject: "Welcome to SpeedNum — your client portal is ready",
+        recipient: contact?.email ?? `${slug(client.business_name)}@portal.speednum.ca`,
+        when: client.portal_invited_at as string,
+        status: "sent" as const,
+      };
+    });
+
+  return [...letters, ...invites].sort((a, b) => (a.when < b.when ? 1 : -1));
 }

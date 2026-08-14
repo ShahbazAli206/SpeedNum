@@ -89,6 +89,69 @@ def letter_invite_html(
 """
 
 
+def portal_welcome_html(
+    *,
+    firm_name: str,
+    client_name: str,
+    email: str,
+    temp_password: str,
+    login_url: str,
+    magic_url: str | None = None,
+    brand_color: str = "#1d4ed8",
+) -> str:
+    """The client-portal welcome email: login details plus a one-click sign-in
+    link. `magic_url` is None when Supabase's admin API couldn't issue a magic
+    link (e.g. not configured) — the button then falls back to the plain
+    login page, and the temporary password becomes the only way in."""
+    cta_url = magic_url or login_url
+    cta_label = "Sign in to your dashboard"
+    fallback_line = (
+        f'Use <strong>{cta_label}</strong> above for instant one-click access, or sign in any time at'
+        if magic_url
+        else "Sign in any time at"
+    )
+    return f"""
+<div style="font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+            background:#f8fafc;padding:32px">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:14px;
+              border:1px solid #e2e8f0;overflow:hidden">
+    <div style="background:{brand_color};padding:20px 28px;color:#fff;font-weight:600;font-size:18px">
+      {firm_name}
+    </div>
+    <div style="padding:28px;color:#0f172a;line-height:1.6">
+      <h2 style="margin:0 0 4px;font-size:19px">Welcome to {firm_name}, {client_name}</h2>
+      <p style="margin:0 0 20px;color:#64748b;font-size:14px">Your secure client portal is ready to use.</p>
+      <p style="margin:0 0 20px">
+        Hi {client_name} team,<br />
+        Your {firm_name} client portal is ready. Sign in to view your documents, track deadlines
+        and follow your invoices — all in one secure place.
+      </p>
+      <div style="background:#f1f5f9;border-radius:10px;padding:16px 18px;margin:0 0 24px">
+        <p style="margin:0 0 6px;font-size:12px;font-weight:700;letter-spacing:.04em;color:#64748b;text-transform:uppercase">
+          Your login details
+        </p>
+        <p style="margin:0 0 4px;font-size:14px"><strong>Email:</strong> {email}</p>
+        <p style="margin:0;font-size:14px">
+          <strong>Temporary password:</strong>
+          <code style="background:#e2e8f0;padding:1px 6px;border-radius:4px">{temp_password}</code>
+        </p>
+      </div>
+      <a href="{cta_url}"
+         style="display:inline-block;background:{brand_color};color:#fff;text-decoration:none;
+                padding:12px 22px;border-radius:8px;font-weight:600">{cta_label}</a>
+      <p style="margin:20px 0 0;font-size:13px;color:#64748b">
+        {fallback_line} <a href="{login_url}" style="color:{brand_color}">{login_url}</a> with the details above.
+      </p>
+      <p style="margin:12px 0 0;font-size:13px;color:#64748b">
+        For your security, please change your password after your first sign-in. If you weren't
+        expecting this email, you can safely ignore it.
+      </p>
+    </div>
+  </div>
+</div>
+"""
+
+
 def invite_html(*, firm_name: str, url: str, brand_color: str = "#1d4ed8") -> str:
     return f"""
 <div style="font-family:ui-sans-serif,system-ui,sans-serif;background:#f8fafc;padding:32px">

@@ -22,6 +22,8 @@ import { cn } from "@/lib/cn";
 import { FIRM, getFirmOverview } from "@/lib/firm-demo";
 import { FIRM_NAV, FIRM_NAV_FLAT } from "@/lib/site";
 
+import { FirmBrandingProvider, useBranding } from "./branding";
+
 const COLLAPSE_KEY = "speednum-firm-collapsed";
 
 /**
@@ -32,6 +34,15 @@ const COLLAPSE_KEY = "speednum-firm-collapsed";
  * than a "CLIENT" sublabel. The command palette is shared but fed FIRM_NAV.
  */
 export function FirmShell({ children }: { children: ReactNode }) {
+  return (
+    <FirmBrandingProvider>
+      <FirmShellInner>{children}</FirmShellInner>
+    </FirmBrandingProvider>
+  );
+}
+
+function FirmShellInner({ children }: { children: ReactNode }) {
+  const { branding } = useBranding();
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -90,7 +101,7 @@ export function FirmShell({ children }: { children: ReactNode }) {
         {collapsed ? (
           <Logo href="/overview" size={30} className="[&>span:last-child]:hidden" />
         ) : (
-          <Logo href="/overview" size={30} sublabel={FIRM.name.toUpperCase()} />
+          <Logo href="/overview" size={30} sublabel={branding.name.toUpperCase()} />
         )}
         <button
           type="button"
@@ -278,7 +289,7 @@ export function FirmShell({ children }: { children: ReactNode }) {
             <ol className="flex items-center gap-1.5 text-[13.5px]">
               <li>
                 <Link href="/overview" className="text-muted transition hover:text-ink">
-                  {FIRM.name}
+                  {branding.name}
                 </Link>
               </li>
               {current ? (
