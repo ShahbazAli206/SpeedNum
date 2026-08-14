@@ -15,6 +15,7 @@ Frequency = Literal["annual", "semi_annual", "quarterly", "monthly", "one_time"]
 ProjectStatus = Literal["not_started", "in_progress", "review", "complete", "on_hold"]
 TaskStatus = Literal["todo", "in_progress", "review", "complete", "blocked"]
 TaskPriority = Literal["low", "medium", "high", "urgent"]
+TaskType = Literal["internal", "client", "other"]
 DeadlineStatus = Literal["open", "snoozed", "filed", "dismissed"]
 LetterStatus = Literal["draft", "sent", "viewed", "signed", "declined", "void"]
 FieldType = Literal["text", "number", "date", "select", "checkbox", "email", "phone"]
@@ -96,6 +97,7 @@ class ProfileRead(ORMModel):
     weekly_capacity: int = 40
     is_active: bool = True
     is_superadmin: bool = False
+    must_change_password: bool = False
     created_at: datetime | None = None
 
 
@@ -232,6 +234,7 @@ class ClientRead(ORMModel):
     annual_fee: float = 0
     onboarded_at: date | None = None
     portal_enabled: bool = False
+    portal_invited_at: datetime | None = None
     notes: str | None = None
     tags: list[str] = Field(default_factory=list)
     custom: dict[str, Any] = Field(default_factory=dict)
@@ -243,6 +246,18 @@ class ClientRead(ORMModel):
     overdue_deadlines: int = 0
     next_due_date: date | None = None
     service_count: int = 0
+
+
+class PortalInviteResult(BaseModel):
+    """Response for POST /clients/{id}/portal-invite — covers both the first
+    invite and a resend (which issues a fresh temporary password either way,
+    since the original is never retrievable once hashed)."""
+
+    ok: bool = True
+    email: str
+    invited_at: datetime
+    email_sent: bool
+    message: str
 
 
 class ContactBase(BaseModel):
@@ -417,6 +432,7 @@ class TaskCreate(BaseModel):
     description: str | None = None
     project_id: uuid.UUID | None = None
     client_id: uuid.UUID | None = None
+    task_type: TaskType = "internal"
     status: TaskStatus = "todo"
     priority: TaskPriority = "medium"
     assignee_id: uuid.UUID | None = None
@@ -431,6 +447,7 @@ class TaskUpdate(BaseModel):
     description: str | None = None
     project_id: uuid.UUID | None = None
     client_id: uuid.UUID | None = None
+    task_type: TaskType | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
     assignee_id: uuid.UUID | None = None
@@ -453,6 +470,7 @@ class TaskRead(ORMModel):
     project_name: str | None = None
     title: str
     description: str | None = None
+    task_type: TaskType = "internal"
     status: TaskStatus
     priority: TaskPriority
     assignee_id: uuid.UUID | None = None
@@ -542,6 +560,7 @@ class LetterCreate(BaseModel):
     client_id: uuid.UUID
     title: str = "Engagement Letter"
     body: str | None = None
+    terms_html: str | None = None
     currency: str = "CAD"
     tax_rate: float = 0
     period_start: date | None = None
@@ -554,6 +573,7 @@ class LetterCreate(BaseModel):
 class LetterUpdate(BaseModel):
     title: str | None = None
     body: str | None = None
+    terms_html: str | None = None
     currency: str | None = None
     tax_rate: float | None = None
     period_start: date | None = None
@@ -569,6 +589,7 @@ class LetterRead(ORMModel):
     client_name: str | None = None
     title: str
     body: str | None = None
+    terms_html: str | None = None
     status: LetterStatus
     token: str
     currency: str
@@ -588,6 +609,10 @@ class LetterRead(ORMModel):
     signer_name: str | None = None
     signer_title: str | None = None
     signature_data: str | None = None
+    firm_signer_name: str | None = None
+    firm_signer_title: str | None = None
+    firm_signature_data: str | None = None
+    firm_signed_at: datetime | None = None
     expires_at: datetime | None = None
     created_at: datetime | None = None
     items: list[LetterItemRead] = Field(default_factory=list)
@@ -612,6 +637,7 @@ class PortalLetter(BaseModel):
     id: uuid.UUID
     title: str
     body: str | None = None
+    terms_html: str | None = None
     status: LetterStatus
     currency: str
     subtotal: float
@@ -624,7 +650,12 @@ class PortalLetter(BaseModel):
     recipient_name: str | None = None
     signed_at: datetime | None = None
     signer_name: str | None = None
+    signer_title: str | None = None
     signature_data: str | None = None
+    firm_signer_name: str | None = None
+    firm_signer_title: str | None = None
+    firm_signature_data: str | None = None
+    firm_signed_at: datetime | None = None
     expires_at: datetime | None = None
     items: list[LetterItemRead] = Field(default_factory=list)
     brand: PortalBrand
@@ -639,6 +670,17 @@ class PortalSignRequest(BaseModel):
 
 class PortalDeclineRequest(BaseModel):
     reason: str | None = None
+
+
+class FirmSignRequest(BaseModel):
+    signer_name: str = Field(min_length=2, max_length=120)
+    signer_title: str | None = None
+    signature_data: str = Field(min_length=32, description="PNG data URL produced by the signature pad")
+
+
+class MarkSignedRequest(BaseModel):
+    signer_name: str | None = None
+    signer_title: str | None = None
 
 
 # --- Notifications / custom fields / audit ------------------------------------

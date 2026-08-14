@@ -12,17 +12,19 @@ from ..config import settings
 from ..deps import SessionDep, TenantUserDep, client_ip
 from ..models import Client, Contact, EngagementLetter, EngagementLetterItem
 from ..schemas import (
+    FirmSignRequest,
     LetterCreate,
     LetterItemInput,
     LetterItemRead,
     LetterRead,
     LetterSendRequest,
     LetterUpdate,
+    MarkSignedRequest,
     Ok,
 )
 from ..services import audit
 from ..services.email import letter_invite_html, send_email
-from ..utils import apply_updates, ensure_found, now_utc, read
+from ..utils import apply_updates, ensure_found, is_valid_signature_data_url, now_utc, read
 
 router = APIRouter(prefix="/engagements", tags=["engagements"])
 
@@ -40,7 +42,7 @@ completed to the date of termination remain payable."""
 
 
 def _share_url(token: str) -> str:
-    return f"{settings.public_app_url.rstrip('/')}/portal/{token}"
+    return f"{settings.public_app_url.rstrip('/')}/engagement/{token}"
 
 
 def _totals(items: list[EngagementLetterItem], tax_rate: float) -> tuple[float, float, float]:
@@ -133,6 +135,7 @@ async def create_letter(
         client_id=client.id,
         title=payload.title,
         body=payload.body or DEFAULT_BODY,
+        terms_html=payload.terms_html,
         currency=payload.currency,
         tax_rate=payload.tax_rate,
         period_start=payload.period_start,
@@ -188,7 +191,7 @@ async def update_letter(
 
     items = payload.items
     apply_updates(letter, payload, allowed={
-        "title", "body", "currency", "tax_rate", "period_start", "period_end",
+        "title", "body", "terms_html", "currency", "tax_rate", "period_start", "period_end",
         "recipient_name", "recipient_email",
     })
     await session.flush()
@@ -267,6 +270,86 @@ async def send_letter(
         ip_address=client_ip(request),
     )
     return _to_read(letter, client.legal_name if client else None)
+
+
+@router.post("/{letter_id}/sign", response_model=LetterRead)
+async def firm_sign_letter(
+    letter_id: uuid.UUID,
+    payload: FirmSignRequest,
+    session: SessionDep,
+    user: TenantUserDep,
+    request: Request,
+) -> LetterRead:
+    """The firm signs its own copy — separate from the client's signature captured
+    on the public portal (`POST /portal/{token}/sign`)."""
+    letter = await session.scalar(
+        select(EngagementLetter).where(
+            EngagementLetter.id == letter_id, EngagementLetter.tenant_id == user.tenant_id
+        )
+    )
+    ensure_found(letter, "Engagement letter")
+    if not is_valid_signature_data_url(payload.signature_data):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "The signature image is not valid.")
+
+    letter.firm_signer_name = payload.signer_name.strip()
+    letter.firm_signer_title = payload.signer_title
+    letter.firm_signature_data = payload.signature_data
+    letter.firm_signed_at = now_utc()
+    await session.flush()
+
+    await audit.record(
+        session,
+        tenant_id=user.tenant_id,
+        actor_id=user.profile.id,
+        actor_email=user.profile.email,
+        action="firm_signed",
+        entity="engagement_letter",
+        entity_id=letter.id,
+        summary=f"{payload.signer_name} signed {letter.title} on behalf of the firm",
+        ip_address=client_ip(request),
+    )
+    return _to_read(letter)
+
+
+@router.post("/{letter_id}/mark-signed", response_model=LetterRead)
+async def mark_letter_signed(
+    letter_id: uuid.UUID,
+    payload: MarkSignedRequest,
+    session: SessionDep,
+    user: TenantUserDep,
+    request: Request,
+) -> LetterRead:
+    """Manual override for a signature captured out of band (paper, email) —
+    records the letter as signed without a signature image."""
+    letter = await session.scalar(
+        select(EngagementLetter).where(
+            EngagementLetter.id == letter_id, EngagementLetter.tenant_id == user.tenant_id
+        )
+    )
+    ensure_found(letter, "Engagement letter")
+    if letter.status == "signed":
+        raise HTTPException(status.HTTP_409_CONFLICT, "This letter has already been signed.")
+
+    letter.status = "signed"
+    letter.signed_at = now_utc()
+    letter.signer_name = payload.signer_name or letter.recipient_name
+    letter.signer_title = payload.signer_title
+    letter.declined_at = None
+    letter.decline_reason = None
+    await session.flush()
+
+    await audit.record(
+        session,
+        tenant_id=user.tenant_id,
+        actor_id=user.profile.id,
+        actor_email=user.profile.email,
+        action="marked_signed",
+        entity="engagement_letter",
+        entity_id=letter.id,
+        summary=f"Marked {letter.title} as signed manually",
+        ip_address=client_ip(request),
+    )
+    return _to_read(letter)
 
 
 @router.post("/{letter_id}/void", response_model=LetterRead)

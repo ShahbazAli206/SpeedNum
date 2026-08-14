@@ -13,6 +13,7 @@ export type Frequency = "annual" | "semi_annual" | "quarterly" | "monthly" | "on
 export type ProjectStatus = "not_started" | "in_progress" | "review" | "complete" | "on_hold";
 export type TaskStatus = "todo" | "in_progress" | "review" | "complete" | "blocked";
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
+export type TaskType = "internal" | "client" | "other";
 export type DeadlineStatus = "open" | "snoozed" | "filed" | "dismissed";
 export type LetterStatus = "draft" | "sent" | "viewed" | "signed" | "declined" | "void";
 export type FieldType = "text" | "number" | "date" | "select" | "checkbox" | "email" | "phone";
@@ -59,6 +60,7 @@ export interface Profile {
   weekly_capacity: number;
   is_active: boolean;
   is_superadmin: boolean;
+  must_change_password: boolean;
   created_at: string | null;
 }
 
@@ -112,6 +114,7 @@ export interface Client {
   annual_fee: number;
   onboarded_at: string | null;
   portal_enabled: boolean;
+  portal_invited_at: string | null;
   notes: string | null;
   tags: string[];
   custom: Record<string, unknown>;
@@ -122,6 +125,16 @@ export interface Client {
   overdue_deadlines: number;
   next_due_date: string | null;
   service_count: number;
+}
+
+/** Response for POST /clients/{id}/portal-invite — covers both the first
+ * invite and a resend. */
+export interface PortalInviteResult {
+  ok: boolean;
+  email: string;
+  invited_at: string;
+  email_sent: boolean;
+  message: string;
 }
 
 export interface Contact {
@@ -197,6 +210,7 @@ export interface Task {
   project_name: string | null;
   title: string;
   description: string | null;
+  task_type: TaskType;
   status: TaskStatus;
   priority: TaskPriority;
   assignee_id: string | null;
@@ -247,6 +261,7 @@ export interface Letter {
   client_name: string | null;
   title: string;
   body: string | null;
+  terms_html: string | null;
   status: LetterStatus;
   token: string;
   currency: string;
@@ -266,6 +281,10 @@ export interface Letter {
   signer_name: string | null;
   signer_title: string | null;
   signature_data: string | null;
+  firm_signer_name: string | null;
+  firm_signer_title: string | null;
+  firm_signature_data: string | null;
+  firm_signed_at: string | null;
   expires_at: string | null;
   created_at: string | null;
   items: LetterItem[];
@@ -276,6 +295,7 @@ export interface PortalLetter {
   id: string;
   title: string;
   body: string | null;
+  terms_html: string | null;
   status: LetterStatus;
   currency: string;
   subtotal: number;
@@ -288,7 +308,12 @@ export interface PortalLetter {
   recipient_name: string | null;
   signed_at: string | null;
   signer_name: string | null;
+  signer_title: string | null;
   signature_data: string | null;
+  firm_signer_name: string | null;
+  firm_signer_title: string | null;
+  firm_signature_data: string | null;
+  firm_signed_at: string | null;
   expires_at: string | null;
   items: LetterItem[];
   brand: {

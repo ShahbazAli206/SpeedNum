@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 from pydantic import BaseModel
 
-from app.utils import apply_updates, as_float, ensure_found, group_count
+from app.utils import apply_updates, as_float, ensure_found, group_count, is_valid_signature_data_url
 
 
 class _Update(BaseModel):
@@ -78,3 +78,18 @@ def test_group_count_sorts_by_count_descending():
     assert {"key": "b", "count": 1} in result
     assert {"key": "c", "count": 1} in result
     assert len(result) == 3
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("data:image/png;base64,iVBORw0KGgo=", True),
+        ("data:image/jpeg;base64,/9j/4AAQ", True),
+        ("not-a-data-url", False),
+        ("", False),
+        ("https://example.com/signature.png", False),
+        ("data:text/plain;base64,aGVsbG8=", False),
+    ],
+)
+def test_is_valid_signature_data_url(value, expected):
+    assert is_valid_signature_data_url(value) is expected

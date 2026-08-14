@@ -3,40 +3,69 @@
 import { CalendarClock, CheckCheck, Kanban, Signature, Users, Zap } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import type { ComponentType } from "react";
 
 import { DashboardHeader } from "@/components/dashboard/page-shell";
 import { useToast } from "@/components/toast";
 import { Button, EmptyState } from "@/components/ui";
+import { post } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import type { Notification } from "@/lib/firm-demo";
 
-const TYPE_META = {
+export interface NotificationView {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  link: string | null;
+  is_read: boolean;
+  when: string;
+}
+
+const TYPE_META: Record<string, { icon: ComponentType<{ className?: string }>; tone: string; label: string }> = {
   deadline: { icon: CalendarClock, tone: "bg-danger-soft text-danger", label: "Deadline" },
   letter: { icon: Signature, tone: "bg-brand-soft text-brand", label: "Letter" },
   task: { icon: Kanban, tone: "bg-warn-soft text-warn", label: "Task" },
   client: { icon: Users, tone: "bg-info-soft text-info", label: "Client" },
   system: { icon: Zap, tone: "bg-surface-2 text-muted", label: "System" },
-} as const;
+};
+
+/** Backend notification types (e.g. "letter_signed") are more specific than
+ * the demo's closed set — match by prefix, falling back to a generic look. */
+function metaFor(type: string) {
+  const key = Object.keys(TYPE_META).find((candidate) => type.startsWith(candidate));
+  return TYPE_META[key ?? "system"];
+}
 
 const FILTERS = ["All", "Unread", "Deadline", "Letter", "Task", "Client", "System"] as const;
 
-export function NotificationsClient({ notifications }: { notifications: Notification[] }) {
+export function NotificationsClient({
+  notifications,
+  isLive,
+}: {
+  notifications: NotificationView[];
+  isLive: boolean;
+}) {
   const toast = useToast();
-  // Read state is local until the notifications API is wired.
   const [read, setRead] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All");
 
-  const isRead = (item: Notification) => read[item.id] ?? item.is_read;
+  const isRead = (item: NotificationView) => read[item.id] ?? item.is_read;
   const unread = notifications.filter((item) => !isRead(item)).length;
 
   const visible = notifications.filter((item) => {
     if (filter === "All") return true;
     if (filter === "Unread") return !isRead(item);
-    return TYPE_META[item.type].label === filter;
+    return metaFor(item.type).label === filter;
   });
+
+  const markRead = (id: string) => {
+    setRead((current) => ({ ...current, [id]: true }));
+    if (isLive) void post(`/notifications/${id}/read`).catch(() => {});
+  };
 
   const markAll = () => {
     setRead(Object.fromEntries(notifications.map((item) => [item.id, true])));
+    if (isLive) void post("/notifications/read-all").catch(() => {});
     toast.success("All caught up", `${unread} notification${unread === 1 ? "" : "s"} marked read.`);
   };
 
@@ -64,7 +93,7 @@ export function NotificationsClient({ notifications }: { notifications: Notifica
               ? notifications.length
               : option === "Unread"
                 ? unread
-                : notifications.filter((item) => TYPE_META[item.type].label === option).length;
+                : notifications.filter((item) => metaFor(item.type).label === option).length;
           return (
             <button
               key={option}
@@ -105,47 +134,51 @@ export function NotificationsClient({ notifications }: { notifications: Notifica
         ) : (
           <ul className="divide-y divide-line">
             {visible.map((item) => {
-              const meta = TYPE_META[item.type];
+              const meta = metaFor(item.type);
               const Icon = meta.icon;
               const unreadItem = !isRead(item);
 
+              const content = (
+                <>
+                  <span className={cn("grid size-9 shrink-0 place-items-center rounded-lg", meta.tone)}>
+                    <Icon className="size-4" />
+                  </span>
+
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2">
+                      <span className={cn("text-[14px] text-ink", unreadItem ? "font-semibold" : "font-medium")}>
+                        {item.title}
+                      </span>
+                      {unreadItem ? (
+                        <span className="size-1.5 shrink-0 rounded-full bg-brand" aria-label="Unread" />
+                      ) : null}
+                    </span>
+                    {item.body ? <span className="mt-0.5 block text-[12.5px] text-muted">{item.body}</span> : null}
+                  </span>
+
+                  <span className="shrink-0 text-[11.5px] whitespace-nowrap text-muted">{item.when}</span>
+                </>
+              );
+
               return (
                 <li key={item.id} className={cn(unreadItem && "bg-brand-soft/25")}>
-                  <Link
-                    href={item.link}
-                    onClick={() => setRead((current) => ({ ...current, [item.id]: true }))}
-                    className="flex items-start gap-3.5 px-5 py-4 transition hover:bg-surface-2"
-                  >
-                    <span
-                      className={cn(
-                        "grid size-9 shrink-0 place-items-center rounded-lg",
-                        meta.tone,
-                      )}
+                  {item.link ? (
+                    <Link
+                      href={item.link}
+                      onClick={() => markRead(item.id)}
+                      className="flex items-start gap-3.5 px-5 py-4 transition hover:bg-surface-2"
                     >
-                      <Icon className="size-4" />
-                    </span>
-
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2">
-                        <span
-                          className={cn(
-                            "text-[14px] text-ink",
-                            unreadItem ? "font-semibold" : "font-medium",
-                          )}
-                        >
-                          {item.title}
-                        </span>
-                        {unreadItem ? (
-                          <span className="size-1.5 shrink-0 rounded-full bg-brand" aria-label="Unread" />
-                        ) : null}
-                      </span>
-                      <span className="mt-0.5 block text-[12.5px] text-muted">{item.body}</span>
-                    </span>
-
-                    <span className="shrink-0 text-[11.5px] whitespace-nowrap text-muted">
-                      {item.when}
-                    </span>
-                  </Link>
+                      {content}
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => markRead(item.id)}
+                      className="flex w-full items-start gap-3.5 px-5 py-4 text-left transition hover:bg-surface-2"
+                    >
+                      {content}
+                    </button>
+                  )}
                 </li>
               );
             })}

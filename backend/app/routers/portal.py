@@ -15,7 +15,7 @@ from ..schemas import (
     PortalSignRequest,
 )
 from ..services import audit
-from ..utils import now_utc
+from ..utils import is_valid_signature_data_url, now_utc
 
 router = APIRouter(prefix="/portal", tags=["portal"])
 
@@ -49,6 +49,7 @@ def _serialise(letter: EngagementLetter, client: Client, tenant: Tenant) -> Port
         id=letter.id,
         title=letter.title,
         body=letter.body,
+        terms_html=letter.terms_html,
         status=letter.status,
         currency=letter.currency,
         subtotal=float(letter.subtotal),
@@ -61,7 +62,12 @@ def _serialise(letter: EngagementLetter, client: Client, tenant: Tenant) -> Port
         recipient_name=letter.recipient_name,
         signed_at=letter.signed_at,
         signer_name=letter.signer_name,
+        signer_title=letter.signer_title,
         signature_data=letter.signature_data,
+        firm_signer_name=letter.firm_signer_name,
+        firm_signer_title=letter.firm_signer_title,
+        firm_signature_data=letter.firm_signature_data,
+        firm_signed_at=letter.firm_signed_at,
         expires_at=letter.expires_at,
         items=[LetterItemRead.model_validate(item) for item in letter.items],
         brand=PortalBrand(
@@ -105,7 +111,7 @@ async def sign_letter(
         raise HTTPException(status.HTTP_409_CONFLICT, "This letter is not available for signature.")
     if not payload.agreed:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "You must agree to the terms to sign.")
-    if not payload.signature_data.startswith("data:image/"):
+    if not is_valid_signature_data_url(payload.signature_data):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "The signature image is not valid.")
 
     letter.status = "signed"

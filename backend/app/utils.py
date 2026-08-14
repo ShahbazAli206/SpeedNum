@@ -73,6 +73,12 @@ def as_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def is_valid_signature_data_url(value: str) -> bool:
+    """A signature pad (type/draw/upload) always normalises to a PNG data URL —
+    reject anything else before it's persisted as a signature."""
+    return value.startswith("data:image/")
+
+
 def group_count(rows: Sequence[Any], key: str) -> list[dict[str, Any]]:
     counts: dict[Any, int] = {}
     for row in rows:
