@@ -21,7 +21,7 @@ import uuid
 import pytest
 
 from app.routers.client_documents import _mint_path, _prefix_for
-from app.services import storage
+from app.services import storage, storage_supabase
 
 
 class TestMintedPaths:
@@ -97,55 +97,62 @@ class TestPrefixConfinement:
 
 class TestSignedUrlParsing:
     """Supabase has returned signed URLs both with and without the /storage/v1
-    prefix across versions, so normalisation is pinned rather than assumed."""
+    prefix across versions, so normalisation is pinned rather than assumed.
+    Exercises storage_supabase.py directly — this parsing is specific to that
+    provider, not part of the storage.py dispatcher's contract."""
 
     @pytest.fixture(autouse=True)
     def _project_url(self, monkeypatch):
-        monkeypatch.setattr(storage.settings, "supabase_url", "https://ref.supabase.co")
+        monkeypatch.setattr(storage_supabase.settings, "supabase_url", "https://ref.supabase.co")
 
     def test_a_relative_url_becomes_absolute(self):
         assert (
-            storage._absolute("/object/sign/documents/a.pdf?token=abc")
+            storage_supabase._absolute("/object/sign/documents/a.pdf?token=abc")
             == "https://ref.supabase.co/storage/v1/object/sign/documents/a.pdf?token=abc"
         )
 
     def test_an_already_prefixed_url_is_not_doubled(self):
         assert (
-            storage._absolute("/storage/v1/object/sign/documents/a.pdf?token=abc")
+            storage_supabase._absolute("/storage/v1/object/sign/documents/a.pdf?token=abc")
             == "https://ref.supabase.co/storage/v1/object/sign/documents/a.pdf?token=abc"
         )
 
     def test_a_trailing_slash_on_the_project_url_does_not_double_up(self, monkeypatch):
-        monkeypatch.setattr(storage.settings, "supabase_url", "https://ref.supabase.co/")
-        assert storage._absolute("object/sign/documents/a.pdf").startswith(
+        monkeypatch.setattr(storage_supabase.settings, "supabase_url", "https://ref.supabase.co/")
+        assert storage_supabase._absolute("object/sign/documents/a.pdf").startswith(
             "https://ref.supabase.co/storage/v1/object/"
         )
 
     def test_the_upload_token_is_extracted(self):
-        assert storage._token_from("/object/upload/sign/documents/a.pdf?token=eyJhbG.abc") == (
-            "eyJhbG.abc"
-        )
+        assert storage_supabase._token_from(
+            "/object/upload/sign/documents/a.pdf?token=eyJhbG.abc"
+        ) == ("eyJhbG.abc")
 
     def test_a_url_without_a_token_returns_none(self):
-        assert storage._token_from("/object/upload/sign/documents/a.pdf") is None
+        assert storage_supabase._token_from("/object/upload/sign/documents/a.pdf") is None
 
 
 class TestConfiguration:
+    """storage.is_configured()/StorageError are the dispatcher's public
+    contract (provider-agnostic); the underlying settings and
+    _require_configured() checked here are the Supabase provider's own, since
+    STORAGE_PROVIDER defaults to "supabase" and nothing here changes it."""
+
     def test_unconfigured_storage_is_reported_not_assumed(self, monkeypatch):
-        monkeypatch.setattr(storage.settings, "supabase_url", "")
-        monkeypatch.setattr(storage.settings, "supabase_service_role_key", "")
+        monkeypatch.setattr(storage_supabase.settings, "supabase_url", "")
+        monkeypatch.setattr(storage_supabase.settings, "supabase_service_role_key", "")
         assert storage.is_configured() is False
         with pytest.raises(storage.StorageError, match="SUPABASE_URL"):
-            storage._require_configured()
+            storage_supabase._require_configured()
 
     def test_both_settings_are_required(self, monkeypatch):
-        monkeypatch.setattr(storage.settings, "supabase_url", "https://ref.supabase.co")
-        monkeypatch.setattr(storage.settings, "supabase_service_role_key", "")
+        monkeypatch.setattr(storage_supabase.settings, "supabase_url", "https://ref.supabase.co")
+        monkeypatch.setattr(storage_supabase.settings, "supabase_service_role_key", "")
         assert storage.is_configured() is False
 
     def test_configured_when_both_are_present(self, monkeypatch):
-        monkeypatch.setattr(storage.settings, "supabase_url", "https://ref.supabase.co")
-        monkeypatch.setattr(storage.settings, "supabase_service_role_key", "service-key")
+        monkeypatch.setattr(storage_supabase.settings, "supabase_url", "https://ref.supabase.co")
+        monkeypatch.setattr(storage_supabase.settings, "supabase_service_role_key", "service-key")
         assert storage.is_configured() is True
 
 
@@ -155,6 +162,6 @@ def test_delete_is_a_no_op_when_storage_is_unconfigured(monkeypatch):
     an async plugin: the suite has no pytest-asyncio dependency."""
     import asyncio
 
-    monkeypatch.setattr(storage.settings, "supabase_url", "")
-    monkeypatch.setattr(storage.settings, "supabase_service_role_key", "")
+    monkeypatch.setattr(storage_supabase.settings, "supabase_url", "")
+    monkeypatch.setattr(storage_supabase.settings, "supabase_service_role_key", "")
     asyncio.run(storage.delete_object("tenant/client/file.pdf"))

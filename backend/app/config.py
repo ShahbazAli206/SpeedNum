@@ -27,6 +27,40 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = Field(default="", alias="SUPABASE_JWT_SECRET")
     jwt_audience: str = Field(default="authenticated", alias="JWT_AUDIENCE")
 
+    # --- Storage ----------------------------------------------------------------
+    # "supabase" keeps the original Supabase Storage REST signing path.
+    # "s3" targets any S3-compatible endpoint (MinIO on the VPS, or a managed
+    # bucket) — see services/storage_s3.py. Both implement the same
+    # create_upload_url/create_download_url/delete_object contract, so
+    # switching providers is a config change, not a code change; the frontend
+    # never sees which one is in effect (it just PUTs to whatever `url` comes
+    # back and never reads `token` unless the provider supplies one).
+    storage_provider: str = Field(default="supabase", alias="STORAGE_PROVIDER")
+
+    # Two separate endpoints on purpose. `s3_endpoint_url` is what the backend
+    # dials directly (the internal Docker hostname, e.g. http://minio:9000) —
+    # used for calls this process makes itself, like delete_object. A presigned
+    # URL's signature bakes in the host it was signed for, and the *browser*
+    # can only ever reach the public one — so presigned URLs are generated
+    # against `s3_public_endpoint_url` (e.g. https://test.spidnums.com/storage-api,
+    # proxied by Caddy to MinIO) even though no request is ever made with that
+    # client. Left blank, it falls back to `s3_endpoint_url`, which is correct
+    # for a managed S3 provider where both are the same public URL.
+    s3_endpoint_url: str = Field(default="", alias="S3_ENDPOINT_URL")
+    s3_public_endpoint_url: str = Field(default="", alias="S3_PUBLIC_ENDPOINT_URL")
+    s3_region: str = Field(default="us-east-1", alias="S3_REGION")
+    s3_access_key_id: str = Field(default="", alias="S3_ACCESS_KEY_ID")
+    s3_secret_access_key: str = Field(default="", alias="S3_SECRET_ACCESS_KEY")
+    s3_bucket: str = Field(default="documents", alias="S3_BUCKET")
+    # MinIO (and most self-hosted S3-compatible servers) need path-style
+    # addressing (host/bucket/key) since there is no per-bucket DNS/wildcard
+    # certificate to support virtual-hosted style (bucket.host/key).
+    s3_use_path_style: bool = Field(default=True, alias="S3_USE_PATH_STYLE")
+
+    @property
+    def s3_public_endpoint(self) -> str:
+        return (self.s3_public_endpoint_url or self.s3_endpoint_url).rstrip("/")
+
     # --- Web ------------------------------------------------------------------
     public_app_url: str = Field(default="http://localhost:3000", alias="PUBLIC_APP_URL")
     cors_origins: str = Field(default="*", alias="CORS_ORIGINS")
