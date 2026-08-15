@@ -2,7 +2,7 @@
 
 Running state of this repo so a fresh session can pick up without re-deriving anything.
 
-**Last updated:** 2026-08-15 (session 4 — see the bottom of this file)
+**Last updated:** 2026-08-16 (session 5 — see the bottom of this file)
 
 ---
 
@@ -725,3 +725,95 @@ loads a profile fails until it is run. All four are `if not exists`-guarded and 
    into a real bucket; that is the first thing to exercise once Supabase is live.
 5. Items 4–6 from session 3 (portal reminders, welcome-email layout) are unchanged.
 6. Legal copy is still unreviewed template wording.
+
+---
+
+# Session 5 — portable schema, VPS Postgres/MinIO, first real staging deploy (2026-08-16)
+
+Driven by a separate architecture brief (Supabase exit plan + Hostinger VPS deployment).
+Branch: `migration/portable-production-architecture` (not yet merged to `main`). Full detail in
+the branch's commit messages and `DEPLOYMENT.md`; this is the pointer for a fresh session.
+
+## What changed
+
+- **Schema made portable.** `profiles.id`'s FK to `auth.users` removed (that table only exists
+  when Postgres is Supabase's own — `deps._provision_profile` already recreates what the
+  `on_auth_user_created` trigger does, as a fallback, so nothing depended on it existing).
+  `0003`'s trigger-attach and `storage.buckets` insert now guard on `to_regclass(...) is not
+  null`; `0004`/`0007`'s RLS policies guard on `to_regrole('authenticated') is not null`.
+  `0002_rls.sql` has no portable content at all, so it's skipped by name via a new
+  `MIGRATIONS_SKIP` env var read by `backend/scripts/migrate.py`, rather than guarded in place.
+  **Verified**: `migrate.py apply` runs clean against a truly empty `postgres:16` container — 24
+  tables, no leftover `auth`/`storage` schema references, no orphaned RLS.
+- **Storage abstraction gained an S3/MinIO provider.** `storage.py` is now a thin dispatcher over
+  `STORAGE_PROVIDER` (supabase | s3); the Supabase implementation moved unchanged to
+  `storage_supabase.py`; `storage_s3.py` is new (boto3, two endpoints — internal for the
+  backend's own calls, public for presigned URLs the browser must reach). No frontend change
+  needed: `lib/storage.ts` already just PUTs to whatever `url` comes back. **Verified**: a real
+  presigned upload → download → delete round-trip against the deployed MinIO, through Caddy,
+  over HTTPS.
+- **VPS now runs Postgres + MinIO alongside the API**, all Docker-internal except `api` (Caddy
+  reaches it by container name over the `web` network — no host port published at all, a change
+  from the previous nginx-oriented compose file). Caddy (already running on the VPS before this
+  work) got a new site block for `test.spidnums.com`, replacing its "HTTPS is working" test
+  response — the previously-written nginx+certbot runbook was never deployed and would have
+  fought Caddy for ports 80/443, so it was replaced rather than stood up alongside.
+- **Backup/restore scripts for both Postgres and MinIO**, cron'd daily at 03:00/03:15 UTC, plus
+  `health-check.sh`. **Verified real restores**, not just written scripts: backed up the live
+  (empty, freshly-migrated) Postgres and restored it into a disposable container (24 tables, 7
+  `schema_migrations` rows survived); uploaded a real test object, backed up MinIO's data
+  directory, and restored it into a disposable MinIO that listed the object back.
+
+## Bugs the deploy itself caught (not found by reading code)
+
+1. Generated `POSTGRES_PASSWORD`/`MINIO_ROOT_PASSWORD` with `openssl rand -base64`, which can
+   emit `/` and `+` — both break when the value is embedded directly in `DATABASE_URL`'s DSN
+   string. Switched the hint to `-hex`.
+2. `app/db.py` defaults to `sslmode=require` when the DSN doesn't say otherwise; the VPS's own
+   `postgres:16` doesn't terminate TLS at all, so the API's engine got "PostgreSQL server ...
+   rejected SSL upgrade" (`migrate.py`'s bare `asyncpg.connect()` worked fine, no ssl kwarg,
+   which is what made this confusing at first) — fixed with `?sslmode=disable` on the two
+   VPS-Postgres `DATABASE_URL`s in `docker-compose.yml` only; Supabase's pooler DSN is unaffected.
+3. First Caddy routing attempt used `handle_path /storage-api/*` to strip a prefix before
+   forwarding to MinIO. That broke every presigned URL: SigV4 signs the exact request path, and
+   MinIO validates against the path it actually receives — stripping the prefix meant those two
+   never matched, and every request came back "Access Denied" with no more specific reason.
+   Fixed by dropping the prefix entirely (`S3_PUBLIC_ENDPOINT_URL` is now the bare host) and
+   matching Caddy's route on the bucket name itself, which path-style S3 already puts first in
+   the URL — nothing rewrites the path anymore.
+4. `restore-storage.sh`'s first draft ran `minio/mc ... sh -c "..."` — `mc`'s entrypoint *is*
+   `mc`, not a shell, so that was parsed as a (nonexistent) `mc sh` subcommand. Needed
+   `--entrypoint /bin/sh` explicitly, matching how `docker-compose.yml`'s `minio-init` already
+   does it. Its cleanup also tried to `rm -rf` a directory MinIO had written as its own
+   container-internal uid, which the host user can't remove through a bind mount — fixed by
+   deleting it through a throwaway root container instead.
+5. `deploy.sh` and the original `docker-compose.yml` published the api container on
+   `127.0.0.1:8000` for an nginx-fronted setup; the Caddy-based one reaches it by container name
+   over the `web` network instead and publishes no host port at all, which silently broke
+   `deploy.sh`'s own `curl 127.0.0.1:8000/health` — fixed to check from inside the container.
+
+All five were caught because the deploy was actually run and its output actually read, not
+because the code looked wrong on inspection — worth remembering before trusting untested
+infrastructure changes of this shape again.
+
+## What is still open (this branch)
+
+1. **Not merged to `main`.** Everything above lives on `migration/portable-production-architecture`.
+2. **No live Supabase project credentials in this session** — Auth (`SUPABASE_URL`,
+   `SUPABASE_SERVICE_ROLE_KEY`) is unset on the VPS deploy, so account-creation/JWT-verified
+   routes correctly 424/401 rather than crash, but signup/login/document-upload were never
+   exercised through a real token. That needs either this project's real Supabase credentials or
+   a decision to build self-hosted auth (the architecture brief explicitly allows keeping
+   Supabase Auth as the long-term choice if self-hosting it is judged riskier than worth).
+3. **No Vercel access in this session** — `NEXT_PUBLIC_API_URL=https://test.spidnums.com` still
+   needs to be set in the Vercel dashboard and the frontend redeployed to actually exercise the
+   Vercel → VPS path end-to-end.
+4. **No offsite backup.** Both backup scripts write to the VPS's own disk only — a VPS failure
+   would take the only copy with it. Needs an external destination (rclone to B2/S3, or similar)
+   and credentials this session didn't have.
+5. **`api.spidnums.com` DNS record doesn't exist yet** — staging currently rides on the
+   pre-existing `test.spidnums.com` record. Creating the `api` A record is a new record, not a
+   change to the production root domain, but still needs Hostinger DNS access this session
+   didn't have.
+6. Production data migration from Supabase (Postgres + Storage) was explicitly out of scope for
+   this pass — nothing in Supabase was read, exported, or touched.
