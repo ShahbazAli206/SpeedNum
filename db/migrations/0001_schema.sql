@@ -75,10 +75,20 @@ create trigger tenants_set_updated_at before update on public.tenants
   for each row execute function public.set_updated_at();
 
 -- -----------------------------------------------------------------------------
--- Profiles — one row per auth.users row, pinned to a tenant
+-- Profiles — one row per identity-provider user, pinned to a tenant.
+--
+-- `id` intentionally carries NO foreign key to an `auth.users` table: on
+-- Supabase that table lives in the same physical database and this used to
+-- reference it directly, but the portable target is a plain Postgres instance
+-- that never has that schema (identity stays with Supabase Auth, an external
+-- service, regardless of which Postgres holds `public`). The row is created
+-- from application code either way — see `handle_new_user()` in
+-- 0003_functions.sql for the Supabase-colocated path, and
+-- `deps._provision_profile` / the invitation-acceptance flow for the
+-- database-agnostic path that runs whenever the trigger hasn't (or can't).
 -- -----------------------------------------------------------------------------
 create table if not exists public.profiles (
-  id            uuid primary key references auth.users (id) on delete cascade,
+  id            uuid primary key,
   tenant_id     uuid references public.tenants (id) on delete cascade,
   email         citext not null,
   full_name     text,

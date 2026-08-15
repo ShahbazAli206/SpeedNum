@@ -148,10 +148,22 @@ begin
 end;
 $$;
 
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute function public.handle_new_user();
+-- Only attach when `auth.users` actually exists: on Supabase that table is
+-- colocated with this schema, but the portable deployment target keeps
+-- Supabase Auth as a separate service in front of a plain Postgres instance
+-- that never has this table. `deps._provision_profile` and the
+-- bootstrap/invitation-acceptance flows already create the same profile row
+-- from application code, so this is a convenience for the colocated case, not
+-- the only path.
+do $$
+begin
+  if to_regclass('auth.users') is not null then
+    execute 'drop trigger if exists on_auth_user_created on auth.users';
+    execute 'create trigger on_auth_user_created after insert on auth.users for each row execute function public.handle_new_user()';
+  else
+    raise notice '0003_functions.sql: auth.users not found — skipping on_auth_user_created trigger (profile provisioning falls back to application code).';
+  end if;
+end $$;
 
 -- -----------------------------------------------------------------------------
 -- Recalculate engagement letter totals whenever line items change
@@ -185,7 +197,20 @@ create trigger letter_items_recalc
 
 -- -----------------------------------------------------------------------------
 -- Storage bucket for client documents / signed letters
+--
+-- Only when Supabase Storage is actually present. The portable deployment
+-- target uses an S3-compatible provider (see STORAGE_PROVIDER in
+-- app/services/storage.py) that manages its own bucket outside of SQL.
 -- -----------------------------------------------------------------------------
-insert into storage.buckets (id, name, public)
-values ('documents', 'documents', false)
-on conflict (id) do nothing;
+do $$
+begin
+  if to_regclass('storage.buckets') is not null then
+    execute $sql$
+      insert into storage.buckets (id, name, public)
+      values ('documents', 'documents', false)
+      on conflict (id) do nothing
+    $sql$;
+  else
+    raise notice '0003_functions.sql: storage.buckets not found — skipping Supabase Storage bucket creation.';
+  end if;
+end $$;

@@ -218,77 +218,98 @@ create index if not exists documents_kind_idx on public.documents (client_id, ki
 --
 -- Same defence-in-depth posture as 0002: the API connects as owner and filters
 -- in code, these policies protect anything arriving via Supabase's authenticated
--- role. Firm staff get the whole tenant; a portal user gets one client.
+-- role (PostgREST/Storage/Realtime/browser supabase-js). On a deployment target
+-- with no Supabase project colocated with this database, that role and
+-- `auth.uid()` do not exist and nothing ever connects to Postgres except this
+-- application's own owner-role connection — so there is no remaining consumer
+-- for these policies, and creating them would just fail on the missing role.
+-- Guarded the same way as 0002 (which defines the helper functions these
+-- policies call): skip the whole section when `authenticated` doesn't exist,
+-- rather than fail migration or install dead policies. Firm staff get the
+-- whole tenant; a portal user gets one client — enforced by app/deps.py's
+-- BookScope on a deployment target where this section is skipped.
 -- -----------------------------------------------------------------------------
-create or replace function public.current_client_id()
-returns uuid
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select client_id from public.profiles where id = auth.uid();
-$$;
-
-grant execute on function public.current_client_id() to authenticated;
-
-alter table public.client_invoices        enable row level security;
-alter table public.client_expenses        enable row level security;
-alter table public.client_employees       enable row level security;
-alter table public.client_pay_runs        enable row level security;
-alter table public.client_tax_obligations enable row level security;
-
--- A row is visible when you are staff at the owning firm, or the portal user for
--- that exact client, or a superadmin.
-do $$
-declare
-  t text;
-  book_tables text[] := array[
-    'client_invoices', 'client_expenses', 'client_employees',
-    'client_pay_runs', 'client_tax_obligations'
-  ];
+do $rls_0004$
 begin
-  foreach t in array book_tables loop
-    execute format('drop policy if exists %I on public.%I', t || '_rw', t);
-    execute format($f$
-      create policy %I on public.%I
-        for all
-        to authenticated
-        using (
-          public.is_superadmin()
-          or (tenant_id = public.current_tenant_id()
-              and (public.current_client_id() is null
-                   or client_id = public.current_client_id()))
-        )
-        with check (
-          public.is_superadmin()
-          or (tenant_id = public.current_tenant_id()
-              and (public.current_client_id() is null
-                   or client_id = public.current_client_id()))
-        )
-    $f$, t || '_rw', t);
-  end loop;
-end $$;
+  if to_regrole('authenticated') is null then
+    raise notice '0004_client_books.sql: skipping Supabase RLS policies (no "authenticated" role on this Postgres instance).';
+    return;
+  end if;
 
--- 0002 scoped documents by tenant only. Re-scope so a portal user sees its own
--- client's files that the firm marked visible, plus anything it uploaded
--- itself — hiding a client's own upload from that same client would make no
--- sense. Mirrors app/routers/client_documents.py::_visible_to_portal exactly;
--- keep the two in sync.
-drop policy if exists documents_tenant_rw on public.documents;
-create policy documents_tenant_rw on public.documents
-  for all
-  to authenticated
-  using (
-    public.is_superadmin()
-    or (tenant_id = public.current_tenant_id()
-        and (public.current_client_id() is null
-             or (client_id = public.current_client_id()
-                 and (is_client_visible or uploaded_by = auth.uid()))))
-  )
-  with check (
-    public.is_superadmin()
-    or (tenant_id = public.current_tenant_id()
-        and (public.current_client_id() is null
-             or client_id = public.current_client_id()))
-  );
+  execute $func$
+    create or replace function public.current_client_id()
+    returns uuid
+    language sql
+    stable
+    security definer
+    set search_path = public
+    as $body$
+      select client_id from public.profiles where id = auth.uid();
+    $body$
+  $func$;
+
+  execute 'grant execute on function public.current_client_id() to authenticated';
+
+  execute 'alter table public.client_invoices        enable row level security';
+  execute 'alter table public.client_expenses        enable row level security';
+  execute 'alter table public.client_employees       enable row level security';
+  execute 'alter table public.client_pay_runs        enable row level security';
+  execute 'alter table public.client_tax_obligations enable row level security';
+
+  -- A row is visible when you are staff at the owning firm, or the portal
+  -- user for that exact client, or a superadmin.
+  declare
+    t text;
+    book_tables text[] := array[
+      'client_invoices', 'client_expenses', 'client_employees',
+      'client_pay_runs', 'client_tax_obligations'
+    ];
+  begin
+    foreach t in array book_tables loop
+      execute format('drop policy if exists %I on public.%I', t || '_rw', t);
+      execute format($pol$
+        create policy %I on public.%I
+          for all
+          to authenticated
+          using (
+            public.is_superadmin()
+            or (tenant_id = public.current_tenant_id()
+                and (public.current_client_id() is null
+                     or client_id = public.current_client_id()))
+          )
+          with check (
+            public.is_superadmin()
+            or (tenant_id = public.current_tenant_id()
+                and (public.current_client_id() is null
+                     or client_id = public.current_client_id()))
+          )
+      $pol$, t || '_rw', t);
+    end loop;
+  end;
+
+  -- 0002 scoped documents by tenant only. Re-scope so a portal user sees its
+  -- own client's files that the firm marked visible, plus anything it
+  -- uploaded itself — hiding a client's own upload from that same client
+  -- would make no sense. Mirrors
+  -- app/routers/client_documents.py::_visible_to_portal exactly; keep the
+  -- two in sync.
+  execute 'drop policy if exists documents_tenant_rw on public.documents';
+  execute $docpol$
+    create policy documents_tenant_rw on public.documents
+      for all
+      to authenticated
+      using (
+        public.is_superadmin()
+        or (tenant_id = public.current_tenant_id()
+            and (public.current_client_id() is null
+                 or (client_id = public.current_client_id()
+                     and (is_client_visible or uploaded_by = auth.uid()))))
+      )
+      with check (
+        public.is_superadmin()
+        or (tenant_id = public.current_tenant_id()
+            and (public.current_client_id() is null
+                 or client_id = public.current_client_id()))
+      )
+  $docpol$;
+end $rls_0004$;

@@ -26,6 +26,18 @@ on the second run.
 Each file is applied inside its own transaction together with its
 schema_migrations row, so a file that fails halfway leaves neither the change
 nor a record claiming it succeeded.
+
+MIGRATIONS_SKIP — comma-separated version prefixes to skip entirely, e.g.
+    MIGRATIONS_SKIP=0002_rls
+0002_rls.sql defines `language sql` helper functions that call `auth.uid()`
+and creates policies `to authenticated` — both are Supabase-specific (that
+role/function only exist when this database is a Supabase project's own
+Postgres) and fail outright on a plain Postgres instance. Every other
+migration guards its Supabase-only statements internally (see 0003, 0004,
+0007) and runs safely either way; 0002 is nothing *but* Supabase-only
+statements, so it is skipped by name instead. Set this on the VPS/portable
+deployment target; leave it unset against Supabase, where 0002 keeps
+providing defence-in-depth RLS as before.
 """
 
 from __future__ import annotations
@@ -110,6 +122,15 @@ def _checksum(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
 
 
+def _skip_prefixes() -> set[str]:
+    raw = os.environ.get("MIGRATIONS_SKIP", "")
+    return {part.strip() for part in raw.split(",") if part.strip()}
+
+
+def _is_skipped(version: str, skip: set[str]) -> bool:
+    return any(version.startswith(prefix) for prefix in skip)
+
+
 async def _connect() -> asyncpg.Connection:
     # statement_cache_size=0 for the same reason app/db.py sets it: the port-6543
     # transaction pooler multiplexes connections and cannot hold prepared statements.
@@ -126,22 +147,26 @@ async def cmd_status() -> int:
     conn = await _connect()
     try:
         applied = await _load_applied(conn)
+        skip = _skip_prefixes()
         pending: list[str] = []
 
         print(f"{'migration':<40} {'state':<10} note")
         print("-" * 78)
         for version, path in _discover():
             checksum = _checksum(path)
-            if version not in applied:
+            if version in applied:
+                if applied[version] != checksum:
+                    # The file changed after it was applied. The database still has
+                    # whatever the old text did, so this is a real divergence, not a
+                    # formality — flag it rather than silently treating it as done.
+                    print(f"{version:<40} {'APPLIED':<10} !! file changed since it was applied")
+                else:
+                    print(f"{version:<40} {'APPLIED':<10}")
+            elif _is_skipped(version, skip):
+                print(f"{version:<40} {'SKIPPED':<10} MIGRATIONS_SKIP")
+            else:
                 pending.append(version)
                 print(f"{version:<40} {'PENDING':<10}")
-            elif applied[version] != checksum:
-                # The file changed after it was applied. The database still has
-                # whatever the old text did, so this is a real divergence, not a
-                # formality — flag it rather than silently treating it as done.
-                print(f"{version:<40} {'APPLIED':<10} !! file changed since it was applied")
-            else:
-                print(f"{version:<40} {'APPLIED':<10}")
 
         print()
         if pending:
@@ -158,7 +183,12 @@ async def cmd_apply(dry_run: bool) -> int:
     conn = await _connect()
     try:
         applied = await _load_applied(conn)
-        pending = [(v, p) for v, p in _discover() if v not in applied]
+        skip = _skip_prefixes()
+        skipped = [v for v, _ in _discover() if v not in applied and _is_skipped(v, skip)]
+        pending = [(v, p) for v, p in _discover() if v not in applied and not _is_skipped(v, skip)]
+
+        if skipped:
+            print(f"Skipping (MIGRATIONS_SKIP): {', '.join(skipped)}")
 
         if not pending:
             print("Nothing to apply — schema is up to date.")

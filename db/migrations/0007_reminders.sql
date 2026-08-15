@@ -85,17 +85,31 @@ create trigger reminders_set_updated_at
 -- -----------------------------------------------------------------------------
 -- RLS — same shape as notifications: firm-wide rows (assignee_id null) plus
 -- your own. See 0002_rls.sql for the helper functions.
+--
+-- Guarded like 0004: skipped when this Postgres instance has no
+-- `authenticated` role (no colocated Supabase project, so no consumer other
+-- than this application's own owner-role connection — see 0004 for the full
+-- reasoning).
 -- -----------------------------------------------------------------------------
-alter table public.reminders enable row level security;
+do $rls_0007$
+begin
+  if to_regrole('authenticated') is null then
+    raise notice '0007_reminders.sql: skipping Supabase RLS policy (no "authenticated" role on this Postgres instance).';
+    return;
+  end if;
 
-drop policy if exists reminders_rw on public.reminders;
-create policy reminders_rw on public.reminders
-  for all to authenticated
-  using (
-    tenant_id = public.current_tenant_id()
-    and (assignee_id is null or assignee_id = auth.uid() or public.is_tenant_admin())
-  )
-  with check (tenant_id = public.current_tenant_id());
+  execute 'alter table public.reminders enable row level security';
+  execute 'drop policy if exists reminders_rw on public.reminders';
+  execute $pol$
+    create policy reminders_rw on public.reminders
+      for all to authenticated
+      using (
+        tenant_id = public.current_tenant_id()
+        and (assignee_id is null or assignee_id = auth.uid() or public.is_tenant_admin())
+      )
+      with check (tenant_id = public.current_tenant_id())
+  $pol$;
+end $rls_0007$;
 
 -- -----------------------------------------------------------------------------
 -- Reminder lead times live on the tenant so a firm can tune them. Read by
