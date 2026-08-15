@@ -1,0 +1,58 @@
+# Lives on the VPS at /home/deploy/apps/caddy/Caddyfile — NOT part of this
+# repo's own Docker Compose project. Caddy was set up once, independently,
+# before this app existed (see DEPLOYMENT.md's VPS runbook), and is shared
+# across whatever else eventually runs on this host. This file is checked in
+# here only as the documented, reproducible source for what the VPS's copy
+# should contain — copy it over, don't hand-edit the two out of sync.
+#
+# Apply:
+#   scp deploy/Caddyfile.example deploy@2.25.108.16:/home/deploy/apps/caddy/Caddyfile
+#   ssh deploy@2.25.108.16 'docker exec caddy caddy validate --config /etc/caddy/Caddyfile'
+#   ssh deploy@2.25.108.16 'docker exec caddy caddy reload --config /etc/caddy/Caddyfile'
+#
+# Validate before reload, always — a bad config should never take the
+# currently-working site down while Caddy tries to apply it.
+
+{
+	email sa38299793@gmail.com
+}
+
+# Staging/validation hostname. Already resolves to this VPS (test A record
+# predates this app) — used here to prove the whole stack end-to-end before
+# any DNS is pointed at it for real. See DEPLOYMENT.md for the plan to move
+# this to api.spidnums.com once a DNS record exists for it; nothing here
+# needs to change to make that move, only the site address below.
+test.spidnums.com {
+	# MinIO's S3 API, presigned-URL traffic only. handle_path strips the
+	# prefix so MinIO sees exactly the path it was asked to sign
+	# (S3_PUBLIC_ENDPOINT_URL=https://test.spidnums.com/storage-api — see
+	# deploy/api.env.example) — an S3 SigV4 signature covers the request
+	# path, so this prefix has to be stripped consistently on both sides or
+	# every presigned URL fails with a signature mismatch.
+	handle_path /storage-api/* {
+		reverse_proxy speednum-minio:9000
+	}
+
+	handle {
+		reverse_proxy speednum-api:8000 {
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Forwarded-Host {host}
+		}
+	}
+
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 20mb
+			roll_keep 5
+		}
+	}
+}

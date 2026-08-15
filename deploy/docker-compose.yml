@@ -1,13 +1,109 @@
-# SpeedNum API on a Hostinger KVM VPS (or any Docker host).
+# SpeedNum stack on a Hostinger KVM VPS (or any Docker host).
 #
-#   cd /opt/speednum && docker compose up -d --build
+#   cd /opt/speednum/deploy && docker compose up -d --build
 #
-# The container is bound to loopback on purpose: nginx terminates TLS in front
-# of it (see nginx/speednum-api.conf). Publishing 0.0.0.0:8000 instead would put
-# a plaintext copy of the API on the public internet alongside the HTTPS one,
-# and browsers would happily send bearer tokens to it.
+# Four services: api (public, via the host's Caddy), postgres and minio
+# (private, never published), migrate (a one-shot tool, not part of `up`).
+#
+# Two networks:
+#   - `web`      external, created once with `docker network create web` and
+#                already owning the host's Caddy container (see
+#                /home/deploy/apps/caddy). `api` joins it so Caddy can reach
+#                `speednum-api:8000` by name; `minio` joins it too, ONLY so
+#                Caddy can reverse-proxy presigned-URL traffic to it under
+#                /storage-api/* (see ../Caddyfile.example) — MinIO publishes no
+#                host port either way, and its bucket has no anonymous policy,
+#                so reachability over this shared bridge still requires a
+#                valid signed S3 request, not just network access.
+#   - `internal` project-local, created automatically by compose. postgres
+#                lives here ONLY — nothing outside this compose project, and
+#                nothing on the internet, can reach it. Never publish 5432.
 
 services:
+  postgres:
+    image: postgres:16
+    container_name: speednum-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-speednum}
+      POSTGRES_USER: ${POSTGRES_USER:-speednum}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in api.env}
+    volumes:
+      # Bind-mounted rather than a named volume so a `docker compose down`
+      # (without -v, which nothing here ever runs against production) can
+      # never take the data with it, and so backups/restores in ../scripts
+      # can reach the files directly.
+      - /home/deploy/data/speednum/postgres:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-speednum} -d $${POSTGRES_DB:-speednum}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  minio:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    container_name: speednum-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in api.env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in api.env}
+      # No public buckets, no browser UI needed on this deployment — the
+      # console (9001) is never published and is reached only via
+      # `docker exec`/an SSH tunnel if it is ever needed.
+      MINIO_BROWSER: "off"
+    volumes:
+      - /home/deploy/data/speednum/minio:/data
+    networks:
+      - internal
+      - web
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # No `ports:` — see the network note above. Reached only by other
+    # containers on `internal`/`web`, never by the host's public interface.
+
+  # One-shot: creates the bucket and denies anonymous access, then exits.
+  # Re-running is harmless (--ignore-existing, and `mc anonymous set none` is
+  # idempotent) — this is provisioning, not a migration, so it is not tracked
+  # the way schema changes are.
+  minio-init:
+    image: minio/mc:RELEASE.2024-10-08T09-37-26Z
+    container_name: speednum-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - internal
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in api.env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in api.env}
+      S3_BUCKET: ${S3_BUCKET:-documents}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
+        mc mb --ignore-existing "local/$$S3_BUCKET" &&
+        mc anonymous set none "local/$$S3_BUCKET"
+    restart: "no"
+
   api:
     build:
       context: ../backend
@@ -25,8 +121,23 @@ services:
       # the Postgres advisory lock in services/scheduler.py means only one of
       # them actually sweeps.
       WEB_CONCURRENCY: "4"
-    ports:
-      - "127.0.0.1:8000:8000"
+      # These three reference ../deploy/.env (compose's own top-level env
+      # file, auto-loaded for *.yml interpolation — a different mechanism
+      # from api.env's `env_file:`, which is not interpolated). One password
+      # each, defined once in .env, rather than pasted a second time into
+      # api.env where it could drift. Anything api.env sets for these same
+      # keys is overridden by this block (compose merges env_file first,
+      # environment second) — leave them out of api.env entirely instead of
+      # relying on that.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-speednum}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-speednum}
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - web
+      - internal
     healthcheck:
       # Repeated from the Dockerfile so `docker compose ps` reports health even
       # if the image is ever rebuilt from a different base.
@@ -68,11 +179,22 @@ services:
       - ./api.env
     environment:
       MIGRATIONS_DIR: /migrations
+      # See the `api` service's environment block above for why these three
+      # are not read from api.env.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-speednum}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-speednum}
     volumes:
       # The image is built from backend/ alone and cannot reach ../db, so the
       # .sql files are mounted in at run time. Read-only: this container has no
       # business editing them.
       - ../db/migrations:/migrations:ro
+    networks:
+      - internal
     entrypoint: ["python", "scripts/migrate.py"]
     command: ["status"]
     restart: "no"
+
+networks:
+  web:
+    external: true
+  internal:
+    driver: bridge

@@ -17,12 +17,21 @@
 
 ## Architecture
 
+Target (this app's own Postgres + storage on the VPS, Supabase kept for Auth only —
+see the architecture doc's "Supabase exit strategy" for why Auth stays while
+Postgres/Storage move):
+
 ```
-Vercel (Next.js 16 frontend)  ──bearer JWT──▶  nginx :443 ──▶ Docker: FastAPI (uvicorn ×4)
-        │                                                              │
-        │                                                              ▼  asyncpg (pooler :6543)
-        └────────── Supabase Auth (sign-in, JWT) ──────────────▶  Supabase Postgres
+Vercel (Next.js 16 frontend)  ──bearer JWT──▶  Caddy :443 ──▶ Docker: FastAPI (uvicorn ×4)
+        │                                                              │        │
+        │                                                              ▼        ▼
+        │                                                         Postgres    MinIO
+        └────────── Supabase Auth (sign-in, JWT) ─────────────────────┘   (both VPS-local,
+                                                                            Docker-internal only)
 ```
+
+Rollback path (unchanged code, config-only): `DATABASE_URL` back to the Supabase pooler string,
+`STORAGE_PROVIDER=supabase` — see `deploy/api.env.example`.
 
 - **Frontend** — `frontend/`, Next.js 16.3 / React 19, Tailwind 4, `@supabase/ssr` for auth only.
   Talks to the backend for all data via bearer token. Runs in **demo mode** (sample data, auth
@@ -30,7 +39,19 @@ Vercel (Next.js 16 frontend)  ──bearer JWT──▶  nginx :443 ──▶ Do
 - **Backend** — `backend/`, FastAPI in Docker. Listens on `$PORT` (falls back to 7860) with
   `WEB_CONCURRENCY` uvicorn workers. Connects directly to Postgres via `asyncpg`.
   **Crashes on boot if `DATABASE_URL` is unset.**
-- **Database** — Supabase Postgres. Schema + RLS + the signup trigger live in `db/migrations/`.
+- **Database** — the VPS's own Postgres container (see the VPS runbook below). Schema lives in
+  `db/migrations/`; the Supabase-only statements in it (RLS policies, the `auth.users` signup
+  trigger) are guarded to skip on a plain Postgres instance — see "Applying migrations" below.
+  Supabase Postgres remains supported as a rollback target (same migrations, same code) via
+  `DATABASE_URL` alone.
+- **Storage** — the VPS's own MinIO, behind the same Caddy reverse-proxying the API (never a
+  publicly exposed port) — see `STORAGE_PROVIDER` in `deploy/api.env.example` and
+  `backend/app/services/storage_s3.py`. Supabase Storage remains supported as a rollback target
+  via `STORAGE_PROVIDER=supabase`.
+- **Auth** — stays with Supabase regardless of where Postgres/Storage live (see the architecture
+  doc's reasoning: self-hosting Argon2id/token-rotation/rate-limiting/OTP securely is a
+  substantial, separate undertaking, and Supabase Auth already works). `backend/app/security.py`
+  verifies its JWTs via JWKS; nothing about that changes when only Postgres/Storage move.
 - **Email** — SMTP or Resend, selected by `EMAIL_PROVIDER`. Carries every credential email;
   see [Email delivery](#email-delivery).
 
@@ -41,8 +62,10 @@ Vercel (Next.js 16 frontend)  ──bearer JWT──▶  nginx :443 ──▶ Do
 | Layer | Status | URL / location |
 |---|---|---|
 | Frontend (Vercel) | ✅ **Deployed** (demo mode until env vars added) | https://speed-num.vercel.app |
-| Database (Supabase) | 🔴 **BLOCKER — migrations `0005`–`0007` not applied.** `0005` adds `profiles.must_change_password`, which `deps.py` reads on *every authenticated request*: until it is applied, every signed-in request 500s. Apply with the runner below. (`0001`–`0004` done: 22 tables, trigger + RLS; auth configured, ES256 signing) | `https://xftnqkmakeaqaandxyei.supabase.co` · Canada Central (`ca-central-1`) |
-| Backend (Hostinger VPS) | ⬜ pending — image, compose, nginx conf and deploy script ready in [`deploy/`](deploy/) | `https://api.<yourdomain>` (TBD) |
+| Database (VPS Postgres) | ⬜ pending first deploy — compose service ready in [`deploy/`](deploy/); migrations run clean from empty (see below) | Docker-internal only, via the `api`/`migrate` services |
+| Database (Supabase, rollback target) | 🔴 **BLOCKER if used directly — migrations `0005`–`0007` not applied there.** `0005` adds `profiles.must_change_password`, which `deps.py` reads on *every authenticated request*: until it is applied, every signed-in request against this database 500s. Apply with the runner below. (`0001`–`0004` done: 22 tables, trigger + RLS; auth configured, ES256 signing) | `https://xftnqkmakeaqaandxyei.supabase.co` · Canada Central (`ca-central-1`) |
+| Object storage (VPS MinIO) | ⬜ pending first deploy — compose service ready in [`deploy/`](deploy/) | Docker-internal + Caddy-proxied `/storage-api/*` only |
+| Backend (Hostinger VPS) | ⬜ pending first deploy — image, compose, Caddy site config and deploy script ready in [`deploy/`](deploy/) | `https://test.spidnums.com` (staging; `api.spidnums.com` pending a DNS record) |
 | Email | ⬜ pending — transport ready (SMTP or Resend); needs credentials + a real `EMAIL_FROM` | verify via `GET /api/v1/settings/email` |
 
 ---
@@ -310,30 +333,50 @@ PaaS supplied for free lives in [`deploy/`](deploy/):
 
 | File | What it is |
 |---|---|
-| [`deploy/docker-compose.yml`](deploy/docker-compose.yml) | The service: restart policy, loopback bind, 4 workers, log rotation |
-| [`deploy/api.env.example`](deploy/api.env.example) | Env template → copy to `deploy/api.env` (gitignored) |
-| [`deploy/nginx/speednum-api.conf`](deploy/nginx/speednum-api.conf) | TLS terminator / reverse proxy |
+| [`deploy/docker-compose.yml`](deploy/docker-compose.yml) | `api`, `postgres`, `minio` (+ `minio-init`), `migrate` — see below |
+| [`deploy/.env.example`](deploy/.env.example) | Shared secrets compose itself interpolates → copy to `deploy/.env` (gitignored) |
+| [`deploy/api.env.example`](deploy/api.env.example) | Container-only env template → copy to `deploy/api.env` (gitignored) |
+| [`deploy/Caddyfile.example`](deploy/Caddyfile.example) | The site block to add to the VPS's existing Caddy — **not** part of this compose project |
 | [`deploy/deploy.sh`](deploy/deploy.sh) | Pull, rebuild, restart, **and verify `/health` came back** |
+
+> **Why Caddy, not nginx+certbot.** An earlier version of this runbook stood up nginx+certbot
+> for TLS. That was written before the VPS itself existed; the actual VPS (see the quick
+> reference in the architecture doc) already runs Caddy in Docker at
+> `/home/deploy/apps/caddy`, owning ports 80/443/443-udp, with a working cert for
+> `test.spidnums.com`. Installing nginx alongside it would fight over those same ports for no
+> benefit — Caddy already does everything nginx+certbot was there for (TLS termination, reverse
+> proxy, auto-renewal), so this app's compose project joins Caddy's existing `web` Docker
+> network instead of running its own reverse proxy.
 
 ### Why each piece is there
 
-- **Loopback bind (`127.0.0.1:8000`).** nginx terminates TLS in front. Publishing `0.0.0.0:8000`
-  would expose a second, plaintext copy of the API, and browsers would send bearer tokens to it.
-- **nginx + certbot are not optional.** An https frontend cannot call an http API (mixed content
-  is blocked), and Vercel will not send a bearer token to an untrusted certificate.
+- **`postgres` and `minio` are not published on the host.** Only `api` (and, transitively,
+  `minio` — see below) join the `web` network Caddy is on; postgres lives on a project-private
+  `internal` network nothing outside this compose project can reach. Never add a `ports:`
+  mapping to either.
+- **`minio` joins `web` too, but still publishes no host port.** Caddy needs to reach it by
+  container name to proxy presigned-URL traffic (`/storage-api/*`, see the Caddyfile) — that
+  requires sharing a Docker network with Caddy, not a host port. Reaching it over that shared
+  bridge still requires a valid signed S3 request; the bucket has no anonymous policy.
 - **`WEB_CONCURRENCY=4`** uses the KVM 4's four vCPUs. Each worker is a separate process running
   its own copy of the reminder scheduler, so `services/scheduler.py` takes a Postgres advisory
   lock (`pg_try_advisory_xact_lock`) before sweeping — the losers skip the tick rather than
   queueing behind the winner and re-running it.
-- **`restart: unless-stopped` + log rotation.** The container is your job now. Unrotated Docker
-  logs grow until they fill the disk, which takes the API down with them.
+- **`restart: unless-stopped` + log rotation** on every service. Unrotated Docker logs grow
+  until they fill the disk, which takes the database down with everything else.
 - **The scheduler actually works here.** A VPS container does not sleep, so the daily sweep at
   `REMINDER_SWEEP_HOUR` fires reliably and no external cron is needed — unlike the Render free tier.
+- **Two separate env files.** `api.env`'s `env_file:` entries are passed straight through with no
+  interpolation, so a shared secret like the Postgres password cannot be written once there and
+  reused — `.env` is compose's own top-level file, auto-loaded to interpolate `${VAR}` inside
+  `docker-compose.yml` itself, which is how `DATABASE_URL` and the S3 credentials get built from
+  one value instead of two pasted in two places. See the comments in both `.env.example` and
+  `api.env.example`.
 
 ### Steps
 
-Prerequisites: a domain (or subdomain) pointed at the VPS's IP, and Docker installed
-(`curl -fsSL https://get.docker.com | sh`).
+Prerequisites: Docker already installed (it is — see the architecture doc's VPS quick
+reference), and the existing Caddy container reachable on the `web` Docker network.
 
 ```bash
 # 1. Get the code.
@@ -347,44 +390,50 @@ GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/ShahbazAli206/SpeedNum.git /o
 git -C /opt/speednum config lfs.fetchexclude "*"
 cd /opt/speednum/deploy
 
-# 2. Fill in secrets (DATABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SMTP/Resend, CORS_ORIGINS)
+# 2. Persistent data directories (bind mounts, so they survive
+#    `docker compose down` and are reachable by the backup scripts).
+mkdir -p /home/deploy/data/speednum/postgres /home/deploy/data/speednum/minio
+
+# 3. Fill in secrets — two files, see the note above on why there are two.
+cp .env.example .env && chmod 600 .env && nano .env
 cp api.env.example api.env && chmod 600 api.env && nano api.env
 
-# 3. Start it
+# 4. Start it
 docker compose up -d --build
 curl -s localhost:8000/health          # expect {"status":"ok","database":"ok",...}
 
-# 4. TLS + reverse proxy
-sudo apt install -y nginx certbot python3-certbot-nginx
-sudo cp nginx/speednum-api.conf /etc/nginx/sites-available/speednum-api
-sudo sed -i 's/api\.yourdomain\.com/api.YOURDOMAIN.com/' /etc/nginx/sites-available/speednum-api
-sudo ln -s /etc/nginx/sites-available/speednum-api /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-sudo certbot --nginx -d api.YOURDOMAIN.com
+# 5. Apply migrations against the fresh, empty VPS Postgres (see "Applying
+#    migrations" below — this is a brand-new database, so it starts from
+#    nothing rather than needing a `baseline` step).
+docker compose run --rm migrate apply
+docker compose run --rm migrate status  # expect "Schema is up to date."
 
-# 5. Firewall — 6543 outbound must stay open for the Supabase pooler
-sudo ufw allow OpenSSH && sudo ufw allow 'Nginx Full' && sudo ufw enable
+# 6. Reverse proxy — add this app's site block to the VPS's existing Caddy
+#    (a separate compose project; see deploy/Caddyfile.example for why).
+scp Caddyfile.example deploy@2.25.108.16:/home/deploy/apps/caddy/Caddyfile
+ssh deploy@2.25.108.16 'docker exec caddy caddy validate --config /etc/caddy/Caddyfile'
+ssh deploy@2.25.108.16 'docker exec caddy caddy reload --config /etc/caddy/Caddyfile'
 ```
 
-Then point the frontend at it: set `NEXT_PUBLIC_API_URL=https://api.YOURDOMAIN.com` on Vercel
-(no trailing slash, no `/api/v1` — the client appends it) and **redeploy**, since env vars only
-take effect on a new build. Add the same origin to `CORS_ORIGINS` in `api.env` and
-`docker compose up -d` to pick it up.
+Then point the frontend at it: set `NEXT_PUBLIC_API_URL=https://test.spidnums.com` on Vercel
+(no trailing slash, no `/api/v1` — the client appends it; swap to `api.spidnums.com` once that
+DNS record exists) and **redeploy**, since env vars only take effect on a new build. Add the
+same origin to `CORS_ORIGINS` in `api.env` and `docker compose up -d` to pick it up.
 
 Subsequent deploys: `cd /opt/speednum/deploy && ./deploy.sh`.
 
 ### Verify the deployment
 
 ```bash
-curl https://api.YOURDOMAIN.com/health        # {"status":"ok","database":"ok"}
+curl https://test.spidnums.com/health        # {"status":"ok","database":"ok"}
 ```
 
 Then, signed in as a firm admin (the token is in the browser's Supabase session):
 
 ```bash
-curl -H "Authorization: Bearer $TOKEN" https://api.YOURDOMAIN.com/api/v1/settings/email
+curl -H "Authorization: Bearer $TOKEN" https://test.spidnums.com/api/v1/settings/email
 curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-     -d '{}' https://api.YOURDOMAIN.com/api/v1/settings/email/test
+     -d '{}' https://test.spidnums.com/api/v1/settings/email/test
 ```
 
 `GET /settings/email` reports the resolved transport and every misconfiguration it can detect
@@ -403,7 +452,29 @@ question the database answers.
 
 > **This project's Supabase instance has `0001`–`0004` applied and `0005`–`0007` not.**
 > Baseline first — re-running the early files is *not* harmless, since `0002` issues bare
-> `create policy` statements that error the second time.
+> `create policy` statements that error the second time. This only applies when running against
+> that specific Supabase database — a fresh VPS Postgres (or a new Supabase project) starts
+> empty and just needs `apply`, no baseline step.
+>
+> **`0001` and `0003` were edited after being applied to that Supabase instance** (removing the
+> `profiles.id -> auth.users(id)` foreign key, and guarding the Supabase-only trigger/storage
+> statements — see the architecture doc's "portable database requirements"). `migrate.py status`
+> against that specific database will show `!! file changed since it was applied` for both —
+> expected and harmless: it does not re-run anything or touch that database's actual schema,
+> which is unaffected. Any new deployment (this VPS, or a fresh Supabase project) applies the
+> current, portable file text from scratch.
+>
+> **`0002_rls.sql` is Supabase-only** (its `language sql` helper functions call `auth.uid()`,
+> which does not exist on a plain Postgres instance, and its policies are `to authenticated`, a
+> role that likewise only exists on a Supabase project). `0004`/`0007` also define RLS policies
+> in the same style but guard them internally (skipped at runtime, not by file, when
+> `to_regrole('authenticated')` is null) since each of those files has portable content too.
+> `0002` has none, so it is skipped by name instead — set `MIGRATIONS_SKIP=0002_rls` in `api.env`
+> when targeting Postgres with no colocated Supabase project (the VPS's own Postgres); leave it
+> unset against Supabase, where `0002` keeps providing defence-in-depth RLS as before. See the
+> comment at the top of `backend/scripts/migrate.py` for the reasoning: nothing but this
+> application's own owner-role connection ever talks to Postgres on the VPS target, so those
+> policies would have no consumer to protect even if they could be created.
 
 From the VPS (reuses the API image, so the host needs no Python):
 
