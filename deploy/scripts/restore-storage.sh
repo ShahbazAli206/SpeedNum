@@ -64,7 +64,12 @@ readonly TMP_PASS="verifyverify"
 cleanup() {
   docker rm -f "$TMP_CONTAINER" >/dev/null 2>&1 || true
   docker network rm "$TMP_NET" >/dev/null 2>&1 || true
-  rm -rf "$TMP_DIR"
+  # MinIO inside the container wrote these as its own container-internal uid,
+  # which the host's deploy user cannot remove directly through the bind
+  # mount — clean up via a throwaway root container instead of leaving a
+  # tmpdir behind on every run.
+  docker run --rm -v "${TMP_DIR}:/cleanup" alpine:3 rm -rf /cleanup >/dev/null 2>&1 || true
+  rm -rf "$TMP_DIR" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -98,7 +103,10 @@ for _ in $(seq 1 30); do
 done
 
 echo "==> Listing the documents bucket and counting objects, via a temporary mc container"
-docker run --rm --network "$TMP_NET" minio/mc:RELEASE.2024-10-08T09-37-26Z sh -c "
+# minio/mc's entrypoint is `mc` itself, not a shell — override it explicitly
+# to run a small script (same reason docker-compose.yml's minio-init service
+# does the same).
+docker run --rm --network "$TMP_NET" --entrypoint /bin/sh minio/mc:RELEASE.2024-10-08T09-37-26Z -c "
   mc alias set local http://${TMP_CONTAINER}:9000 '$TMP_USER' '$TMP_PASS' >/dev/null &&
   mc ls local/documents --recursive | head -20 &&
   echo '--- object count ---' &&
