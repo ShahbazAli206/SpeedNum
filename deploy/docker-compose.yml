@@ -129,7 +129,16 @@ services:
       # keys is overridden by this block (compose merges env_file first,
       # environment second) — leave them out of api.env entirely instead of
       # relying on that.
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-speednum}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-speednum}
+      #
+      # sslmode=disable: this Postgres never terminates TLS (it's the plain
+      # official image, reachable only over the `internal` Docker network,
+      # never the internet) — without this, app/db.py's default of
+      # sslmode=require makes asyncpg attempt an SSL handshake and the server
+      # rejects the upgrade outright ("PostgreSQL server ... rejected SSL
+      # upgrade"), which reads as a connection failure, not an auth one.
+      # Supabase's pooler (the rollback DATABASE_URL in api.env) does
+      # terminate TLS and needs this left at its default instead.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-speednum}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-speednum}?sslmode=disable
       S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
     depends_on:
@@ -181,7 +190,7 @@ services:
       MIGRATIONS_DIR: /migrations
       # See the `api` service's environment block above for why these three
       # are not read from api.env.
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-speednum}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-speednum}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-speednum}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-speednum}?sslmode=disable
     volumes:
       # The image is built from backend/ alone and cannot reach ../db, so the
       # .sql files are mounted in at run time. Read-only: this container has no
