@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..models import Client, ClientService, Deadline, Profile, Service, Tenant
-from .email import portal_welcome_html, send_email, staff_welcome_html
+from .email import portal_welcome_html, send_email, sender_name, staff_welcome_html
 from .supabase_admin import (
     SupabaseAdminError,
     create_auth_user,
@@ -352,6 +352,7 @@ async def _send_welcome(
                 brand_color=tenant.brand_color,
             ),
             reply_to=reply_to,
+            from_name=sender_name(tenant.name, tenant.email_from_name),
         )
 
     # Staff get a magic link too. `staff_welcome_html` has always accepted one;
@@ -376,4 +377,5 @@ async def _send_welcome(
             brand_color=tenant.brand_color,
         ),
         reply_to=reply_to,
+        from_name=sender_name(tenant.name, tenant.email_from_name),
     )

@@ -31,7 +31,7 @@ from ..schemas import (
     ReminderSweepResult,
 )
 from ..services import audit, reminders as engine
-from ..services.email import reminder_digest_html, send_email
+from ..services.email import reminder_digest_html, send_email, sender_name
 from ..utils import ensure_found, now_utc, profile_names, read, today_utc
 
 router = APIRouter(prefix="/reminders", tags=["reminders"])
@@ -400,6 +400,7 @@ async def sweep_tenant(
                     app_url=settings.public_app_url,
                     brand_color=tenant.brand_color,
                 ),
+                from_name=sender_name(tenant.name, tenant.email_from_name),
             )
             if delivered:
                 result.emailed += 1

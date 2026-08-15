@@ -23,7 +23,7 @@ from ..schemas import (
     Ok,
 )
 from ..services import audit
-from ..services.email import letter_invite_html, send_email
+from ..services.email import letter_invite_html, send_email, sender_name
 from ..utils import apply_updates, ensure_found, is_valid_signature_data_url, now_utc, read
 
 router = APIRouter(prefix="/engagements", tags=["engagements"])
@@ -255,6 +255,7 @@ async def send_letter(
             message=payload.message,
         ),
         reply_to=user.profile.email,
+        from_name=sender_name(user.tenant.name, user.tenant.email_from_name),
     )
 
     await audit.record(

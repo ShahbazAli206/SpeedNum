@@ -43,6 +43,7 @@ from .routers import (
     workflows,
 )
 from .services import scheduler
+from .services.email import email_status
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -69,11 +70,11 @@ def _warn_about_configuration() -> None:
             "SUPABASE_SERVICE_ROLE_KEY is unset — creating logins and signing document "
             "uploads/downloads will fail with HTTP 424."
         )
-    if settings.is_production and not settings.resend_api_key:
-        log.warning(
-            "RESEND_API_KEY is unset — credential emails, portal welcomes and reminder "
-            "digests will be logged instead of delivered."
-        )
+    if settings.is_production:
+        for warning in email_status()["warnings"]:
+            log.warning("Email: %s", warning)
+        if settings.email_is_configured:
+            log.info("Email transport: %s as %s", settings.resolved_email_provider, settings.email_from)
     if settings.is_production and settings.public_app_url.startswith("http://localhost"):
         log.warning(
             "PUBLIC_APP_URL still points at localhost — sign-in and e-signature links "

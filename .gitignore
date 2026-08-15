@@ -44,3 +44,8 @@ Desktop.ini
 .DS_Store
 .vscode/
 .idea/
+
+# ---- Deployment ----
+# Live secrets for the VPS container (DB password, service-role key, SMTP
+# password). deploy/api.env.example is the tracked template.
+deploy/api.env

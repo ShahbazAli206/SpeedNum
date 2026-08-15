@@ -25,7 +25,7 @@ from ..schemas import (
 )
 from ..services import accounts, audit
 from ..services.accounts import ROLE_LABELS, AccountError
-from ..services.email import invite_html, send_email
+from ..services.email import invite_html, send_email, sender_name
 from ..utils import apply_updates, ensure_found, now_utc, read, today_utc
 
 router = APIRouter(prefix="/team", tags=["team"])
@@ -379,6 +379,7 @@ async def invite_member(
             brand_color=user.tenant.brand_color,
         ),
         reply_to=user.profile.email,
+        from_name=sender_name(user.tenant.name, user.tenant.email_from_name),
     )
     await audit.record(
         session,

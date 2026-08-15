@@ -5,31 +5,34 @@
 > here** — they live in `DEPLOYMENT.secrets.local.md` (gitignored, local-only) and in each
 > platform's own dashboard. Each secret below says where to retrieve it.
 
-**Last updated:** 2026-08-10
+**Last updated:** 2026-08-15
 
-> **Backend host note:** the original plan was Hugging Face, but as of 2025/2026 HF Docker
-> Spaces require a paid PRO plan **and** block all outbound ports except 80/443/8080 (which
-> would break the port-6543 Supabase connection). Backend is therefore hosted on **Render**
-> (free tier, Dockerfile as-is, allows outbound 6543, GitHub auto-deploy).
+> **Backend host note:** Hugging Face was the original plan and is ruled out — Docker Spaces
+> now need a paid PRO plan **and** block every outbound port except 80/443/8080, which breaks
+> the port-6543 Supabase connection. **Render** (free tier) works and is documented below as
+> the PaaS option. The **current target is a Hostinger KVM 4 VPS** — see the runbook at the
+> end of this file; everything it needs is in [`deploy/`](deploy/).
 
 ---
 
 ## Architecture
 
 ```
-Vercel (Next.js 16 frontend)  ──bearer JWT──▶  Render Web Service (FastAPI, Docker)
-        │                                                    │
-        │                                                    ▼  asyncpg (transaction pooler :6543)
-        └────────── Supabase Auth (sign-in, JWT) ──────▶  Supabase Postgres
+Vercel (Next.js 16 frontend)  ──bearer JWT──▶  nginx :443 ──▶ Docker: FastAPI (uvicorn ×4)
+        │                                                              │
+        │                                                              ▼  asyncpg (pooler :6543)
+        └────────── Supabase Auth (sign-in, JWT) ──────────────▶  Supabase Postgres
 ```
 
 - **Frontend** — `frontend/`, Next.js 16.3 / React 19, Tailwind 4, `@supabase/ssr` for auth only.
   Talks to the backend for all data via bearer token. Runs in **demo mode** (sample data, auth
   off) when its env vars are absent — so it deploys and renders before the backend exists.
-- **Backend** — `backend/`, FastAPI, deployed as a **Render Web Service** from the `backend/`
-  Dockerfile. Listens on `$PORT` (Render-injected; falls back to 7860). Connects directly to
-  Postgres via `asyncpg`. **Crashes on boot if `DATABASE_URL` is unset.**
+- **Backend** — `backend/`, FastAPI in Docker. Listens on `$PORT` (falls back to 7860) with
+  `WEB_CONCURRENCY` uvicorn workers. Connects directly to Postgres via `asyncpg`.
+  **Crashes on boot if `DATABASE_URL` is unset.**
 - **Database** — Supabase Postgres. Schema + RLS + the signup trigger live in `db/migrations/`.
+- **Email** — SMTP or Resend, selected by `EMAIL_PROVIDER`. Carries every credential email;
+  see [Email delivery](#email-delivery).
 
 ---
 
@@ -38,8 +41,9 @@ Vercel (Next.js 16 frontend)  ──bearer JWT──▶  Render Web Service (Fas
 | Layer | Status | URL / location |
 |---|---|---|
 | Frontend (Vercel) | ✅ **Deployed** (demo mode until env vars added) | https://speed-num.vercel.app |
-| Database (Supabase) | ⚠️ **migrations `0005`–`0007` still to apply** (`0001`–`0004` done: 22 tables, trigger + RLS); auth configured (Site/redirect URLs, ES256 signing, anon key captured) | `https://xftnqkmakeaqaandxyei.supabase.co` · Canada Central (`ca-central-1`) |
-| Backend (Render) | ⬜ pending — Dockerfile is port-agnostic and ready to deploy | `https://<service>.onrender.com` (TBD) |
+| Database (Supabase) | 🔴 **BLOCKER — migrations `0005`–`0007` not applied.** `0005` adds `profiles.must_change_password`, which `deps.py` reads on *every authenticated request*: until it is applied, every signed-in request 500s. Apply with the runner below. (`0001`–`0004` done: 22 tables, trigger + RLS; auth configured, ES256 signing) | `https://xftnqkmakeaqaandxyei.supabase.co` · Canada Central (`ca-central-1`) |
+| Backend (Hostinger VPS) | ⬜ pending — image, compose, nginx conf and deploy script ready in [`deploy/`](deploy/) | `https://api.<yourdomain>` (TBD) |
+| Email | ⬜ pending — transport ready (SMTP or Resend); needs credentials + a real `EMAIL_FROM` | verify via `GET /api/v1/settings/email` |
 
 ---
 
@@ -167,12 +171,19 @@ postgresql://postgres.xftnqkmakeaqaandxyei:<db-password>@aws-0-ca-central-1.pool
 
 There's a dependency cycle; this order breaks it:
 
-1. **Vercel first** → produces `speed-num.vercel.app`, needed by Supabase (redirect URLs) and Render (CORS). ✅ done
+1. **Vercel first** → produces `speed-num.vercel.app`, needed by Supabase (redirect URLs) and the backend (CORS). ✅ done
 2. **Supabase** → produces project URL, anon key, DB connection string. Blocks the backend (can't
    boot without `DATABASE_URL`) and the frontend's auth. ✅ done
-3. **Render** → needs Supabase's `DATABASE_URL` + `SUPABASE_URL` and the Vercel URL for CORS.
-   Produces the API base URL (`*.onrender.com`).
-4. **Back to Vercel** → paste the 4 `NEXT_PUBLIC_*` vars (Supabase + Render + site URL), redeploy → real data.
+3. **Backend host** (Hostinger VPS — see the runbook below; or Render) → needs Supabase's
+   `DATABASE_URL` + `SUPABASE_URL` and the Vercel URL for CORS. Produces the API base URL.
+4. **Migrations** → `baseline 0004` then `apply`, from the deployed container. Must happen before
+   anyone signs in: without `0005` every authenticated request 500s. See
+   [Applying migrations](#applying-migrations).
+5. **Email** → set `EMAIL_FROM` to a domain you control plus one transport (SMTP or Resend), then
+   prove it with `POST /api/v1/settings/email/test`. See [Email delivery](#email-delivery).
+6. **Back to Vercel** → paste the 4 `NEXT_PUBLIC_*` vars (Supabase + API URL + site URL),
+   redeploy → real data. Env vars only take effect on a new build.
+7. **First superadmin** → the manual SQL below, to unlock `/admin`.
 
 ---
 
@@ -199,9 +210,15 @@ Run them in the SQL Editor, in this order:
 > Two files share the number `0006`. They touch different tables and alphabetical order is a
 > valid order, so applying them as listed is correct.
 >
-> All four are written with `add column if not exists` / `create ... if not exists`, so
-> re-running one is a no-op rather than an error — safe to apply again if you lose track of
-> which have been run.
+> All four guard their DDL (`add column if not exists`, `create type` inside a
+> `duplicate_object` handler), so re-running one is safe rather than an error if you lose
+> track of which have been applied.
+>
+> One caveat: `0006_task_type.sql` ends with a **backfill**, not just DDL —
+> `update public.tasks set task_type = 'client' where client_id is not null`. That is not a
+> no-op on a second run: it would overwrite any task whose type a user had since changed by
+> hand. Harmless on a fresh database (no rows yet); worth knowing before re-running it on a
+> populated one.
 
 ### 3. Render — backend (current step)
 Prereq: the port-agnostic `backend/Dockerfile` must be pushed to `main` on GitHub.
@@ -271,60 +288,175 @@ Render connects to GitHub via in-browser OAuth — no personal access token need
   **Note:** a sleeping instance also means the in-process reminder scheduler does not fire.
   On a VPS this stops being a concern; on a sleeping free tier, drive
   `POST /admin/reminders/sweep` from an external cron instead.
+- **`EMAIL_FROM` must be changed.** The default `onboarding@resend.dev` is Resend's shared
+  sandbox and only delivers to the Resend account owner — every client and staff credential
+  email silently goes nowhere. `GET /api/v1/settings/email` flags it.
+- Port **25 is blocked** on Hostinger VPS. Use SMTP 465/587, or Resend over HTTPS.
+- With `WEB_CONCURRENCY > 1` each worker runs its own reminder scheduler; a Postgres advisory
+  lock means only one sweeps. Leave `REMINDER_SCHEDULER_ENABLED=true`.
 - Hugging Face was ruled out: Docker Spaces now need PRO and block outbound port 6543.
-- `db/migrations/0007_reminders.sql` must be applied before the reminders board works.
-  Until then `/reminders` returns an error the frontend swallows into an empty board, and
-  the scheduler logs a failed sweep every day.
+- **Migrations `0005`–`0007` must be applied before the app works at all** — `0005` adds
+  `profiles.must_change_password`, read on every authenticated request. `0006` adds the
+  engagement-letter signing columns and `tasks.task_type`; `0007` creates `reminders`,
+  without which `/reminders` errors (the frontend swallows it into an empty board) and the
+  scheduler logs a failed sweep daily. See [Applying migrations](#applying-migrations).
+
+---
+## Hostinger KVM 4 VPS — backend runbook
+
+The Dockerfile is host-agnostic (non-root uid 1000, `CMD` expands `${PORT}`, `HEALTHCHECK`
+on `/health`), so nothing in the image changes to move here. Everything a VPS needs that a
+PaaS supplied for free lives in [`deploy/`](deploy/):
+
+| File | What it is |
+|---|---|
+| [`deploy/docker-compose.yml`](deploy/docker-compose.yml) | The service: restart policy, loopback bind, 4 workers, log rotation |
+| [`deploy/api.env.example`](deploy/api.env.example) | Env template → copy to `deploy/api.env` (gitignored) |
+| [`deploy/nginx/speednum-api.conf`](deploy/nginx/speednum-api.conf) | TLS terminator / reverse proxy |
+| [`deploy/deploy.sh`](deploy/deploy.sh) | Pull, rebuild, restart, **and verify `/health` came back** |
+
+### Why each piece is there
+
+- **Loopback bind (`127.0.0.1:8000`).** nginx terminates TLS in front. Publishing `0.0.0.0:8000`
+  would expose a second, plaintext copy of the API, and browsers would send bearer tokens to it.
+- **nginx + certbot are not optional.** An https frontend cannot call an http API (mixed content
+  is blocked), and Vercel will not send a bearer token to an untrusted certificate.
+- **`WEB_CONCURRENCY=4`** uses the KVM 4's four vCPUs. Each worker is a separate process running
+  its own copy of the reminder scheduler, so `services/scheduler.py` takes a Postgres advisory
+  lock (`pg_try_advisory_xact_lock`) before sweeping — the losers skip the tick rather than
+  queueing behind the winner and re-running it.
+- **`restart: unless-stopped` + log rotation.** The container is your job now. Unrotated Docker
+  logs grow until they fill the disk, which takes the API down with them.
+- **The scheduler actually works here.** A VPS container does not sleep, so the daily sweep at
+  `REMINDER_SWEEP_HOUR` fires reliably and no external cron is needed — unlike the Render free tier.
+
+### Steps
+
+Prerequisites: a domain (or subdomain) pointed at the VPS's IP, and Docker installed
+(`curl -fsSL https://get.docker.com | sh`).
+
+```bash
+# 1. Get the code.
+# GIT_LFS_SKIP_SMUDGE=1 because the repo carries ~619 MB of demo media in LFS
+# (a screen recording and a zip) that the server has no use for. GitHub's free
+# tier allows 1 GB of LFS bandwidth per month, so a plain clone spends most of
+# it — and every later `git pull` would spend more. The fetchexclude makes that
+# permanent for this checkout. CI skips LFS for the same reason.
+sudo mkdir -p /opt/speednum && sudo chown "$USER" /opt/speednum
+GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/ShahbazAli206/SpeedNum.git /opt/speednum
+git -C /opt/speednum config lfs.fetchexclude "*"
+cd /opt/speednum/deploy
+
+# 2. Fill in secrets (DATABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SMTP/Resend, CORS_ORIGINS)
+cp api.env.example api.env && chmod 600 api.env && nano api.env
+
+# 3. Start it
+docker compose up -d --build
+curl -s localhost:8000/health          # expect {"status":"ok","database":"ok",...}
+
+# 4. TLS + reverse proxy
+sudo apt install -y nginx certbot python3-certbot-nginx
+sudo cp nginx/speednum-api.conf /etc/nginx/sites-available/speednum-api
+sudo sed -i 's/api\.yourdomain\.com/api.YOURDOMAIN.com/' /etc/nginx/sites-available/speednum-api
+sudo ln -s /etc/nginx/sites-available/speednum-api /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d api.YOURDOMAIN.com
+
+# 5. Firewall — 6543 outbound must stay open for the Supabase pooler
+sudo ufw allow OpenSSH && sudo ufw allow 'Nginx Full' && sudo ufw enable
+```
+
+Then point the frontend at it: set `NEXT_PUBLIC_API_URL=https://api.YOURDOMAIN.com` on Vercel
+(no trailing slash, no `/api/v1` — the client appends it) and **redeploy**, since env vars only
+take effect on a new build. Add the same origin to `CORS_ORIGINS` in `api.env` and
+`docker compose up -d` to pick it up.
+
+Subsequent deploys: `cd /opt/speednum/deploy && ./deploy.sh`.
+
+### Verify the deployment
+
+```bash
+curl https://api.YOURDOMAIN.com/health        # {"status":"ok","database":"ok"}
+```
+
+Then, signed in as a firm admin (the token is in the browser's Supabase session):
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" https://api.YOURDOMAIN.com/api/v1/settings/email
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d '{}' https://api.YOURDOMAIN.com/api/v1/settings/email/test
+```
+
+`GET /settings/email` reports the resolved transport and every misconfiguration it can detect
+(no transport, sandbox sender, unauthenticated SMTP) without echoing any secret.
+`POST /settings/email/test` sends a real message — default recipient is the caller — so
+delivery is proven before a client is ever invited.
 
 ---
 
-## Hostinger KVM VPS (current backend target)
+## Applying migrations
 
-The Dockerfile is host-agnostic — non-root uid 1000, `CMD` expands `${PORT:-7860}`, and a
-`HEALTHCHECK` on `/health` — so it moves off Render unchanged. What differs on a VPS:
+`db/migrations/*.sql` used to be pasted into the Supabase SQL editor by hand, which
+works once per file and leaves no record of what ran. [`backend/scripts/migrate.py`](backend/scripts/migrate.py)
+tracks them in `public.schema_migrations` instead, so "what schema is deployed" is a
+question the database answers.
 
-1. **You supply `PORT`** and keep the container restarting yourself. Compose is enough:
+> **This project's Supabase instance has `0001`–`0004` applied and `0005`–`0007` not.**
+> Baseline first — re-running the early files is *not* harmless, since `0002` issues bare
+> `create policy` statements that error the second time.
 
-   ```yaml
-   # /opt/speednum/docker-compose.yml
-   services:
-     api:
-       build: ./backend            # or image: ghcr.io/<you>/speednum-api:latest
-       restart: unless-stopped     # the container is now your job, not a PaaS's
-       env_file: /opt/speednum/api.env
-       environment:
-         PORT: "8000"
-       ports:
-         - "127.0.0.1:8000:8000"   # bind to loopback; nginx terminates TLS
-   ```
+From the VPS (reuses the API image, so the host needs no Python):
 
-2. **Front it with nginx + certbot** for TLS. Vercel will not send a bearer token to an
-   untrusted certificate, and browsers block mixed content from an https frontend:
+```bash
+cd /opt/speednum/deploy
+docker compose run --rm migrate status            # what is applied, what is pending
+docker compose run --rm migrate baseline 0004     # ONE TIME: record 0001-0004 without running
+docker compose run --rm migrate apply             # runs 0005, 0006 ×2, 0007
+docker compose run --rm migrate status            # expect "Schema is up to date."
+```
 
-   ```nginx
-   server {
-     server_name api.yourdomain.com;
-     location / {
-       proxy_pass http://127.0.0.1:8000;
-       proxy_set_header Host $host;
-       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-       proxy_set_header X-Forwarded-Proto $scheme;
-     }
-   }
-   ```
-   Then `certbot --nginx -d api.yourdomain.com`.
+Locally, the same script with `DATABASE_URL` set: `python scripts/migrate.py status`.
 
-3. **Set `NEXT_PUBLIC_API_URL`** on Vercel to `https://api.yourdomain.com` (no trailing
-   slash, no `/api/v1` — the client appends it) and redeploy. Leaving it unset silently
-   targets `localhost:8000` and the app shows demo data with no error.
+- Each file runs in **its own transaction together with its tracking row**, so a failure
+  leaves neither the change nor a record claiming success. Nothing after it is attempted.
+- `status` flags a file whose **checksum changed after it was applied** — the database still
+  has what the old text did.
+- Both files numbered `0006` are kept as distinct versions and applied in a stable order.
+  They touch different tables (`engagement_letters`, `tasks`), so the order between them
+  does not matter.
+- `deploy.sh` warns after a successful deploy if anything is still pending, because a missing
+  column does not stop the API booting — it fails at the first request that touches it.
 
-4. **Add the VPS origin to `CORS_ORIGINS`** — or rely on the standing `*.vercel.app` regex
-   if you only serve the Vercel domain.
+---
 
-5. **The scheduler now works properly here.** A VPS container does not sleep, so the daily
-   sweep at `REMINDER_SWEEP_HOUR` fires reliably and no external cron is needed. If you
-   later scale to more than one replica, set `REMINDER_SCHEDULER_ENABLED=false` on all but
-   one — duplicate sweeps are harmless (the dedupe index absorbs them) but wasteful.
+## Email delivery
 
-6. **Outbound 6543 must be open** for the Supabase pooler. Hostinger does not block it by
-   default; if you add a firewall, allow it explicitly.
+Credential emails are already wired to every account-creating route: `POST /team`,
+`POST /users`, `POST /clients/{id}/portal-invite`, `POST /import/users/commit` and both
+`resend-credentials` routes all go through `services/accounts.py`, which creates the Supabase
+Auth user and sends the matching template (`portal_welcome_html` for a client, the leaner
+`staff_welcome_html` for an accountant). Both carry the email address, the one-time password
+and a magic sign-in link.
+
+**The only thing that stops them arriving is an unconfigured transport.** Pick one:
+
+| | SMTP | Resend |
+|---|---|---|
+| Set | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD` | `RESEND_API_KEY` |
+| On Hostinger | `smtp.hostinger.com:465` (hPanel → Emails) | — |
+| Needs | a mailbox on your domain | a verified sending domain |
+| From address | must usually match the authenticated mailbox | any address on the verified domain |
+
+`EMAIL_FROM` must be an address on a domain you control. The shipped default
+(`onboarding@resend.dev`) is Resend's shared sandbox and **only delivers to the Resend account
+owner's own address** — leave it in place and no client or staff member ever receives their
+credentials, with no error anywhere except the `email_sent: false` on the create response.
+
+Port 25 is blocked on Hostinger VPS; 465 and 587 are open. Messages go out as
+multipart/alternative with a generated text part, which matters because a credentials email
+in a spam folder is the same as one never sent.
+
+**With no transport configured nothing breaks.** `send_email` logs `[email:dry-run]` and
+returns False, the account is still created, and the UI shows the temporary password on
+screen for the admin to pass on by hand. That is the designed fallback, not a failure — but
+it is not a way to run a firm.

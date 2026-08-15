@@ -1,0 +1,78 @@
+# SpeedNum API on a Hostinger KVM VPS (or any Docker host).
+#
+#   cd /opt/speednum && docker compose up -d --build
+#
+# The container is bound to loopback on purpose: nginx terminates TLS in front
+# of it (see nginx/speednum-api.conf). Publishing 0.0.0.0:8000 instead would put
+# a plaintext copy of the API on the public internet alongside the HTTPS one,
+# and browsers would happily send bearer tokens to it.
+
+services:
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    image: speednum-api:latest
+    container_name: speednum-api
+    # The container is now your job rather than a PaaS's — this is what brings
+    # it back after a crash, and after the VPS reboots.
+    restart: unless-stopped
+    env_file:
+      - ./api.env
+    environment:
+      PORT: "8000"
+      # 4 workers for a KVM 4's 4 vCPUs. Each runs its own reminder scheduler;
+      # the Postgres advisory lock in services/scheduler.py means only one of
+      # them actually sweeps.
+      WEB_CONCURRENCY: "4"
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      # Repeated from the Dockerfile so `docker compose ps` reports health even
+      # if the image is ever rebuilt from a different base.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)",
+        ]
+      interval: 60s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      # Without this, container logs grow until they fill the disk — which on a
+      # VPS takes the database connection down with everything else.
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # Schema migrations. Reuses the API image (asyncpg is already in it) so the
+  # VPS needs no Python of its own.
+  #
+  #   docker compose run --rm migrate status
+  #   docker compose run --rm migrate baseline 0004   # first time only, see DEPLOYMENT.md
+  #   docker compose run --rm migrate apply
+  #
+  # The `tools` profile keeps it out of `docker compose up`: schema changes
+  # should be a decision, not a side effect of restarting the API.
+  migrate:
+    profiles: ["tools"]
+    image: speednum-api:latest
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./api.env
+    environment:
+      MIGRATIONS_DIR: /migrations
+    volumes:
+      # The image is built from backend/ alone and cannot reach ../db, so the
+      # .sql files are mounted in at run time. Read-only: this container has no
+      # business editing them.
+      - ../db/migrations:/migrations:ro
+    entrypoint: ["python", "scripts/migrate.py"]
+    command: ["status"]
+    restart: "no"

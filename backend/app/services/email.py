@@ -1,13 +1,37 @@
-"""Transactional email.
+"""Transactional email: the transport, and the templates it carries.
 
-Uses Resend when RESEND_API_KEY is present; otherwise the message is logged so
-local development and the free Hugging Face tier work without a mail provider.
+Two transports, selected by `settings.resolved_email_provider`:
+
+* **resend** — Resend's HTTPS API. Needs no outbound mail ports, which is the
+  only thing that works on hosts that block them.
+* **smtp** — a plain mailbox on the firm's own domain (on Hostinger,
+  `smtp.hostinger.com:465`). No third-party account, and the From address is a
+  domain the recipients already recognise.
+
+With neither configured the message is logged and `send_email` returns False.
+That is deliberate and load-bearing: account provisioning still succeeds and the
+caller shows the temporary password on screen, so a half-configured deploy
+degrades to "read the password off the admin's screen" rather than failing to
+create the account at all.
+
+Every message goes out as multipart/alternative. The text part is derived from
+the HTML rather than written twice — a message with no text alternative scores
+badly with spam filters, and credential emails are exactly the ones that must
+not land in a junk folder.
 """
 
 from __future__ import annotations
 
+import asyncio
+import html as html_module
 import logging
+import re
+import smtplib
+import ssl
+from dataclasses import dataclass
 from datetime import date
+from email.message import EmailMessage
+from email.utils import formataddr, parseaddr
 
 import httpx
 
@@ -18,16 +42,89 @@ log = logging.getLogger(__name__)
 RESEND_ENDPOINT = "https://api.resend.com/emails"
 
 
-async def send_email(*, to: str, subject: str, html: str, reply_to: str | None = None) -> bool:
-    if not settings.resend_api_key:
-        log.info("[email:dry-run] to=%s subject=%s", to, subject)
-        return False
+@dataclass(slots=True)
+class DeliveryResult:
+    """Why a send succeeded or failed.
 
-    payload = {
-        "from": settings.email_from,
+    `send_email` flattens this to a bool for the call sites that only branch on
+    "did it go", but the diagnostics endpoint needs the reason — an operator
+    testing a fresh VPS has to be told "SMTP authentication failed", not False.
+    """
+
+    ok: bool
+    provider: str
+    error: str | None = None
+
+    def __bool__(self) -> bool:
+        return self.ok
+
+
+# --- plain-text alternative ---------------------------------------------------
+_BLOCK_BREAK = re.compile(r"(?i)</\s*(p|div|tr|h[1-6]|li|table)\s*>|<\s*br\s*/?>")
+_DROP_ELEMENT = re.compile(r"(?is)<(script|style)[^>]*>.*?</\1\s*>")
+_ANCHOR = re.compile(r'(?is)<a\b[^>]*?href\s*=\s*["\']([^"\']+)["\'][^>]*>(.*?)</a\s*>')
+_TAG = re.compile(r"(?s)<[^>]+>")
+_BLANK_RUN = re.compile(r"\n{3,}")
+
+
+def html_to_text(html: str) -> str:
+    """A readable plain-text rendering of a template.
+
+    Not a general HTML-to-text converter — it only has to handle the markup in
+    this file. Links keep their URL in parentheses so the sign-in link survives
+    in a client that shows the text part, which for a credentials email is the
+    whole point.
+    """
+    text = _DROP_ELEMENT.sub("", html)
+    text = _ANCHOR.sub(lambda m: f"{_TAG.sub('', m.group(2)).strip()} ({m.group(1)})", text)
+    text = _BLOCK_BREAK.sub("\n", text)
+    text = _TAG.sub("", text)
+    text = html_module.unescape(text)
+    # Collapse the indentation the templates carry, without joining separate lines.
+    text = "\n".join(line.strip() for line in text.splitlines())
+    return _BLANK_RUN.sub("\n\n", text).strip()
+
+
+def sender_name(name: str | None, override: str | None = None) -> str:
+    """Whose name a message arrives under.
+
+    A client hired the firm, not this product, so the From line should say
+    "Harrison CPA" over the platform's address. `override` is the tenant's
+    `email_from_name`, which lets a firm show a trading name without owning a
+    mail domain — the address stays the platform's, since sending as the firm's
+    own domain would fail SPF.
+
+    Takes strings rather than a Tenant so this module keeps knowing nothing
+    about the ORM.
+    """
+    return ((override or "").strip() or (name or "").strip())
+
+
+def _sender(from_name: str | None) -> str:
+    """The From header. `from_name` lets a message go out as the firm's own name
+    over the platform's address — "Harrison CPA <no-reply@speednum.app>" — which
+    reads far better to a client than the product's name for a firm they hired."""
+    if not from_name:
+        return settings.email_from
+    address = settings.email_sender_address
+    return formataddr((from_name.strip(), address)) if address else settings.email_from
+
+
+def _valid_recipient(to: str) -> bool:
+    _, address = parseaddr(to or "")
+    return bool(address) and "@" in address and "." in address.rsplit("@", 1)[-1]
+
+
+# --- transports ---------------------------------------------------------------
+async def _deliver_resend(
+    *, sender: str, to: str, subject: str, html: str, text: str, reply_to: str | None
+) -> DeliveryResult:
+    payload: dict[str, object] = {
+        "from": sender,
         "to": [to],
         "subject": subject,
         "html": html,
+        "text": text,
     }
     if reply_to:
         payload["reply_to"] = reply_to
@@ -39,13 +136,222 @@ async def send_email(*, to: str, subject: str, html: str, reply_to: str | None =
                 json=payload,
                 headers={"Authorization": f"Bearer {settings.resend_api_key}"},
             )
-        if response.status_code >= 400:
-            log.warning("Email provider rejected message: %s %s", response.status_code, response.text)
-            return False
-        return True
     except httpx.HTTPError as exc:
-        log.warning("Email delivery failed: %s", exc)
-        return False
+        log.warning("Email delivery failed (resend): %s", exc)
+        return DeliveryResult(False, "resend", f"Could not reach Resend: {exc}")
+
+    if response.status_code >= 400:
+        # Resend answers with {"message": "..."} on rejection; that sentence is
+        # the actionable half (unverified domain, invalid recipient), so pass it
+        # through rather than a bare status code.
+        detail = response.text
+        try:
+            body = response.json()
+            detail = str(body.get("message") or body.get("error") or detail)
+        except ValueError:
+            pass
+        log.warning("Resend rejected message: %s %s", response.status_code, detail)
+        return DeliveryResult(False, "resend", f"Resend rejected the message: {detail}")
+
+    return DeliveryResult(True, "resend")
+
+
+def _build_mime(
+    *, sender: str, to: str, subject: str, html: str, text: str, reply_to: str | None
+) -> EmailMessage:
+    message = EmailMessage()
+    message["From"] = sender
+    message["To"] = to
+    message["Subject"] = subject
+    if reply_to:
+        message["Reply-To"] = reply_to
+    # set_content then add_alternative produces multipart/alternative with the
+    # text part first, which is the order clients expect.
+    message.set_content(text)
+    message.add_alternative(html, subtype="html")
+    return message
+
+
+def _smtp_send_blocking(message: EmailMessage) -> None:
+    """Runs on a worker thread — smtplib is synchronous and would otherwise
+    block the event loop for the whole SMTP conversation."""
+    context = ssl.create_default_context()
+    host, port, timeout = settings.smtp_host, settings.smtp_port, settings.smtp_timeout
+
+    if settings.smtp_use_ssl:
+        client: smtplib.SMTP = smtplib.SMTP_SSL(host, port, timeout=timeout, context=context)
+    else:
+        client = smtplib.SMTP(host, port, timeout=timeout)
+
+    try:
+        client.ehlo()
+        if not settings.smtp_use_ssl:
+            # STARTTLS on anything but an explicit SSL port. Credentials and a
+            # temporary password are in flight here, so this is not optional —
+            # a server that cannot upgrade should fail the send, not downgrade.
+            client.starttls(context=context)
+            client.ehlo()
+        if settings.smtp_username:
+            client.login(settings.smtp_username, settings.smtp_password)
+        client.send_message(message)
+    finally:
+        # quit() can itself raise on a half-broken connection; the message is
+        # already delivered by then, so closing must not turn success into failure.
+        try:
+            client.quit()
+        except smtplib.SMTPException:
+            client.close()
+
+
+async def _deliver_smtp(
+    *, sender: str, to: str, subject: str, html: str, text: str, reply_to: str | None
+) -> DeliveryResult:
+    if not settings.smtp_host:
+        return DeliveryResult(False, "smtp", "SMTP_HOST is not set.")
+
+    message = _build_mime(
+        sender=sender, to=to, subject=subject, html=html, text=text, reply_to=reply_to
+    )
+    try:
+        await asyncio.to_thread(_smtp_send_blocking, message)
+    except smtplib.SMTPAuthenticationError as exc:
+        log.warning("SMTP authentication failed for %s: %s", settings.smtp_username, exc)
+        return DeliveryResult(
+            False, "smtp", "SMTP authentication failed — check SMTP_USERNAME and SMTP_PASSWORD."
+        )
+    except smtplib.SMTPRecipientsRefused:
+        log.warning("SMTP server refused recipient %s", to)
+        return DeliveryResult(False, "smtp", f"The mail server refused the address {to}.")
+    except smtplib.SMTPSenderRefused as exc:
+        log.warning("SMTP server refused sender %s: %s", sender, exc)
+        return DeliveryResult(
+            False,
+            "smtp",
+            f"The mail server refused the From address {sender}. It usually has to match the "
+            "authenticated mailbox.",
+        )
+    except (OSError, smtplib.SMTPException, ssl.SSLError) as exc:
+        # OSError covers connection refused / DNS failure / timeout, which on a
+        # fresh VPS is nearly always a blocked outbound port.
+        log.warning("SMTP delivery failed via %s:%s — %s", settings.smtp_host, settings.smtp_port, exc)
+        return DeliveryResult(
+            False,
+            "smtp",
+            f"Could not send via {settings.smtp_host}:{settings.smtp_port} — {type(exc).__name__}: {exc}",
+        )
+
+    return DeliveryResult(True, "smtp")
+
+
+# --- public API ---------------------------------------------------------------
+async def deliver(
+    *,
+    to: str,
+    subject: str,
+    html: str,
+    reply_to: str | None = None,
+    from_name: str | None = None,
+) -> DeliveryResult:
+    """Send one message, reporting why it failed when it does."""
+    provider = settings.resolved_email_provider
+
+    if not _valid_recipient(to):
+        return DeliveryResult(False, provider, f"{to!r} is not a usable email address.")
+
+    text = html_to_text(html)
+    sender = _sender(from_name)
+    reply_to = reply_to or settings.email_reply_to or None
+
+    if provider == "none":
+        log.info("[email:dry-run] to=%s subject=%s", to, subject)
+        return DeliveryResult(
+            False,
+            "none",
+            "No email transport is configured. Set RESEND_API_KEY, or SMTP_HOST with its "
+            "credentials, to deliver this message.",
+        )
+
+    if provider == "resend":
+        if not settings.resend_api_key:
+            return DeliveryResult(False, "resend", "EMAIL_PROVIDER=resend but RESEND_API_KEY is unset.")
+        return await _deliver_resend(
+            sender=sender, to=to, subject=subject, html=html, text=text, reply_to=reply_to
+        )
+
+    return await _deliver_smtp(
+        sender=sender, to=to, subject=subject, html=html, text=text, reply_to=reply_to
+    )
+
+
+async def send_email(
+    *,
+    to: str,
+    subject: str,
+    html: str,
+    reply_to: str | None = None,
+    from_name: str | None = None,
+) -> bool:
+    """Fire-and-report wrapper over `deliver`.
+
+    Kept returning a bool because every caller uses it the same way: record
+    whether the recipient was told, and fall back to showing the credentials on
+    screen when they were not.
+    """
+    return (await deliver(
+        to=to, subject=subject, html=html, reply_to=reply_to, from_name=from_name
+    )).ok
+
+
+def email_status() -> dict[str, object]:
+    """What the operator needs to diagnose delivery, and nothing secret.
+
+    Never returns a key, password or full connection string — this is readable
+    by any firm admin, and the answer to "is email working" must not require
+    handing out the credential that makes it work.
+    """
+    provider = settings.resolved_email_provider
+    warnings: list[str] = []
+
+    if provider == "none":
+        warnings.append(
+            "No transport configured — credential emails are logged, not sent. The temporary "
+            "password is still shown on screen when an account is created."
+        )
+    if provider == "resend" and not settings.resend_api_key:
+        warnings.append("EMAIL_PROVIDER=resend but RESEND_API_KEY is unset.")
+    if provider == "smtp" and not settings.smtp_host:
+        warnings.append("EMAIL_PROVIDER=smtp but SMTP_HOST is unset.")
+    if provider == "smtp" and not settings.smtp_username:
+        warnings.append(
+            "SMTP_USERNAME is unset — most providers reject unauthenticated relay, and an "
+            "open one would be worse."
+        )
+    if settings.email_sender_domain == "resend.dev":
+        warnings.append(
+            "EMAIL_FROM is still the resend.dev sandbox sender, which only delivers to the "
+            "Resend account owner's own address. Clients and staff will never receive their "
+            "credentials. Set EMAIL_FROM to an address on a domain you have verified."
+        )
+    if not settings.email_sender_address:
+        warnings.append("EMAIL_FROM has no address in it.")
+
+    status: dict[str, object] = {
+        "provider": provider,
+        "configured": provider != "none",
+        "sender": settings.email_from,
+        "sender_domain": settings.email_sender_domain,
+        "reply_to": settings.email_reply_to or None,
+        "warnings": warnings,
+    }
+    if provider == "smtp":
+        status["smtp"] = {
+            "host": settings.smtp_host,
+            "port": settings.smtp_port,
+            "security": "ssl" if settings.smtp_use_ssl else "starttls",
+            "username": settings.smtp_username,
+            "authenticated": bool(settings.smtp_username and settings.smtp_password),
+        }
+    return status
 
 
 def letter_invite_html(
@@ -353,6 +659,49 @@ def reminder_digest_html(
       <p style="margin:20px 0 0;font-size:12.5px;color:#64748b">
         You are receiving this because you are an owner or administrator of {firm_name}. Lead
         times are configurable under Settings.
+      </p>
+    </div>
+  </div>
+</div>
+"""
+
+
+def test_message_html(
+    *,
+    firm_name: str,
+    requested_by: str,
+    provider: str,
+    brand_color: str = "#1d4ed8",
+) -> str:
+    """The message behind POST /settings/email/test.
+
+    Deliberately says what it is in the subject and the body: it lands in a real
+    inbox, and an unexplained email from a system a client has just been added to
+    reads like a phishing attempt. Carries no credentials and no links, so
+    triggering it can never leak anything.
+    """
+    return f"""
+<div style="font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+            background:#f8fafc;padding:32px">
+  <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:14px;
+              border:1px solid #e2e8f0;overflow:hidden">
+    <div style="background:{brand_color};padding:20px 28px;color:#fff;font-weight:600;font-size:18px">
+      {firm_name}
+    </div>
+    <div style="padding:28px;color:#0f172a;line-height:1.6">
+      <h2 style="margin:0 0 12px;font-size:19px">Email delivery is working</h2>
+      <p style="margin:0 0 16px">
+        If you are reading this, {firm_name} can deliver credential emails, client portal
+        welcomes and reminder digests to this address.
+      </p>
+      <p style="margin:0 0 16px;font-size:13.5px;color:#475569">
+        Sent via <strong>{provider}</strong>, requested by {requested_by} from the firm's
+        settings page. This is a test message — it carries no login details and asks nothing
+        of you.
+      </p>
+      <p style="margin:0;font-size:13px;color:#64748b">
+        Worth checking whether it landed in the inbox or the spam folder: credential emails
+        travel the same path, and a client who cannot find theirs cannot sign in.
       </p>
     </div>
   </div>

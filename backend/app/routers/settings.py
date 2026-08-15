@@ -1,14 +1,19 @@
-"""Firm profile, white-label branding and the audit trail."""
+"""Firm profile, white-label branding, email delivery checks and the audit trail."""
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Query, Request
+from pydantic import BaseModel, EmailStr
 from sqlalchemy import desc, select
 
+from ..config import settings
 from ..deps import AdminUserDep, SessionDep, TenantUserDep, client_ip
 from ..models import AuditLog
 from ..schemas import AuditLogRead, TenantRead, TenantUpdate
 from ..services import audit
+from ..services.email import deliver, email_status, sender_name, test_message_html
 from ..utils import apply_updates
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -38,6 +43,73 @@ async def update_tenant(
             ip_address=client_ip(request),
         )
     return TenantRead.model_validate(user.tenant)
+
+
+# --- email delivery -----------------------------------------------------------
+class EmailTestRequest(BaseModel):
+    to: EmailStr | None = None
+
+
+class EmailTestResult(BaseModel):
+    ok: bool
+    provider: str
+    to: str
+    error: str | None = None
+    message: str
+
+
+@router.get("/email")
+async def email_delivery_status(user: AdminUserDep) -> dict[str, Any]:
+    """Whether credential emails can actually be delivered, and what is wrong if
+    they cannot.
+
+    Exists because the failure is otherwise silent by design: with no transport
+    configured, creating an account still succeeds and only reports
+    `email_sent: false` on that one response. After a deploy an admin needs to
+    ask the question directly rather than infer it from a create they may not
+    want to perform yet.
+
+    Returns no key, password or connection string — a firm admin can read this.
+    """
+    return email_status()
+
+
+@router.post("/email/test", response_model=EmailTestResult)
+async def send_test_email(payload: EmailTestRequest, user: AdminUserDep) -> EmailTestResult:
+    """Send a real message through the configured transport.
+
+    Defaults to the caller's own address: the point is to confirm a message
+    leaves the server and arrives, and the person who can check the inbox is
+    whoever pressed the button. An arbitrary recipient is still allowed, so a
+    firm can prove delivery to a client's domain — this is admin-only and sends
+    a fixed, contentless template, so it is not a usable spam relay.
+    """
+    recipient = str(payload.to) if payload.to else user.profile.email
+    result = await deliver(
+        to=recipient,
+        subject=f"{user.tenant.name}: SpeedNum email delivery test",
+        html=test_message_html(
+            firm_name=user.tenant.name,
+            requested_by=user.profile.full_name or user.profile.email,
+            provider=settings.resolved_email_provider,
+            brand_color=user.tenant.brand_color,
+        ),
+        reply_to=user.profile.email,
+        from_name=sender_name(user.tenant.name, user.tenant.email_from_name),
+    )
+
+    if result.ok:
+        message = f"Test email sent to {recipient}. Check the inbox, and the spam folder."
+    else:
+        message = result.error or "The message could not be sent."
+
+    return EmailTestResult(
+        ok=result.ok,
+        provider=result.provider,
+        to=recipient,
+        error=result.error,
+        message=message,
+    )
 
 
 @router.get("/audit-log", response_model=list[AuditLogRead])

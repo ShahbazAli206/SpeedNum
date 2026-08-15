@@ -37,7 +37,9 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Byte-compile
-        run: python -m compileall -q app
+        # scripts/ too: migrate.py is standalone and imported by nothing, so a
+        # syntax error in it would otherwise only surface on the deploy host.
+        run: python -m compileall -q app scripts
 
       - name: Import smoke test
         env:
