@@ -34,10 +34,10 @@ test.spidnums.com {
 	}
 
 	handle {
-		reverse_proxy speednum-api:8000 {
-			header_up X-Forwarded-Proto {scheme}
-			header_up X-Forwarded-Host {host}
-		}
+		# Caddy already forwards X-Forwarded-Proto/Host/For by default —
+		# app/main.py's uvicorn runs with --proxy-headers, so it reads them
+		# without any extra header_up directives here.
+		reverse_proxy speednum-api:8000
 	}
 
 	encode gzip
