@@ -23,13 +23,17 @@
 # this to api.spidnums.com once a DNS record exists for it; nothing here
 # needs to change to make that move, only the site address below.
 test.spidnums.com {
-	# MinIO's S3 API, presigned-URL traffic only. handle_path strips the
-	# prefix so MinIO sees exactly the path it was asked to sign
-	# (S3_PUBLIC_ENDPOINT_URL=https://test.spidnums.com/storage-api — see
-	# deploy/api.env.example) — an S3 SigV4 signature covers the request
-	# path, so this prefix has to be stripped consistently on both sides or
-	# every presigned URL fails with a signature mismatch.
-	handle_path /storage-api/* {
+	# MinIO's S3 API, presigned-URL traffic only. Matched on the bucket name
+	# itself (path-style S3: /{bucket}/{key}), not a distinguishing prefix —
+	# a SigV4 signature covers the exact request path, and any rewrite (a
+	# prefix stripped by handle_path, for instance) changes the path MinIO
+	# sees from the one that was actually signed, so every presigned URL
+	# comes back "Access Denied". S3_PUBLIC_ENDPOINT_URL is the bare host
+	# (https://test.spidnums.com — see deploy/api.env.example) with no path
+	# suffix, so boto3 signs for exactly this path and nothing rewrites it
+	# between the browser and MinIO. If S3_BUCKET is ever changed from
+	# "documents", update this matcher to match.
+	handle /documents/* {
 		reverse_proxy speednum-minio:9000
 	}
 
