@@ -38,6 +38,17 @@ test.spidnums.com {
 	}
 
 	handle {
+		# 12MB: the same limit the previously-written (never deployed)
+		# nginx config carried — the API itself never receives a document
+		# upload (those go browser-to-MinIO directly via a presigned URL,
+		# see deploy/api.env.example's STORAGE_PROVIDER note), so the
+		# largest body it legitimately accepts is a CSV/XLSX client/user
+		# import (routers/imports.py). Caught by re-deriving this file from
+		# scratch around Caddy instead of nginx — the limit has no other
+		# enforcement point once nginx's client_max_body_size is gone.
+		request_body {
+			max_size 12MB
+		}
 		# Caddy already forwards X-Forwarded-Proto/Host/For by default —
 		# app/main.py's uvicorn runs with --proxy-headers, so it reads them
 		# without any extra header_up directives here.
@@ -60,3 +71,44 @@ test.spidnums.com {
 		}
 	}
 }
+
+# --- Production API hostname — NOT ACTIVE YET ------------------------------
+# Uncomment this block only after api.spidnums.com's DNS record exists AND
+# has propagated (verify with `dig +short api.spidnums.com` before
+# uncommenting — Caddy will otherwise retry ACME issuance against a
+# non-resolving domain indefinitely, which is harmless to the working
+# test.spidnums.com block above but pointless log noise until the record is
+# live). Identical to the block above; kept as a literal duplicate rather
+# than a shared snippet so the two can diverge later (e.g. dropping
+# test.spidnums.com once production is fully validated) without restructuring.
+# Per the migration plan, do NOT remove the test.spidnums.com block above
+# until production has been independently verified end to end.
+#
+# api.spidnums.com {
+# 	handle /documents/* {
+# 		reverse_proxy speednum-minio:9000
+# 	}
+#
+# 	handle {
+# 		request_body {
+# 			max_size 12MB
+# 		}
+# 		reverse_proxy speednum-api:8000
+# 	}
+#
+# 	encode gzip
+#
+# 	header {
+# 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+# 		X-Content-Type-Options "nosniff"
+# 		X-Frame-Options "DENY"
+# 		Referrer-Policy "strict-origin-when-cross-origin"
+# 	}
+#
+# 	log {
+# 		output file /data/access-api.log {
+# 			roll_size 20mb
+# 			roll_keep 5
+# 		}
+# 	}
+# }
