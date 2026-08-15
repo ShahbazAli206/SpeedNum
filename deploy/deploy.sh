@@ -10,13 +10,29 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-readonly HEALTH_URL="http://127.0.0.1:8000/health"
 readonly ATTEMPTS=30
 
 if [[ ! -f api.env ]]; then
   echo "error: deploy/api.env is missing. Copy api.env.example to api.env and fill it in." >&2
   exit 1
 fi
+if [[ ! -f .env ]]; then
+  echo "error: deploy/.env is missing. Copy .env.example to .env and fill it in." >&2
+  exit 1
+fi
+
+# The api container publishes no host port (Caddy reaches it by container
+# name over the `web` Docker network instead — see docker-compose.yml), so
+# this checks from inside the container rather than curling localhost.
+check_health() {
+  docker compose exec -T api python -c "
+import urllib.request, sys
+try:
+    print(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).read().decode())
+except Exception as exc:
+    sys.exit(1)
+" 2>/dev/null
+}
 
 echo "==> Fetching latest main"
 # Skip the ~619 MB of demo media held in LFS — the server never reads it, and
@@ -30,8 +46,7 @@ docker compose up -d --build
 
 echo "==> Waiting for /health"
 for attempt in $(seq 1 "$ATTEMPTS"); do
-  # --fail so a 5xx is not mistaken for a healthy reply.
-  if response=$(curl -sS --fail --max-time 5 "$HEALTH_URL" 2>/dev/null); then
+  if response=$(check_health); then
     echo "$response"
     case "$response" in
       *'"database":"ok"'*)
