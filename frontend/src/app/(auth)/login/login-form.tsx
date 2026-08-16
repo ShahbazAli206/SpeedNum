@@ -7,8 +7,8 @@ import { useState } from "react";
 
 import { Alert, Button, Checkbox, Field, Input } from "@/components/ui";
 import { get } from "@/lib/api";
-import { SUPABASE_CONFIGURED, validateEmail, validatePassword } from "@/lib/auth";
-import { supabaseBrowser } from "@/lib/supabase/client";
+import { login } from "@/lib/auth-client";
+import { AUTH_CONFIGURED, validateEmail, validatePassword } from "@/lib/auth";
 import type { Me } from "@/lib/types";
 
 /** Where each kind of account lands. Mirrors src/proxy.ts. */
@@ -20,7 +20,7 @@ const PORTAL_HOME = "/dashboard";
  *
  * `profiles.client_id` decides which app someone belongs to, and only the API
  * knows it — the JWT carries a routing hint but an account created before that
- * hint existed (or via plain Supabase signup) has none. So ask, and fall back to
+ * hint existed has none. So ask, and fall back to
  * the firm app: a member of staff sent to the portal sees another client's
  * chrome and nothing of their own, whereas a portal user who briefly reaches a
  * firm route is bounced straight back by the proxy. The safer wrong guess wins.
@@ -60,23 +60,15 @@ export function LoginForm() {
 
     setPending(true);
 
-    // Demo mode: no Supabase project configured, so there is no role to read.
-    // The firm app is the fuller surface, so that is where a demo lands.
-    if (!SUPABASE_CONFIGURED) {
+    // Demo mode: no backend configured, so there is no role to read. The
+    // firm app is the fuller surface, so that is where a demo lands.
+    if (!AUTH_CONFIGURED) {
       router.push(requested ?? FIRM_HOME);
       return;
     }
 
     try {
-      const { error } = await supabaseBrowser().auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
-      if (error) {
-        setFormError(error.message);
-        setPending(false);
-        return;
-      }
+      await login(email.trim(), password);
       router.push(requested ?? (await resolveHome()));
       router.refresh();
     } catch (error) {
@@ -99,10 +91,10 @@ export function LoginForm() {
       <h1 className="mt-6 text-[1.75rem] font-extrabold tracking-tight text-ink">Welcome back</h1>
       <p className="mt-1.5 text-[14.5px] text-muted">Sign in to your SpeedNum client portal.</p>
 
-      {!SUPABASE_CONFIGURED ? (
+      {!AUTH_CONFIGURED ? (
         <div className="mt-5">
           <Alert tone="info" title="Demo mode">
-            Supabase isn&apos;t configured, so any valid-looking email and a 6-character password
+            No backend is configured, so any valid-looking email and a 6-character password
             will open the portal with sample data.
           </Alert>
         </div>
@@ -131,7 +123,7 @@ export function LoginForm() {
         <div className="mt-4">
           <div className="mb-1.5 flex items-center justify-between">
             <span className="text-[13px] font-medium text-ink-soft">Password</span>
-            <Link href="/login" className="text-[12.5px] font-medium text-brand hover:underline">
+            <Link href="/forgot-password" className="text-[12.5px] font-medium text-brand hover:underline">
               Forgot password?
             </Link>
           </div>

@@ -6,15 +6,15 @@ import { useEffect, useState } from "react";
 
 import { Logo } from "@/components/logo";
 import { ButtonLink } from "@/components/ui";
-import { SUPABASE_CONFIGURED } from "@/lib/auth";
-import { supabaseBrowser } from "@/lib/supabase/client";
+import { magicLogin } from "@/lib/auth-client";
+import { AUTH_CONFIGURED } from "@/lib/auth";
 
 type Status = "working" | "success" | "error";
 
 /**
  * The link behind "Sign in to your dashboard" in the welcome emails.
  * No login form is ever shown here — it exchanges the token embedded in the
- * URL for a real session (supabase.auth.verifyOtp), then hands off.
+ * URL for a real session (POST /api/auth/magic-login), then hands off.
  * `first_login=1` tells the shell to show the "set a new password" prompt
  * without waiting on a round trip to the API.
  *
@@ -46,37 +46,36 @@ export function PortalLoginClient() {
   const next = safeNext(searchParams.get("next"));
   const destination = `${next}${next.includes("?") ? "&" : "?"}first_login=1`;
 
-  // Demo mode (no Supabase configured) or a missing token are both known at
+  // Demo mode (no backend configured) or a missing token are both known at
   // mount time — fold them into the initial state instead of a synchronous
   // setState inside the effect below, which only needs to handle the async
-  // verifyOtp round trip.
+  // magic-login round trip.
   const [status, setStatus] = useState<Status>(
-    !SUPABASE_CONFIGURED ? "success" : !tokenHash ? "error" : "working",
+    !AUTH_CONFIGURED ? "success" : !tokenHash ? "error" : "working",
   );
-  const [errorMessage, setErrorMessage] = useState(!SUPABASE_CONFIGURED || tokenHash ? "" : MISSING_TOKEN_MESSAGE);
+  const [errorMessage, setErrorMessage] = useState(!AUTH_CONFIGURED || tokenHash ? "" : MISSING_TOKEN_MESSAGE);
 
   useEffect(() => {
-    // Demo mode: no Supabase project configured, so there is no real session
-    // to establish — go straight to the dashboard, same as the login form.
-    if (!SUPABASE_CONFIGURED) {
+    // Demo mode: no backend configured, so there is no real session to
+    // establish — go straight to the dashboard, same as the login form.
+    if (!AUTH_CONFIGURED) {
       const timeout = setTimeout(() => router.replace(destination), 500);
       return () => clearTimeout(timeout);
     }
     if (!tokenHash) return;
 
     let cancelled = false;
-    supabaseBrowser()
-      .auth.verifyOtp({ token_hash: tokenHash, type: "magiclink" })
-      .then(({ error }) => {
+    magicLogin(tokenHash)
+      .then(() => {
         if (cancelled) return;
-        if (error) {
-          setStatus("error");
-          setErrorMessage(error.message || "This sign-in link is no longer valid.");
-          return;
-        }
         setStatus("success");
         router.replace(destination);
         router.refresh();
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setStatus("error");
+        setErrorMessage(error instanceof Error ? error.message : "This sign-in link is no longer valid.");
       });
 
     return () => {

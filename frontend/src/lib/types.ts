@@ -516,7 +516,7 @@ export interface ImportResult {
 /* Client-portal books (invoices, expenses, payroll, taxes, documents)        */
 /*                                                                            */
 /* Backs /dashboard/*. lib/demo.ts is the current source for those pages —   */
-/* swap a page to these once NEXT_PUBLIC_SUPABASE_URL is configured and a    */
+/* swap a page to these once NEXT_PUBLIC_API_URL is configured and a         */
 /* session exists to call /api/v1/client-portal/*. Field names match         */
 /* schemas.py exactly (snake_case), unlike demo.ts's camelCase.              */
 /* -------------------------------------------------------------------------- */

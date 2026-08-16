@@ -11,7 +11,7 @@ import type { CredentialResult } from "@/lib/types";
 /**
  * Shows a freshly issued temporary password exactly once.
  *
- * Supabase stores only the hash, so this is genuinely the only moment the value
+ * Only the password hash is stored, so this is genuinely the only moment the value
  * exists anywhere outside the email — reopening the row later can offer a reset
  * but never a re-read. That is why it gets its own modal with a copy button
  * rather than a toast: a toast that auto-dismisses would lose the password for

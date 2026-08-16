@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 
 import { cn } from "@/lib/cn";
-import { SUPABASE_CONFIGURED } from "@/lib/auth";
-import { supabaseBrowser } from "@/lib/supabase/client";
+import { AUTH_CONFIGURED } from "@/lib/auth";
+import { logout } from "@/lib/auth-client";
 
 /**
  * Signs the user out for real.
@@ -14,7 +14,7 @@ import { supabaseBrowser } from "@/lib/supabase/client";
  * Both shells previously rendered a plain `<Link href="/login">` here, which did
  * not end the session — and because `src/proxy.ts` bounces a *signed-in* user
  * away from /login, clicking "Sign out" actually landed them back in the app.
- * Clearing the Supabase session first is what makes the redirect stick.
+ * Revoking the session first is what makes the redirect stick.
  */
 /**
  * The sign-out action on its own, for callers that render their own control —
@@ -25,11 +25,11 @@ export function useSignOut() {
 
   return useCallback(async () => {
     try {
-      if (SUPABASE_CONFIGURED) {
-        await supabaseBrowser().auth.signOut();
+      if (AUTH_CONFIGURED) {
+        await logout();
       }
     } catch {
-      // Already signed out, or storage is unavailable — the redirect below is
+      // Already signed out, or the API is unreachable — the redirect below is
       // still the right outcome.
     }
     // refresh() re-runs the proxy so the server forgets the session cookie too.

@@ -8,12 +8,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Menu as DropdownMenu } from "@/components/ui";
 import { get, post } from "@/lib/api";
-import { SUPABASE_CONFIGURED } from "@/lib/auth";
+import { logout } from "@/lib/auth-client";
+import { AUTH_CONFIGURED } from "@/lib/auth";
 import { cn } from "@/lib/cn";
 import { getDeadlines } from "@/lib/demo";
 import { useSession } from "@/lib/session";
 import { DASHBOARD_NAV_FLAT } from "@/lib/site";
-import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Notification } from "@/lib/types";
 
 const URGENCY_TONE = {
@@ -66,9 +66,9 @@ export function Topbar({
   };
 
   const signOut = async () => {
-    if (SUPABASE_CONFIGURED) {
+    if (AUTH_CONFIGURED) {
       try {
-        await supabaseBrowser().auth.signOut();
+        await logout();
       } catch {
         // Redirecting is the right outcome regardless.
       }

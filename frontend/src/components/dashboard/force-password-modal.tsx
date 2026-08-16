@@ -7,8 +7,7 @@ import { useEffect, useState } from "react";
 import { useToast } from "@/components/toast";
 import { Button, Field, Input, Modal } from "@/components/ui";
 import { get, post } from "@/lib/api";
-import { SUPABASE_CONFIGURED, validatePassword } from "@/lib/auth";
-import { supabaseBrowser } from "@/lib/supabase/client";
+import { AUTH_CONFIGURED, validatePassword } from "@/lib/auth";
 import type { Me } from "@/lib/types";
 
 /**
@@ -40,7 +39,7 @@ export function ForcePasswordModal() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!SUPABASE_CONFIGURED) return;
+    if (!AUTH_CONFIGURED) return;
 
     let cancelled = false;
     get<Me>("/auth/me")
@@ -71,14 +70,8 @@ export function ForcePasswordModal() {
 
     setSaving(true);
     try {
-      if (SUPABASE_CONFIGURED) {
-        const { error: updateError } = await supabaseBrowser().auth.updateUser({ password });
-        if (updateError) {
-          setError(updateError.message);
-          setSaving(false);
-          return;
-        }
-        await post("/auth/complete-password-change");
+      if (AUTH_CONFIGURED) {
+        await post("/auth/change-password", { new_password: password });
       }
       toast.success("Password updated", "Use your new password the next time you sign in.");
       setOpen(false);

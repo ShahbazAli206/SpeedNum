@@ -7,14 +7,14 @@ import { useState } from "react";
 
 import { Alert, Button, Checkbox, Field, Input } from "@/components/ui";
 import { post } from "@/lib/api";
+import { register } from "@/lib/auth-client";
 import {
-  SUPABASE_CONFIGURED,
+  AUTH_CONFIGURED,
   passwordStrength,
   validateEmail,
   validatePassword,
 } from "@/lib/auth";
 import { cn } from "@/lib/cn";
-import { supabaseBrowser } from "@/lib/supabase/client";
 import { PRICING } from "@/lib/site";
 
 interface Errors {
@@ -73,7 +73,7 @@ export function SignupForm() {
       business:
         isInvited || values.business.trim() ? undefined : "Enter your firm's name.",
       email: validateEmail(values.email),
-      password: validatePassword(values.password),
+      password: validatePassword(values.password, 8),
       terms: agreed ? undefined : "Please accept the terms to continue.",
     };
     setErrors(next);
@@ -82,32 +82,13 @@ export function SignupForm() {
     setPending(true);
     const fullName = `${values.firstName.trim()} ${values.lastName.trim()}`.trim();
 
-    if (!SUPABASE_CONFIGURED) {
+    if (!AUTH_CONFIGURED) {
       router.push("/overview");
       return;
     }
 
     try {
-      const { error } = await supabaseBrowser().auth.signUp({
-        email: values.email.trim(),
-        password: values.password,
-        options: {
-          data: {
-            full_name: fullName,
-            // `firm_name` is what the API reads to create the tenant and make
-            // this account its owner (backend/app/deps.py `_provision_profile`).
-            // An invited user must not carry it — they are joining a firm that
-            // already exists, and a stray value here would spin up a second one.
-            ...(isInvited ? {} : { firm_name: values.business.trim() }),
-            is_staff: true,
-          },
-        },
-      });
-      if (error) {
-        setFormError(error.message);
-        setPending(false);
-        return;
-      }
+      await register(values.email.trim(), values.password, fullName);
 
       if (isInvited) {
         // Attaches the brand-new profile to the inviting firm with the role the
@@ -120,6 +101,20 @@ export function SignupForm() {
             caught instanceof Error
               ? `Your account was created, but the invitation could not be applied: ${caught.message}`
               : "Your account was created, but the invitation could not be applied.",
+          );
+          setPending(false);
+          return;
+        }
+      } else {
+        // Not joining an existing firm — create one and become its owner.
+        // A signup with no tenant would have every firm page refuse it.
+        try {
+          await post("/auth/bootstrap", { firm_name: values.business.trim(), full_name: fullName });
+        } catch (caught) {
+          setFormError(
+            caught instanceof Error
+              ? `Your account was created, but your firm could not be set up: ${caught.message}`
+              : "Your account was created, but your firm could not be set up.",
           );
           setPending(false);
           return;
@@ -145,10 +140,10 @@ export function SignupForm() {
           : `Start your ${PRICING.trialDays}-day free trial — no credit card required.`}
       </p>
 
-      {!SUPABASE_CONFIGURED ? (
+      {!AUTH_CONFIGURED ? (
         <div className="mt-5">
           <Alert tone="info" title="Demo mode">
-            Supabase isn&apos;t configured, so this creates no real account — it opens the portal
+            No backend is configured, so this creates no real account — it opens the portal
             with sample data.
           </Alert>
         </div>
@@ -214,7 +209,7 @@ export function SignupForm() {
             <Input
               type={reveal ? "text" : "password"}
               autoComplete="new-password"
-              placeholder="At least 6 characters"
+              placeholder="At least 8 characters"
               className="pr-10"
               value={values.password}
               onChange={set("password")}

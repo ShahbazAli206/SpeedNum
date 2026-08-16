@@ -17,7 +17,7 @@ import { DashboardHeader, KpiRow } from "@/components/dashboard/page-shell";
 import { useToast } from "@/components/toast";
 import { Button } from "@/components/ui";
 import { ApiError } from "@/lib/api";
-import { SUPABASE_CONFIGURED } from "@/lib/auth";
+import { AUTH_CONFIGURED } from "@/lib/auth";
 import { cn } from "@/lib/cn";
 import type { DocumentFile } from "@/lib/demo";
 import { formatBytes, formatDate } from "@/lib/format";
@@ -56,16 +56,16 @@ export function DocumentsClient({
   const acknowledge = async (files: FileList | null) => {
     if (!files?.length) return;
 
-    // Demo mode: no Supabase project configured, so there's nowhere real to
+    // Demo mode: no backend configured, so there's nowhere real to
     // put the bytes. Acknowledge the pick rather than silently doing nothing.
-    if (!SUPABASE_CONFIGURED) {
+    if (!AUTH_CONFIGURED) {
       const names = Array.from(files)
         .slice(0, 3)
         .map((file) => file.name)
         .join(", ");
       toast.info(
         `${files.length} file${files.length === 1 ? "" : "s"} selected`,
-        `${names} — this is demo data; connect Supabase to upload for real.`,
+        `${names} — this is demo data; connect a backend to upload for real.`,
       );
       return;
     }
@@ -96,8 +96,8 @@ export function DocumentsClient({
   };
 
   const download = async (row: DocumentFile) => {
-    if (!SUPABASE_CONFIGURED) {
-      toast.info("Demo file", `${row.name} isn't a real document — connect Supabase to store files.`);
+    if (!AUTH_CONFIGURED) {
+      toast.info("Demo file", `${row.name} isn't a real document — connect a backend to store files.`);
       return;
     }
 

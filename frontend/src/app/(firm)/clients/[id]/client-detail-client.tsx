@@ -20,7 +20,7 @@ import { useRef, useState } from "react";
 import { useToast } from "@/components/toast";
 import { Button, Card, CardHeader, Field, Input, Modal, Select, Tab, Tabs } from "@/components/ui";
 import { ApiError, post } from "@/lib/api";
-import { SUPABASE_CONFIGURED } from "@/lib/auth";
+import { AUTH_CONFIGURED } from "@/lib/auth";
 import { cn } from "@/lib/cn";
 import { assignClientService } from "@/lib/client-services";
 import type {
@@ -146,7 +146,7 @@ export function ClientDetailClient({
   const [taskStatus, setTaskStatus] = useState<TaskStatus>("todo");
   const [taskDueDate, setTaskDueDate] = useState("");
 
-  // Upload file — genuinely real when Supabase Storage is configured (same
+  // Upload file — genuinely real when a storage backend is configured (same
   // helper the client portal's own Documents page uses), demo-only otherwise.
   const [fileModalOpen, setFileModalOpen] = useState(false);
   const [addedFiles, setAddedFiles] = useState<ClientDocument[]>([]);
@@ -200,7 +200,7 @@ export function ClientDetailClient({
     setPrice("0");
     setNextDue("");
 
-    // Real backend + Supabase configured: persist the assignment for real.
+    // Real backend configured: persist the assignment for real.
     // Any failure (most commonly: no backend reachable yet) is silent here —
     // the optimistic row above already gives the admin working feedback,
     // same fallback philosophy as the rest of this page's "Add" actions.
@@ -242,8 +242,8 @@ export function ClientDetailClient({
   const submitFile = async () => {
     if (!pendingFile) return;
 
-    if (!SUPABASE_CONFIGURED) {
-      toast.info(`${pendingFile.name} selected`, "This is demo data; connect Supabase to upload for real.");
+    if (!AUTH_CONFIGURED) {
+      toast.info(`${pendingFile.name} selected`, "This is demo data; connect a backend to upload for real.");
       closeFileModal();
       return;
     }
@@ -270,7 +270,7 @@ export function ClientDetailClient({
       setPortalInvitedAt(result.invited_at);
       toast.success(result.email_sent ? "Welcome email sent" : "Portal login ready", result.message);
     } catch {
-      // No live backend/Supabase configured yet — acknowledge the action the
+      // No live backend configured yet — acknowledge the action the
       // same way the rest of the firm-side app does on demo data.
       setPortalInvitedAt(new Date().toISOString());
       toast.success(

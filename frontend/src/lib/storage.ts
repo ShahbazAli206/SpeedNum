@@ -3,17 +3,14 @@
 /**
  * Document storage: upload and download, both signed by the backend.
  *
- * The bytes still go straight between the browser and Supabase Storage — a
- * large file never passes through the API, so it cannot burn its request
- * timeout. What changed is *who signs*: the browser used to call
- * `supabase.storage.createSignedUploadUrl()` itself, which cannot work against
- * the real project. `db/migrations/0003_functions.sql` creates the `documents`
- * bucket private and defines no policies on `storage.objects`, and Supabase has
- * RLS on by default there — so an anon-role session is denied every operation.
- *
- * The API signs with the service-role key instead (backend/app/services/storage.py),
- * having first checked that this account may touch this client's book. It also
- * mints the storage path, so a caller cannot aim a row at someone else's object.
+ * The bytes still go straight between the browser and object storage (MinIO
+ * on the VPS, or Supabase Storage as a rollback — see
+ * backend/app/services/storage.py's provider dispatch) — a large file never
+ * passes through the API, so it cannot burn its request timeout. The API
+ * signs the URL itself, having first checked that this account may touch
+ * this client's book, and mints the storage path server-side, so a caller
+ * cannot aim a row at someone else's object. This module never needs to
+ * know which provider is behind the URL it's given — it just PUTs to it.
  */
 
 import { get, post } from "./api";
@@ -43,7 +40,8 @@ export async function uploadDocument(
   });
 
   // The signed URL carries its own authorisation in the query string, so this
-  // request deliberately sends no bearer token — it goes to Supabase, not to us.
+  // request deliberately sends no bearer token — it goes straight to object
+  // storage, not to our own API.
   let response: Response;
   try {
     response = await fetch(slot.url, {
@@ -79,8 +77,8 @@ export async function uploadDocument(
  * leak a working link.
  *
  * Navigates rather than using a download attribute: the attribute is ignored
- * cross-origin, and Supabase serves the object with its own content type, so
- * the browser previews what it can and downloads the rest.
+ * cross-origin, and object storage serves the object with its own content
+ * type, so the browser previews what it can and downloads the rest.
  */
 export async function documentUrl(documentId: string, clientId?: string): Promise<string> {
   const query = clientId ? `?client_id=${encodeURIComponent(clientId)}` : "";

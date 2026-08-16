@@ -60,7 +60,7 @@ export function NewTaskClient({ clients, team }: { clients: ClientRow[]; team: T
     setSubmitting(true);
 
     try {
-      // Real backend + Supabase configured: create the task for real. Any
+      // Real backend configured: create the task for real. Any
       // failure (most commonly: no backend reachable yet) falls back to the
       // same acknowledgement the rest of the firm-side app gives on demo data.
       await post<Task>("/tasks", {

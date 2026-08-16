@@ -220,7 +220,7 @@ export function AccountantModal({
               onChange={(event) => setSendCredentials(event.target.checked)}
             />
             <Alert tone="info" title="What happens next">
-              A Supabase login is created with a temporary password and they are asked to replace it
+              A login is created with a temporary password and they are asked to replace it
               on first sign-in. You will see the password once after saving, in case you need to pass
               it on another way.
             </Alert>
