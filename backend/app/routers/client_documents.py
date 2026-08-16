@@ -1,10 +1,10 @@
 """Client-portal book: document metadata. Shown on /dashboard/documents.
 
-File bytes go straight from the browser to the `documents` Supabase Storage
-bucket (see db/migrations/0003_functions.sql) via a signed upload URL —
-routing them through this Space would burn its request timeout on large
-files for no benefit. This router only registers/serves the resulting
-metadata row, same division of labour as most Supabase-backed apps.
+File bytes go straight from the browser to object storage (MinIO on the
+VPS by default; Supabase Storage as a rollback — see services/storage.py's
+provider dispatch) via a presigned URL — routing them through this API
+would burn its request timeout on large files for no benefit. This router
+only registers/serves the resulting metadata row.
 """
 
 from __future__ import annotations
@@ -126,7 +126,7 @@ async def create_upload_url(
 
     Step 2 is POST "" with the returned `storage_path`, once the bytes are in.
     Splitting it this way keeps the file itself off this API — the browser talks
-    to Supabase Storage directly — while still letting us decide *here* whether
+    to object storage directly — while still letting us decide *here* whether
     this caller may write into this client's book at all.
     """
     await ensure_client_in_tenant(session, scope.tenant_id, scope.client_id)

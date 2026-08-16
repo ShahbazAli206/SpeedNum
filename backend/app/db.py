@@ -1,4 +1,6 @@
-"""Async SQLAlchemy engine wired to Supabase Postgres."""
+"""Async SQLAlchemy engine — plain Postgres 16 on the VPS by default; the
+port-6543/Supavisor branch below also lets the same image point at a
+Supabase project's pooler as a rollback (see MIGRATION.md)."""
 
 from __future__ import annotations
 
@@ -31,8 +33,10 @@ def _split_url(url: str) -> tuple[str, dict[str, str]]:
 def _build_engine():
     if not settings.database_url:
         raise RuntimeError(
-            "DATABASE_URL is not set. Point it at your Supabase connection pooler, e.g. "
-            "postgresql://postgres.<ref>:<password>@aws-0-ca-central-1.pooler.supabase.com:6543/postgres"
+            "DATABASE_URL is not set. Point it at the VPS Postgres service, e.g. "
+            "postgresql+asyncpg://speednum_app:<password>@postgres:5432/speednum "
+            "(or a Supabase pooler string as a rollback, e.g. "
+            "postgresql://postgres.<ref>:<password>@aws-0-ca-central-1.pooler.supabase.com:6543/postgres)"
         )
 
     url, libpq = _split_url(settings.database_url)
