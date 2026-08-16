@@ -6,7 +6,7 @@ import secrets
 import uuid
 from datetime import timedelta
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
 
 from ..config import settings
@@ -26,11 +26,18 @@ from ..schemas import (
 from ..services import accounts, audit
 from ..services.accounts import ROLE_LABELS, AccountError
 from ..services.email import invite_html, send_email, sender_name
+from ..services.rate_limit import rate_limit_by_tenant
 from ..utils import apply_updates, ensure_found, now_utc, read, today_utc
 
 router = APIRouter(prefix="/team", tags=["team"])
 
 OPEN_TASK_STATES = ("todo", "in_progress", "review", "blocked")
+
+# Per-tenant, not per-IP: a firm's staff share an office network, and one
+# firm's abuse shouldn't affect another's quota. Generous enough for a firm
+# onboarding a full team in one sitting; tight enough to blunt a compromised
+# admin session or a scripted account-creation loop.
+_account_creation_rate_limit = rate_limit_by_tenant("team-account-creation", limit=20, window_seconds=3600)
 
 
 def _invite_url(token: str) -> str:
@@ -93,7 +100,12 @@ async def list_team(session: SessionDep, user: TenantUserDep) -> list[TeamMember
     ]
 
 
-@router.post("", response_model=CredentialResult, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=CredentialResult,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_account_creation_rate_limit)],
+)
 async def create_member(
     payload: StaffCreate, session: SessionDep, user: AdminUserDep, request: Request
 ) -> CredentialResult:
@@ -161,7 +173,11 @@ async def create_member(
     )
 
 
-@router.post("/{profile_id}/resend-credentials", response_model=CredentialResult)
+@router.post(
+    "/{profile_id}/resend-credentials",
+    response_model=CredentialResult,
+    dependencies=[Depends(_account_creation_rate_limit)],
+)
 async def resend_credentials(
     profile_id: uuid.UUID, session: SessionDep, user: AdminUserDep, request: Request
 ) -> CredentialResult:
@@ -335,7 +351,12 @@ async def list_invitations(session: SessionDep, user: AdminUserDep) -> list[Invi
     return [read(InvitationRead, row, invite_url=_invite_url(row.token)) for row in rows]
 
 
-@router.post("/invitations", response_model=InvitationRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/invitations",
+    response_model=InvitationRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_account_creation_rate_limit)],
+)
 async def invite_member(
     payload: InvitationCreate, session: SessionDep, user: AdminUserDep, request: Request
 ) -> InvitationRead:

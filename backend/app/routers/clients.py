@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select
 
 from ..deps import SessionDep, TenantUserDep, client_ip
@@ -24,9 +24,15 @@ from ..schemas import (
 )
 from ..services import accounts, audit
 from ..services.accounts import AccountError
+from ..services.rate_limit import rate_limit_by_tenant
 from ..utils import apply_updates, ensure_found, now_utc, profile_names, read, today_utc
 
 router = APIRouter(tags=["clients"])
+
+# Same reasoning as team.py's/users.py's identically-shaped limit — portal
+# invites create a client-portal login, the same kind of account-creation
+# action, just from a different surface.
+_portal_invite_rate_limit = rate_limit_by_tenant("clients-portal-invite", limit=20, window_seconds=3600)
 
 OPEN_TASK_STATES = ("todo", "in_progress", "review", "blocked")
 
@@ -233,7 +239,11 @@ async def delete_client(
     return Ok(message=f"Deleted {name}")
 
 
-@router.post("/clients/{client_id}/portal-invite", response_model=PortalInviteResult)
+@router.post(
+    "/clients/{client_id}/portal-invite",
+    response_model=PortalInviteResult,
+    dependencies=[Depends(_portal_invite_rate_limit)],
+)
 async def invite_to_portal(
     client_id: uuid.UUID, session: SessionDep, user: TenantUserDep, request: Request
 ) -> PortalInviteResult:

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 
 from ..deps import AdminUserDep, SessionDep, TenantUserDep, client_ip
@@ -29,9 +29,17 @@ from ..schemas import (
 )
 from ..services import accounts, audit
 from ..services.accounts import AccountError
+from ..services.rate_limit import rate_limit_by_tenant
 from ..utils import apply_updates, ensure_found, read
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+# Same reasoning as team.py's identically-named limit — a separate instance
+# because this module is imported independently, but the same bucket key
+# prefix would collide across both routers if shared, so it's named
+# distinctly ("users-" vs "team-") to keep each endpoint family's quota
+# independent.
+_account_creation_rate_limit = rate_limit_by_tenant("users-account-creation", limit=20, window_seconds=3600)
 
 
 def _decorate(row: Profile, client_name: str | None) -> PlatformUserRead:
@@ -74,7 +82,12 @@ async def list_users(
     return [_decorate(profile, client_name) for profile, client_name in rows]
 
 
-@router.post("", response_model=CredentialResult, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=CredentialResult,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_account_creation_rate_limit)],
+)
 async def create_user(
     payload: PlatformUserCreate, session: SessionDep, user: AdminUserDep, request: Request
 ) -> CredentialResult:
@@ -190,7 +203,11 @@ async def update_user(
     return _decorate(profile, client_name)
 
 
-@router.post("/{profile_id}/resend-credentials", response_model=CredentialResult)
+@router.post(
+    "/{profile_id}/resend-credentials",
+    response_model=CredentialResult,
+    dependencies=[Depends(_account_creation_rate_limit)],
+)
 async def resend_credentials(
     profile_id: uuid.UUID, session: SessionDep, user: AdminUserDep, request: Request
 ) -> CredentialResult:

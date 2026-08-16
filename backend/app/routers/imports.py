@@ -16,7 +16,7 @@ import re
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 
 from ..deps import AdminUserDep, SessionDep, TenantUserDep
@@ -31,6 +31,7 @@ from ..schemas import (
 )
 from ..services import accounts, audit
 from ..services.accounts import AccountError
+from ..services.rate_limit import rate_limit_by_tenant
 
 router = APIRouter(prefix="/import", tags=["import"])
 
@@ -39,6 +40,11 @@ MAX_PREVIEW_ROWS = 100
 # Bulk-provisioning logins is slow (one Supabase round-trip each) and mistakes
 # are expensive to undo, so a single commit is capped.
 MAX_USER_COMMIT_ROWS = 200
+
+# Lower than team.py's/users.py's per-account limit — a single bulk commit
+# can itself create up to MAX_USER_COMMIT_ROWS logins, so the *number of
+# commit calls* needs a tighter cap than the number of individual creations.
+_bulk_user_import_rate_limit = rate_limit_by_tenant("import-users-commit", limit=5, window_seconds=3600)
 
 FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "code": ("client code", "code", "client id", "client no", "account", "account number"),
@@ -509,7 +515,11 @@ async def preview_users(
     )
 
 
-@router.post("/users/commit", response_model=UserImportResult)
+@router.post(
+    "/users/commit",
+    response_model=UserImportResult,
+    dependencies=[Depends(_bulk_user_import_rate_limit)],
+)
 async def commit_users(
     rows: list[UserImportRow],
     session: SessionDep,
