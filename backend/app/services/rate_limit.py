@@ -46,7 +46,21 @@ async def _hit(session: AsyncSession, *, key: str, window_seconds: int) -> int:
     """Atomically increments the counter for `key` in the current fixed
     window and returns the new count. The INSERT...ON CONFLICT...RETURNING
     is one round trip and one row lock, so two workers racing on the same
-    key can never both observe a stale pre-increment count."""
+    key can never both observe a stale pre-increment count.
+
+    Commits immediately, deliberately not waiting for whatever request this
+    dependency is guarding to finish. `SessionDep` (deps.get_session) commits
+    once at the very end of the request and rolls back the *entire*
+    transaction on any exception — including the 429 this module itself
+    raises, and any unrelated failure further down the same endpoint. Left
+    uncommitted here, a rejected request's own increment would be undone by
+    its own rejection (or a legitimate request's increment undone by an
+    unrelated later failure, e.g. a duplicate-email 409), letting a caller
+    who can reliably trigger *some* error retry indefinitely for free.
+    Verified against a real deployment before trusting this reasoning —
+    see PROGRESS.md's rate-limiting entry for the actual counts observed
+    with and without this commit.
+    """
     window_start = _window_start(window_seconds)
     result = await session.execute(
         text(
@@ -61,6 +75,7 @@ async def _hit(session: AsyncSession, *, key: str, window_seconds: int) -> int:
         {"key": key, "window_start": window_start},
     )
     count = result.scalar_one()
+    await session.commit()
 
     if random.random() < _CLEANUP_PROBABILITY:
         await session.execute(
