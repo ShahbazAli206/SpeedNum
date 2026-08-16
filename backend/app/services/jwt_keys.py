@@ -42,37 +42,46 @@ def _kid_for(public_key: Ed25519PublicKey) -> str:
     return base64.urlsafe_b64encode(hashlib.sha256(raw).digest()[:16]).decode().rstrip("=")
 
 
+def _b64decode_pem(value: str) -> bytes:
+    """JWT_PRIVATE_KEY/JWT_PREVIOUS_PUBLIC_KEYS store a PEM block's raw bytes,
+    base64-encoded. Not a literal PEM string with escaped newlines: Docker
+    Compose's env_file format unescapes `\\n` into a *real* newline when it
+    reads the file back, which splits a multi-line PEM into separate lines
+    it then tries to parse as new `KEY=VALUE` pairs — caught by an actual
+    deploy failing on exactly that ("unexpected character in variable
+    name"), not by inspection. Base64 has no newlines and needs no escaping."""
+    import base64
+
+    return base64.b64decode(value)
+
+
 def _load_private_key() -> Ed25519PrivateKey:
-    pem = settings.jwt_private_key
-    if not pem:
+    encoded = settings.jwt_private_key
+    if not encoded:
         # A fresh key every restart means every session is invalidated on
         # deploy — acceptable for a first boot with no users yet, loud
         # enough that it can't be mistaken for the production configuration.
         log.warning(
             "JWT_PRIVATE_KEY is not set — generating an ephemeral signing key. "
             "Every existing session will be invalidated on the next restart. "
-            "Set JWT_PRIVATE_KEY in api.env for a real deployment "
-            "(generate with: openssl genpkey -algorithm ed25519)."
+            "Set JWT_PRIVATE_KEY in api.env for a real deployment (see "
+            "deploy/api.env.example for the exact generate-and-encode command)."
         )
         return Ed25519PrivateKey.generate()
 
-    normalized = pem.replace("\\n", "\n").encode()
-    return serialization.load_pem_private_key(normalized, password=None)  # type: ignore[return-value]
+    return serialization.load_pem_private_key(_b64decode_pem(encoded), password=None)  # type: ignore[return-value]
 
 
 def _load_previous_public_keys() -> dict[str, Ed25519PublicKey]:
-    raw = settings.jwt_previous_public_keys
-    if not raw.strip():
+    raw = settings.jwt_previous_public_keys.strip()
+    if not raw:
         return {}
     keys: dict[str, Ed25519PublicKey] = {}
-    # Split on the PEM footer so multiple concatenated PEM blocks in one env
-    # var (comma-separated would corrupt the base64 body) work correctly.
-    for block in raw.split("-----END PUBLIC KEY-----"):
-        block = block.strip()
-        if not block:
+    for encoded in raw.split(","):
+        encoded = encoded.strip()
+        if not encoded:
             continue
-        pem = block.replace("\\n", "\n") + "\n-----END PUBLIC KEY-----\n"
-        key = serialization.load_pem_public_key(pem.encode())
+        key = serialization.load_pem_public_key(_b64decode_pem(encoded))
         if isinstance(key, Ed25519PublicKey):
             keys[_kid_for(key)] = key
     return keys

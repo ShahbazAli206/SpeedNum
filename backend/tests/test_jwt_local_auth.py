@@ -113,6 +113,8 @@ class TestVerifyLocalRejections:
 
 class TestKeyRotation:
     def test_a_token_signed_by_a_retired_key_still_verifies_via_previous_public_keys(self, monkeypatch):
+        import base64
+
         from app.services import jwt_keys
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -122,13 +124,16 @@ class TestKeyRotation:
         old_public_pem = old_key.public_key().public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
-        ).decode()
+        )
         old_kid = jwt_keys._kid_for(old_key.public_key())
         token = pyjwt.encode(_valid_payload(), old_key, algorithm="EdDSA", headers={"kid": old_kid})
 
         # Rotate: a brand new signing key, with the old one's public half
-        # listed as still-acceptable for verification.
-        monkeypatch.setattr("app.services.jwt_keys.settings.jwt_previous_public_keys", old_public_pem)
+        # (base64-encoded, matching how JWT_PREVIOUS_PUBLIC_KEYS is actually
+        # stored — see jwt_keys._b64decode_pem for why) listed as still
+        # acceptable for verification.
+        encoded = base64.b64encode(old_public_pem).decode()
+        monkeypatch.setattr("app.services.jwt_keys.settings.jwt_previous_public_keys", encoded)
         jwt_keys.reset_keyring_cache()
 
         claims = _verify_local(token)
