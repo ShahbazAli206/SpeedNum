@@ -99,20 +99,48 @@ endpoint still succeeds (`201`).
 
 ## Rate limiting / brute-force protection
 
-**Gap, not fixed this session.** No application-level rate limiting exists anywhere in the
-FastAPI app (no `slowapi` or equivalent middleware), and Caddy's stock `caddy:2` image does not
-include a rate-limiting module without a custom build. Login/signup/password-reset/OTP
-themselves are not FastAPI endpoints at all — they go directly from the browser to Supabase
-Auth, which has its own platform-level rate limiting outside this application's control. What
-*is* in this application's control and currently unprotected: account-creation/invite endpoints
-(`POST /team`, `POST /users`, portal invites, bulk import) could be hit repeatedly without a
-built-in throttle. Not fixed here because a correct fix needs either a Caddy rebuild with the
-rate-limit module (a change to something explicitly called out as "already working, don't
-rewrite") or new in-app middleware whose behavior across 4 separate uvicorn workers needs
-actual load-testing to size correctly — rushing an under-tested limiter into a
-production-adjacent path felt like a worse trade than documenting the gap plainly. Recommended
-follow-up: a small per-IP sliding-window limiter (e.g., `slowapi`) on the account-creation
-routes specifically, sized after real traffic patterns are known.
+**Implemented and verified against the live deployment.** Login/signup/password-reset/OTP are
+still not FastAPI endpoints at all — they go directly from the browser to Supabase Auth, whose
+own platform-level rate limiting is outside this application's control either way. What *is* in
+this application's control, and was previously unprotected, now has a limit:
+`POST /team`, `.../resend-credentials`, `POST /team/invitations`, `POST /users`,
+`.../resend-credentials`, `POST /clients/{id}/portal-invite` (20/hour per tenant),
+`POST /import/users/commit` (5/hour per tenant — lower, since one call can itself create up to
+200 logins), and the public, unauthenticated `POST /public/leads` form (5/5min per IP).
+
+Backed by a new Postgres table (`db/migrations/0008_rate_limits.sql`), not Redis or an
+in-process counter: `WEB_CONCURRENCY=4` means four separate uvicorn processes, so an in-memory
+counter would only ever see one worker's quarter of the traffic — the same class of problem
+`services/scheduler.py` already solved with a Postgres advisory lock for the reminder sweep.
+Not a Caddy rebuild either, since the stock `caddy:2` image has no rate-limit module and adding
+one would mean rebuilding something explicitly called out as "already working, don't rewrite."
+A single `INSERT ... ON CONFLICT ... RETURNING` makes the increment-and-check atomic across all
+four workers.
+
+**Two real bugs found and fixed by testing against the live deployment, not just reading the
+code:**
+1. The counter's own commit was riding on the same database transaction as the endpoint it
+   guards. `deps.get_session` rolls back the *entire* request transaction on any exception —
+   including the `429` this module itself raises, and any unrelated failure later in the same
+   endpoint (a duplicate-email `409`, for instance). Left as-is, a rejected request's own
+   increment was undone by its own rejection, and a legitimate request's increment would be
+   undone by an unrelated later failure — letting a caller who can reliably trigger some other
+   error retry indefinitely for free. Fixed by committing the counter immediately, independent
+   of the rest of the request.
+2. Bulk-provisioning logins is capped tenant-wide, not per-caller, so a large firm doing
+   legitimate onboarding could plausibly hit `/import/users/commit`'s 5/hour limit — noted here
+   rather than silently, in case it needs raising once real usage is observed.
+
+**Verified end to end** against the live `/public/leads` endpoint (the only rate-limited route
+reachable without a Supabase auth token, which this session did not have): a burst of 8 requests
+against the 5-per-5-minute limit produced exactly 5×`201` then `429` with `Retry-After: 300`;
+the persisted counter grew past the limit rather than staying pinned at it (confirming fix #1
+above actually took effect, not just that the fix compiled); and after waiting for the window to
+expire, a fresh request succeeded (`201`) again. The tenant-scoped limiters on `/team`, `/users`,
+etc. use the identical mechanism (same `_hit()` function, same commit fix) but were not
+separately exercised end-to-end, since doing so needs an authenticated admin session this
+session had no Supabase credentials to obtain — this is an inference from shared code, not an
+independent test of each route.
 
 ## Upload size at the storage layer
 
