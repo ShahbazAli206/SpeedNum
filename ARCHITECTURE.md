@@ -14,7 +14,10 @@ session history of how this came to be, see [`PROGRESS.md`](PROGRESS.md).
                     │   Vercel (Next.js)      │  https://speed-num.vercel.app
                     │   frontend, unchanged   │  (spidnums.com/www planned, not yet cut over)
                     └────────────┬───────────-┘
-                                 │ bearer JWT (Supabase-issued)
+                                 │ bearer JWT (this app's own, EdDSA-signed) +
+                                 │ first-party sn_refresh/sn_access cookies
+                                 │ (see "Authentication" below — why two cookie
+                                 │  domains are involved)
                                  ▼
                     ┌────────────────────────┐
                     │  Hostinger VPS          │  2.25.108.16
@@ -24,34 +27,51 @@ session history of how this came to be, see [`PROGRESS.md`](PROGRESS.md).
                     │  └─────────┬────────-┘   │
                     │            │ web network │
                     │  ┌─────────▼────────-┐   │
-                    │  │ FastAPI (api)     │   │  no host port published
-                    │  │ 4 uvicorn workers │   │
+                    │  │ FastAPI (api)     │   │  no host port published — owns auth too now
+                    │  │ 4 uvicorn workers │   │  (services/local_auth.py)
                     │  └───┬──────────┬────┘   │
                     │      │ internal │ web    │  ("internal" = compose-project-private
                     │      │ network  │ network │   bridge; postgres never joins "web")
                     │  ┌───▼──────┐ ┌─▼──────-┐ │
-                    │  │ Postgres │ │ MinIO   │  │  neither publishes a host port
-                    │  │   16     │ │ (S3 API)│  │  MinIO joins `web` too, ONLY so Caddy
-                    │  └──────────┘ └─────────┘ │  can proxy /documents/* to it
+                    │  │ Postgres │ │ MinIO   │  │  neither publishes a host port. Postgres
+                    │  │   16     │ │ (S3 API)│  │  now also holds auth_credentials/
+                    │  └──────────┘ └─────────┘ │  auth_refresh_tokens/auth_email_tokens
                     └────────────────────────┘
-                                 │
-                                 ▼
-                    ┌────────────────────────┐
-                    │  Supabase (external)    │  Auth ONLY — https://<ref>.supabase.co
-                    │  Auth (GoTrue)          │  Postgres/Storage NOT used for normal
-                    └────────────────────────┘  operation; kept intact as rollback target
 ```
+
+Supabase is no longer in this diagram at all: Postgres, Storage, and (as of this branch) Auth
+are all self-hosted. `AUTH_PROVIDER=supabase` and `STORAGE_PROVIDER=supabase` remain as
+documented, inactive-by-default rollback paths — see [`SECURITY.md`](SECURITY.md)'s
+"Authentication decision" — not deleted, just not the default.
 
 ## Services and where they run
 
 | Service | Where | Public? | Notes |
 |---|---|---|---|
-| Frontend (Next.js) | Vercel | Yes (`speed-num.vercel.app`) | Unchanged by this migration |
+| Frontend (Next.js) | Vercel | Yes (`speed-num.vercel.app`) | Also hosts the auth BFF routes under `/api/auth/*` — see below |
 | Reverse proxy (Caddy) | VPS, Docker | Yes (80/443, auto TLS) | Predates this app; shared `web` network |
-| Backend API (FastAPI) | VPS, Docker (`speednum-api`) | No — reached only via Caddy | 4 workers (`WEB_CONCURRENCY=4`), no host port |
+| Backend API (FastAPI) | VPS, Docker (`speednum-api`) | No — reached only via Caddy | 4 workers (`WEB_CONCURRENCY=4`), no host port; owns authentication |
 | Database (Postgres 16) | VPS, Docker (`speednum-postgres`) | No | `internal` network only, connects as a non-superuser app role |
 | Object storage (MinIO) | VPS, Docker (`speednum-minio`) | No (S3 API only reachable via Caddy path route) | Private bucket, no anonymous policy |
-| Identity (Supabase Auth) | Supabase (external) | N/A | JWT issuer; verified via JWKS, no shared database |
+
+## Authentication
+
+Self-hosted (`backend/app/services/{password_hash,jwt_keys,local_auth}.py`): Argon2id
+passwords, Ed25519 (EdDSA)-signed access tokens (15 min default), rotating hashed refresh
+tokens with reuse detection. Full detail and what was verified: [`SECURITY.md`](SECURITY.md)'s
+"Authentication decision" section.
+
+**Why the frontend has its own `/api/auth/*` routes, not just calls to the backend directly:**
+the refresh token lives in an HttpOnly cookie scoped to the API's own domain
+(`test.spidnums.com`). A cookie is never readable across origins — not by JavaScript, and not by
+a *different origin's server* — so Next.js Server Components running on Vercel could never see
+it if the browser talked to the backend directly. `frontend/src/app/api/auth/{register,login,
+logout,refresh,magic-login,session}/route.ts` run server-side on Vercel, call the FastAPI
+backend themselves, and re-mint the tokens as first-party cookies on *this* domain — which both
+Server Components (`lib/api-server.ts`, via `next/headers`) and the browser's next same-site
+request can then read normally. Ordinary data calls (`lib/api.ts`) are unaffected by any of
+this: an `Authorization: Bearer` header has no cross-origin cookie restriction, so they keep
+talking to the backend directly, exactly as before Supabase was removed.
 
 ## Request paths
 
@@ -63,16 +83,15 @@ session history of how this came to be, see [`PROGRESS.md`](PROGRESS.md).
   Presigned URLs are signed for `https://<hostname>/documents/...` (path-style S3; matched by
   Caddy on the bucket name itself, not a distinguishing prefix — see the comment in
   `deploy/Caddyfile.example` for why a prefix-and-strip approach doesn't work with SigV4).
-- **Login/signup/session**: browser ↔ Supabase Auth directly (via `@supabase/ssr`), never
-  through the VPS at all. The VPS-side API only *verifies* the resulting JWT (JWKS) and calls
-  Supabase's admin API to provision/reset/delete logins server-side.
+- **Login/signup/session**: browser → Vercel's own `/api/auth/*` routes (same-origin) → FastAPI
+  backend → Postgres. See "Authentication" above for why this extra hop exists.
 
 ## Environment variables
 
 Full templates with comments: [`deploy/.env.example`](deploy/.env.example) (compose-level
 interpolation — Postgres/MinIO credentials), [`deploy/api.env.example`](deploy/api.env.example)
-(container env — Supabase, storage provider, email, CORS), and
-[`frontend/.env.example`](frontend/.env.example) (the four `NEXT_PUBLIC_*` vars). The short
+(container env — auth, storage provider, email, CORS), and
+[`frontend/.env.example`](frontend/.env.example) (the two `NEXT_PUBLIC_*` vars). The short
 version:
 
 | Variable | Where | Purpose |
@@ -80,7 +99,9 @@ version:
 | `DATABASE_URL` | built by `docker-compose.yml` from `.env` | Points at VPS Postgres by default; a commented rollback string points at Supabase's pooler instead |
 | `STORAGE_PROVIDER` | `api.env` | `s3` (MinIO, current) or `supabase` (rollback) |
 | `S3_ENDPOINT_URL` / `S3_PUBLIC_ENDPOINT_URL` | `api.env` | Internal vs. browser-facing MinIO endpoint — see the comment in `storage_s3.py` for why they differ |
-| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | `api.env` | Auth stays Supabase regardless of the two above |
+| `AUTH_PROVIDER` | `api.env` | `local` (current) or `supabase` (rollback) |
+| `JWT_PRIVATE_KEY` | `api.env` | Base64-encoded Ed25519 private key — required for `AUTH_PROVIDER=local` in any real deployment |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | `api.env` | Only read when `AUTH_PROVIDER=supabase` or `STORAGE_PROVIDER=supabase` |
 | `MIGRATIONS_SKIP` | `api.env` | `0002_rls` when targeting a Postgres with no colocated Supabase project |
 | `CORS_ORIGINS` | `api.env` | The exact Vercel origin — never `*` in production |
 | `NEXT_PUBLIC_API_URL` | Vercel dashboard | The API's public HTTPS hostname — **never** the VPS's bare IP |

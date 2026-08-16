@@ -112,14 +112,16 @@ operation — the old VPS's Postgres/MinIO were never modified.
 ## Supabase → VPS cutover status
 
 This is the *original* migration this branch implements — moving Postgres and Storage off
-Supabase onto this VPS, while deliberately keeping Supabase Auth (see `SECURITY.md`'s
-"Authentication decision"). Current state:
+Supabase onto this VPS. Auth was originally kept on Supabase deliberately (see `SECURITY.md`'s
+"Authentication decision" for that reasoning); the owner later made the opposite call, and
+self-hosted auth has since been implemented and verified — see the same section for what
+changed and why. Current state:
 
 | Component | Status |
 |---|---|
 | Postgres | Portable schema verified on a fresh VPS Postgres 16. **Production data has not been migrated** — Supabase's actual project data was never read, exported, or touched this session (no credentials available, and doing so is explicitly an approval-gated action regardless). |
 | Storage | MinIO deployed and verified (presigned round-trip). **No production documents migrated** — same reasoning as above. |
-| Auth | Unchanged — still Supabase, by deliberate decision, not as a temporary stopgap. |
+| Auth | Self-hosted (`AUTH_PROVIDER=local`), verified end-to-end against the live deployment. `AUTH_PROVIDER=supabase` remains a working rollback. **No existing Supabase Auth users were migrated** — there are none yet (this deployment has no real users); see `SECURITY.md` if that changes before a production cutover. |
 
 ### If/when a real production data migration happens
 

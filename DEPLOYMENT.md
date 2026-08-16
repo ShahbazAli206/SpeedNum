@@ -17,25 +17,31 @@
 
 ## Architecture
 
-Target (this app's own Postgres + storage on the VPS, Supabase kept for Auth only —
-see the architecture doc's "Supabase exit strategy" for why Auth stays while
-Postgres/Storage move):
+Target: this app's own Postgres, storage, and (as of this branch) authentication, all on the
+VPS. Supabase is no longer required for normal operation — see [`SECURITY.md`](SECURITY.md)'s
+"Authentication decision" for why an earlier pass recommended keeping Supabase Auth and why
+that call was later reversed.
 
 ```
 Vercel (Next.js 16 frontend)  ──bearer JWT──▶  Caddy :443 ──▶ Docker: FastAPI (uvicorn ×4)
-        │                                                              │        │
-        │                                                              ▼        ▼
-        │                                                         Postgres    MinIO
-        └────────── Supabase Auth (sign-in, JWT) ─────────────────────┘   (both VPS-local,
-                                                                            Docker-internal only)
+   │ (own /api/auth/* BFF routes —                                    │        │
+   │  see ARCHITECTURE.md for why)                                    ▼        ▼
+   └──────────────────────────────────────────────────────────▶ Postgres    MinIO
+                                                                  (both VPS-local,
+                                                                   Docker-internal only,
+                                                                   Postgres now also
+                                                                   holds credentials/
+                                                                   sessions/tokens)
 ```
 
 Rollback path (unchanged code, config-only): `DATABASE_URL` back to the Supabase pooler string,
-`STORAGE_PROVIDER=supabase` — see `deploy/api.env.example`.
+`STORAGE_PROVIDER=supabase`, `AUTH_PROVIDER=supabase` — see `deploy/api.env.example`.
 
-- **Frontend** — `frontend/`, Next.js 16.3 / React 19, Tailwind 4, `@supabase/ssr` for auth only.
-  Talks to the backend for all data via bearer token. Runs in **demo mode** (sample data, auth
-  off) when its env vars are absent — so it deploys and renders before the backend exists.
+- **Frontend** — `frontend/`, Next.js 16.3 / React 19, Tailwind 4. Talks to the backend for all
+  data via bearer token, and to its own `/api/auth/*` routes for login/register/refresh/logout
+  (see `ARCHITECTURE.md`'s "Authentication" section for why those routes exist). Runs in **demo
+  mode** (sample data, auth off) when `NEXT_PUBLIC_API_URL` is absent — so it deploys and renders
+  before the backend exists.
 - **Backend** — `backend/`, FastAPI in Docker. Listens on `$PORT` (falls back to 7860) with
   `WEB_CONCURRENCY` uvicorn workers. Connects directly to Postgres via `asyncpg`.
   **Crashes on boot if `DATABASE_URL` is unset.**
@@ -48,12 +54,14 @@ Rollback path (unchanged code, config-only): `DATABASE_URL` back to the Supabase
   publicly exposed port) — see `STORAGE_PROVIDER` in `deploy/api.env.example` and
   `backend/app/services/storage_s3.py`. Supabase Storage remains supported as a rollback target
   via `STORAGE_PROVIDER=supabase`.
-- **Auth** — stays with Supabase regardless of where Postgres/Storage live (see the architecture
-  doc's reasoning: self-hosting Argon2id/token-rotation/rate-limiting/OTP securely is a
-  substantial, separate undertaking, and Supabase Auth already works). `backend/app/security.py`
-  verifies its JWTs via JWKS; nothing about that changes when only Postgres/Storage move.
-- **Email** — SMTP or Resend, selected by `EMAIL_PROVIDER`. Carries every credential email;
-  see [Email delivery](#email-delivery).
+- **Auth** — self-hosted (`AUTH_PROVIDER=local`): Argon2id passwords, Ed25519-signed access
+  tokens, rotating hashed refresh tokens with reuse detection — see
+  `backend/app/services/{password_hash,jwt_keys,local_auth}.py` and `SECURITY.md`'s
+  "Authentication decision" for the full design and what was verified against the live
+  deployment. Supabase Auth remains supported as a rollback target via `AUTH_PROVIDER=supabase`.
+- **Email** — SMTP or Resend, selected by `EMAIL_PROVIDER`. Carries every credential email
+  *and* now also verification/reset/magic-link emails (previously Supabase's job) — see
+  [Email delivery](#email-delivery).
 
 ---
 

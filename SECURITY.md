@@ -168,60 +168,72 @@ Every database query goes through SQLAlchemy's ORM or parameterized `text()` cal
 parameters like `:name`, never an f-string or `.format()` built directly into a query) —
 checked with a repo-wide grep for the dangerous patterns; none found.
 
-## Authentication decision: keep Supabase Auth (Option B)
+## Authentication decision: self-hosted (superseded the earlier "keep Supabase" call)
 
-Evaluated whether to replace Supabase Auth with a self-hosted system, as the architecture
-brief invited if it could be done "securely and efficiently."
+An earlier pass on this branch evaluated replacing Supabase Auth and recommended keeping it —
+the operational/security complexity of a correct self-hosted system was judged not worth taking
+on without dedicated time and a way to validate against real Supabase credentials. The owner
+subsequently made the opposite call explicitly: remove Supabase entirely, including Auth. That
+decision has since been implemented (`AUTH_PROVIDER=local` is now the default) and verified
+against the live deployment — this section replaces the earlier recommendation rather than
+sitting alongside it as a still-open question.
 
-**Resource cost**: modest either way. Argon2id hashing and a small auth server would not
-meaningfully strain this KVM 4 (4 vCPU / 15GB RAM, currently ~1.1GB used across the entire
-Postgres+MinIO+API stack) — resource usage is *not* the deciding factor here, unlike the
-brief's framing suggested it might be.
+**What was actually built**, in `backend/app/services/{password_hash,jwt_keys,local_auth}.py`:
+- **Passwords**: Argon2id (`argon2-cffi`'s defaults — the OWASP-recommended variant), verified
+  with automatic rehash-on-login if parameters are ever strengthened later.
+- **Access tokens**: Ed25519 (EdDSA)-signed JWTs, 15-minute default TTL, verified via a `kid`-keyed
+  keyring that supports rotation (`JWT_PREVIOUS_PUBLIC_KEYS` keeps a retired key valid for
+  verification only, until its last-issued token would have expired anyway).
+- **Refresh tokens**: opaque random tokens, SHA-256-hashed at rest (not Argon2id — these are
+  already high-entropy, unlike a human password, so a fast hash is the right tool), rotated on
+  every use, with **reuse detection**: presenting an already-rotated or revoked token revokes
+  every other session for that profile too, on the theory a stolen token is more likely to be
+  replayed than reported. **Verified live**: rotating past a stale cookie, then replaying it,
+  correctly returned 401 and killed the still-valid sibling session in the same test.
+- **Email verification / magic-link / password reset**: single-use, hashed, short-lived tokens
+  (24h / 15min / 1h respectively) — verified live for all three: valid token succeeds, a second
+  use of the same token is rejected, an unrelated/malformed token is rejected, and (for password
+  reset) the old password stops working while the new one succeeds immediately.
+- **Rate limiting**: the same Postgres-backed limiter as the rest of the app, on every endpoint
+  that creates a credential or accepts public input — login, register, forgot-password,
+  verify-email, and every admin account-creation route.
+- **Account lockout**: 10 failed logins locks the account for 15 minutes, independent of and in
+  addition to the per-IP rate limit on `/auth/login`.
+- **Rollback preserved, not deleted**: `AUTH_PROVIDER=supabase` still works — `security.py` and
+  `services/accounts.py` are dispatchers, and the Supabase code paths (`supabase_admin.py`,
+  the JWKS-verification branch) are untouched, just no longer the default. This is the same
+  pattern already used for `STORAGE_PROVIDER`.
 
-**Operational/security complexity**: the deciding factor instead. Self-hosting a *correct* auth
-system means building, from nothing currently in this codebase: password hashing (Argon2id),
-access/refresh token issuance with rotation and revocation, a session/token store, password
-reset and email verification token flows, OTP/magic-link generation and one-time-use
-enforcement, brute-force/lockout handling, CSRF protection for any cookie-based flow, and a
-signing-key rotation strategy — each one a place a subtle, dangerous bug can hide, in a part of
-the system that currently has zero authentication vulnerabilities because it delegates
-entirely to a maintained, widely-used identity provider. Replacing it would trade a
-proven system for a new, unaudited one, in an area where mistakes are unusually costly
-(session fixation, timing attacks, token replay).
+**Verified end-to-end against the live deployment**, not just unit-tested: register → get a
+real JWT → `/auth/me` → bootstrap a firm → create a client → refresh (rotation) → replay the old
+refresh token (reuse detection fires, both sessions die) → fresh login → forgot-password →
+reset-password with the real token → old password rejected, new one works → an admin-provisioned
+team-member account logs in with its temp password and correctly hits the existing
+`must_change_password` gate → a second, independent tenant cannot see the first tenant's clients
+or documents (IDOR attempts return 404, not 403, so existence isn't leaked either) → document
+upload/download through MinIO succeeds under the new tokens with no code changes to the storage
+layer. See `PROGRESS.md`'s local-auth entry for the exact commands and responses.
 
-**No live Supabase credentials were available in this session** to validate that a replacement
-preserves the current JWT contract (`sub`/`email`/`role`/`user_metadata.{client_id,firm_name,
-is_staff}`, read throughout `deps.py` and the frontend's `proxy.ts`) without a regression —
-building this blind would be worse than not building it yet.
-
-**Recommendation: keep Supabase Auth.** The codebase already isolates it cleanly — JWT
-verification in `security.py` reads only `SUPABASE_URL`/`SUPABASE_JWT_SECRET`, and admin
-operations go through the single `supabase_admin.py` module — so this remains a clean provider
-swap later, not a rewrite, if the owner chooses to revisit it with dedicated time and a real
-Supabase test project to validate against.
-
-**If self-hosted auth is pursued later**, the migration path: (1) implement a parallel
-`auth_local.py` matching `supabase_admin.py`'s exact function signatures
-(`create_auth_user`/`reset_password`/`delete_auth_user`/`generate_magic_link`), plus new
-login/refresh/logout endpoints; (2) add a migration for credential/session storage (the
-portable schema already has no `auth.users` dependency to conflict with this); (3) extend
-`security.py` to verify tokens from either provider during a transition window, gated by an
-`AUTH_PROVIDER` setting; (4) update the frontend to call the new endpoints instead of
-`@supabase/ssr` for login/signup/refresh; (5) test password hashing, token rotation/revocation,
-OTP/magic-link one-time-use and expiry, rate limiting, and session fixation specifically, ideally
-as a dedicated security review pass; (6) run both providers in parallel and validated before
-retiring Supabase Auth — which, like any step that disables working authentication, needs
-explicit owner approval before it happens, not just before it's deleted.
+**What is not yet done**: OTP as a distinct numeric-code flow was not implemented — the product
+only ever used a one-click magic link (`portal-login` in the frontend), never a code-entry UI, so
+building a second mechanism nothing calls would have been exactly the "unnecessary second
+authentication mechanism" the brief asked not to add. CSRF: not separately implemented, because
+this design carries no ambient-cookie-authorized state-changing request — the refresh cookie
+only feeds `/api/auth/refresh`, which mints a token, not a state change, and every actual data
+mutation requires an explicit `Authorization: Bearer` header a CSRF attacker cannot forge
+cross-site.
 
 ## Email / OTP
 
-OTP, password reset, email verification, and invitations are all Supabase Auth features
-(magic-link generation goes through `supabase_admin.py::generate_magic_link`); this
-application does not run its own OTP or verification-token logic. Credential/welcome emails
-(a separate concern from Supabase's own auth emails) go through `services/email.py`'s existing
-SMTP/Resend abstraction (`EMAIL_PROVIDER=auto|smtp|resend`), already reviewed in an earlier
-session and unchanged here. **Not exercised with a real send this session** — no SMTP/Resend
-credentials were available. Existing DNS: SPF (`v=spf1 include:_spf.mail.hostinger.com ~all`)
+Password reset, email verification, and magic-link generation are now this application's own
+(`services/local_auth.py`), not Supabase's — see "Authentication decision" above. All
+transactional email, including these, goes through `services/email.py`'s existing SMTP/Resend
+abstraction (`EMAIL_PROVIDER=auto|smtp|resend`), already reviewed in an earlier session and
+unchanged here. **Not exercised with a real send this session** — the deployed SMTP credentials
+are placeholders (`smtp.hostinger.com` correctly rejected authentication, confirmed in the
+deploy logs), so the actual token values for the verify-email/reset-password/team-invite tests
+were read directly from the service functions that would otherwise have emailed them, not from
+a real inbox. Existing DNS: SPF (`v=spf1 include:_spf.mail.hostinger.com ~all`)
 covers the Hostinger-SMTP path this deployment defaults to; DMARC is currently `p=none`
 (monitor-only, no enforcement) — a reasonable early-stage setting, worth tightening to
 `quarantine`/`reject` later once SPF/DKIM alignment is confirmed solid, but not changed here
