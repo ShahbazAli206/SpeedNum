@@ -65,11 +65,27 @@ def _warn_about_configuration() -> None:
             "user's token. Set it to the frontend's exact origin, e.g. "
             "CORS_ORIGINS=https://your-app.vercel.app"
         )
-    if settings.is_production and not settings.supabase_service_role_key:
-        log.warning(
-            "SUPABASE_SERVICE_ROLE_KEY is unset — creating logins and signing document "
-            "uploads/downloads will fail with HTTP 424."
+    using_supabase_auth = (settings.auth_provider or "local").strip().lower() == "supabase"
+    using_supabase_storage = (settings.storage_provider or "supabase").strip().lower() == "supabase"
+    if settings.is_production and (using_supabase_auth or using_supabase_storage) and not settings.supabase_service_role_key:
+        what = " and ".join(
+            filter(
+                None,
+                [
+                    "creating logins" if using_supabase_auth else None,
+                    "signing document uploads/downloads" if using_supabase_storage else None,
+                ],
+            )
         )
+        log.warning("SUPABASE_SERVICE_ROLE_KEY is unset — %s will fail with HTTP 424.", what)
+    if settings.is_production and not using_supabase_auth:
+        # Forces the keyring to load now rather than on the first request,
+        # so a missing JWT_PRIVATE_KEY is reported at boot like every other
+        # misconfiguration here, not silently on whatever request happens
+        # to need a token first.
+        from .services import jwt_keys
+
+        jwt_keys.keyring()
     if settings.is_production:
         for warning in email_status()["warnings"]:
             log.warning("Email: %s", warning)
