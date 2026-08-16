@@ -1,15 +1,14 @@
 /**
  * Auth helpers shared by the login and signup forms.
  *
- * Supabase is optional in this build: when the env vars are absent the app runs
- * in demo mode and the portal is browsable without a real session. That is the
- * same assumption `src/proxy.ts` makes — it lets every request through rather
- * than locking the site out when Supabase is unconfigured.
+ * The backend API is optional in this build: when NEXT_PUBLIC_API_URL is
+ * absent the app runs in demo mode and the portal is browsable without a
+ * real session. That is the same assumption `src/proxy.ts` makes — it lets
+ * every request through rather than locking the site out when there is no
+ * backend to authenticate against.
  */
 
-export const SUPABASE_CONFIGURED = Boolean(
-  process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-);
+export const AUTH_CONFIGURED = Boolean(process.env.NEXT_PUBLIC_API_URL);
 
 export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 

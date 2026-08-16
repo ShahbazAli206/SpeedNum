@@ -1,6 +1,6 @@
 "use client";
 
-import { supabaseBrowser } from "./supabase/client";
+import { currentAccessToken, ensureHydrated, refreshAccessToken } from "./auth-client";
 
 const RAW_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -39,23 +39,20 @@ export interface RequestOptions extends Omit<RequestInit, "body"> {
   anonymous?: boolean;
 }
 
-async function accessToken(): Promise<string | null> {
+async function doFetch(path: string, payload: BodyInit | undefined, finalHeaders: Headers, rest: RequestInit): Promise<Response> {
   try {
-    const { data } = await supabaseBrowser().auth.getSession();
-    return data.session?.access_token ?? null;
+    return await fetch(`${API_URL}${path}`, { ...rest, headers: finalHeaders, body: payload, cache: "no-store" });
   } catch {
-    return null;
+    throw new ApiError(
+      0,
+      "Could not reach the API. Check NEXT_PUBLIC_API_URL and that the backend is awake.",
+    );
   }
 }
 
 export async function api<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { body, anonymous, headers, ...rest } = options;
   const finalHeaders = new Headers(headers);
-
-  if (!anonymous) {
-    const token = await accessToken();
-    if (token) finalHeaders.set("Authorization", `Bearer ${token}`);
-  }
 
   let payload: BodyInit | undefined;
   if (body instanceof FormData) {
@@ -65,19 +62,25 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     finalHeaders.set("Content-Type", "application/json");
   }
 
-  let response: Response;
-  try {
-    response = await fetch(`${API_URL}${path}`, {
-      ...rest,
-      headers: finalHeaders,
-      body: payload,
-      cache: "no-store",
-    });
-  } catch {
-    throw new ApiError(
-      0,
-      "Could not reach the API. Check NEXT_PUBLIC_API_URL and that the Space is awake.",
-    );
+  if (!anonymous) {
+    await ensureHydrated();
+    const token = currentAccessToken();
+    if (token) finalHeaders.set("Authorization", `Bearer ${token}`);
+  }
+
+  let response = await doFetch(path, payload, finalHeaders, rest);
+
+  // The access token is short-lived by design (15 min default) — a 401 on a
+  // request that *did* carry a token is the ordinary "it expired mid-session"
+  // case, not necessarily "not signed in". One silent refresh-and-retry
+  // covers that without every caller needing its own retry logic; a second
+  // 401 after a successful refresh is a real authorization failure.
+  if (!anonymous && response.status === 401 && currentAccessToken()) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      finalHeaders.set("Authorization", `Bearer ${refreshed}`);
+      response = await doFetch(path, payload, finalHeaders, rest);
+    }
   }
 
   if (response.status === 204) return undefined as T;

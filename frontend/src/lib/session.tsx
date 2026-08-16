@@ -12,7 +12,7 @@ import {
 } from "react";
 
 import { get } from "./api";
-import { SUPABASE_CONFIGURED } from "./auth";
+import { AUTH_CONFIGURED } from "./auth";
 import { FIRM, getFirmOverview, getReminderCounts } from "./firm-demo";
 import type { Me, ReminderCounts } from "./types";
 
@@ -25,7 +25,7 @@ import type { Me, ReminderCounts } from "./types";
  * — the reason it matters — the sidebar badge, the bell and the reminders page
  * can never disagree about the unread count.
  *
- * Falls back to the demo identity when Supabase is unconfigured or the API is
+ * Falls back to the demo identity when no backend is configured or the API is
  * unreachable, matching `lib/api-server.ts`: a page never breaks, it just shows
  * sample data with `isLive` false.
  */
@@ -78,7 +78,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const [reminders, setReminders] = useState<ReminderCounts>(EMPTY_REMINDERS);
   const [isLive, setIsLive] = useState(false);
-  const [isLoading, setIsLoading] = useState(SUPABASE_CONFIGURED);
+  const [isLoading, setIsLoading] = useState(AUTH_CONFIGURED);
   const [unreadOverride, setUnreadOverride] = useState<number | null>(null);
 
   // A ref, not state: the poll only needs to know whether a fetch is already in
@@ -86,7 +86,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const inFlight = useRef(false);
 
   const load = useCallback(async () => {
-    if (!SUPABASE_CONFIGURED || inFlight.current) return;
+    if (!AUTH_CONFIGURED || inFlight.current) return;
     inFlight.current = true;
     try {
       const profile = await get<Me>("/auth/me");
@@ -121,7 +121,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     // task. The rule cannot see across the async boundary.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
-    if (!SUPABASE_CONFIGURED) return;
+    if (!AUTH_CONFIGURED) return;
     const timer = setInterval(() => void load(), REFRESH_MS);
 
     // Coming back to the tab is the moment a stale badge is most obvious.

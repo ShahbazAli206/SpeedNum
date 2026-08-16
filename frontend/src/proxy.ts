@@ -1,5 +1,6 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+
+import { ACCESS_COOKIE, REFRESH_COOKIE } from "@/lib/session-server";
 
 /**
  * Routes that require a signed-in user.
@@ -44,68 +45,64 @@ function matches(pathname: string, routes: string[]): boolean {
 }
 
 /**
- * Which app this account belongs to, read straight off the JWT.
+ * Which app this account belongs to, read straight off the access token —
+ * unverified (a plain base64url decode, no signature check). That's
+ * deliberate, not an oversight: this value only ever picks which shell to
+ * redirect to, never an authorization decision (every API call re-verifies
+ * the token's signature server-side regardless), and Edge middleware
+ * shouldn't need a JWT library or a network round trip just for a UX hint.
  *
- * `profiles.client_id` is the authoritative flag (see backend/app/deps.py), but
- * the proxy has only the token — a database round trip on every request would
- * cost more than it saves. Supabase copies `user_metadata` into the JWT, so the
- * portal-invite flow stamps a `client_id` there and this reads it back.
- *
- * Returns null when the token carries no hint, in which case we leave the user
- * where they asked to go rather than guessing: the page itself calls
- * `GET /auth/me` and can redirect with the real answer. Being permissive here is
- * deliberate — a wrong guess would lock a legitimate user out of their own app.
+ * Returns null when the cookie is absent or carries no hint, in which case
+ * we leave the user where they asked to go rather than guessing: the page
+ * itself calls `GET /auth/me` and can redirect with the real answer. Being
+ * permissive here is deliberate — a wrong guess would lock a legitimate
+ * user out of their own app.
  */
-function accountKind(metadata: Record<string, unknown> | undefined): "firm" | "portal" | null {
-  if (!metadata) return null;
-  const clientId = metadata.client_id;
-  if (typeof clientId === "string" && clientId.length > 0) return "portal";
-  if (metadata.is_portal === true) return "portal";
-  if (metadata.firm_name || metadata.is_staff === true) return "firm";
-  return null;
+function accountKindFromAccessToken(token: string | undefined): "firm" | "portal" | null {
+  if (!token) return null;
+  try {
+    const payloadSegment = token.split(".")[1];
+    if (!payloadSegment) return null;
+    const base64 = payloadSegment.replace(/-/g, "+").replace(/_/g, "/");
+    const json = atob(base64);
+    const payload = JSON.parse(json) as { user_metadata?: Record<string, unknown> };
+    const metadata = payload.user_metadata;
+    if (!metadata) return null;
+    const clientId = metadata.client_id;
+    if (typeof clientId === "string" && clientId.length > 0) return "portal";
+    if (metadata.is_portal === true) return "portal";
+    if (metadata.is_staff === true) return "firm";
+    return null;
+  } catch {
+    return null;
+  }
 }
 
-export async function proxy(request: NextRequest) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Without Supabase configured, let every request through rather than locking
-  // the whole site out — the pages surface a clear setup message instead.
-  if (!url || !key) return NextResponse.next();
+  if (!process.env.NEXT_PUBLIC_API_URL) {
+    // No backend configured — demo mode, let every request through rather
+    // than locking the whole site out; pages surface a clear setup message.
+    return NextResponse.next();
+  }
 
-  let response = NextResponse.next({ request });
-
-  const supabase = createServerClient(url, key, {
-    cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
-      setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-        response = NextResponse.next({ request });
-        cookiesToSet.forEach(({ name, value, options }) =>
-          response.cookies.set(name, value, options),
-        );
-      },
-    },
-  });
-
-  // Refreshes the session cookie as a side effect — must run on every request.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Presence of the long-lived refresh cookie is the "probably signed in"
+  // signal, not the short-lived access cookie — the access token can be
+  // legitimately absent for up to its own TTL between refreshes without the
+  // user actually being signed out; the API is what re-verifies for real.
+  const signedIn = Boolean(request.cookies.get(REFRESH_COOKIE)?.value);
 
   const needsAuth = matches(pathname, PROTECTED);
-  if (needsAuth && !user) {
+  if (needsAuth && !signedIn) {
     const redirect = request.nextUrl.clone();
     redirect.pathname = "/login";
     redirect.searchParams.set("next", pathname);
     return NextResponse.redirect(redirect);
   }
 
-  if (user) {
-    const kind = accountKind(user.user_metadata);
+  if (signedIn) {
+    const kind = accountKindFromAccessToken(request.cookies.get(ACCESS_COOKIE)?.value);
 
     // Leaving /login or /signup: send them to their own home, not always the
     // client portal. `?next=` from the redirect above wins, so a deep link
@@ -134,7 +131,7 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  return response;
+  return NextResponse.next();
 }
 
 export const config = {
