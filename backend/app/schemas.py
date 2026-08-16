@@ -195,6 +195,44 @@ class BootstrapRequest(BaseModel):
     full_name: str | None = None
 
 
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=200)
+    full_name: str = Field(min_length=1, max_length=200)
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=200)
+
+
+class AuthResult(BaseModel):
+    """Access token only — the refresh token travels as an HttpOnly cookie,
+    never in a JSON body a script could read."""
+
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int
+    profile: ProfileRead
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=1)
+    password: str = Field(min_length=8, max_length=200)
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(min_length=1)
+
+
+class MagicLoginRequest(BaseModel):
+    token: str = Field(min_length=1)
+
+
 class InvitationCreate(BaseModel):
     email: EmailStr
     role: UserRole = "member"

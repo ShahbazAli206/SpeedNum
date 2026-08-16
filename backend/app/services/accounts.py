@@ -27,18 +27,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..models import Client, ClientService, Deadline, Profile, Service, Tenant
+from . import local_auth
 from .email import portal_welcome_html, send_email, sender_name, staff_welcome_html
-from .supabase_admin import (
-    SupabaseAdminError,
-    create_auth_user,
-    delete_auth_user,
-    generate_magic_link,
-    generate_temp_password,
-    is_configured,
-    reset_password,
-)
+from .supabase_admin import SupabaseAdminError
+from .supabase_admin import create_auth_user as _supabase_create_auth_user
+from .supabase_admin import delete_auth_user as _supabase_delete_auth_user
+from .supabase_admin import generate_magic_link as _supabase_generate_magic_link
+from .supabase_admin import is_configured as _supabase_is_configured
+from .supabase_admin import reset_password as _supabase_reset_password
 
 log = logging.getLogger(__name__)
+
+
+def _using_local() -> bool:
+    return (settings.auth_provider or "local").strip().lower() != "supabase"
+
+
+# generate_temp_password is identical either way (a one-time password shown
+# to the admin and emailed to the new account) — local_auth's version is
+# used regardless of provider, since it never talks to an external service.
+generate_temp_password = local_auth.generate_temp_password
 
 ROLE_LABELS = {
     "owner": "an owner",
@@ -118,7 +126,11 @@ def _routing_metadata(*, tenant_id: uuid.UUID, client_id: uuid.UUID | None) -> d
 
 
 def require_configured() -> None:
-    if not is_configured():
+    """Local auth needs no external service, so there is nothing to check —
+    this only guards the Supabase rollback path."""
+    if _using_local():
+        return
+    if not _supabase_is_configured():
         raise AccountError(
             "Creating logins requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the API. "
             "Add them, or use an email invitation instead.",
@@ -159,15 +171,22 @@ async def provision(
             raise AccountError("That client record does not exist in this firm.", status_code=404)
 
     temp_password = generate_temp_password()
-    try:
-        new_id = await create_auth_user(
-            email=email,
-            password=temp_password,
-            full_name=full_name,
-            metadata=_routing_metadata(tenant_id=tenant.id, client_id=client_id),
-        )
-    except SupabaseAdminError as exc:
-        raise AccountError(str(exc), status_code=424) from exc
+    using_local = _using_local()
+
+    if using_local:
+        # No external ID to fetch — mint one now; auth_credentials has an FK
+        # to profiles, so its row is created *after* the profile below.
+        new_id = uuid.uuid4()
+    else:
+        try:
+            new_id = await _supabase_create_auth_user(
+                email=email,
+                password=temp_password,
+                full_name=full_name,
+                metadata=_routing_metadata(tenant_id=tenant.id, client_id=client_id),
+            )
+        except SupabaseAdminError as exc:
+            raise AccountError(str(exc), status_code=424) from exc
 
     profile = Profile(
         id=new_id,
@@ -185,6 +204,9 @@ async def provision(
     )
     session.add(profile)
     await session.flush()
+
+    if using_local:
+        await local_auth.create_credentials(session, profile_id=new_id, password=temp_password)
 
     email_sent = False
     if send_welcome:
@@ -222,10 +244,13 @@ async def reissue(
         client = await session.get(Client, profile.client_id)
 
     temp_password = generate_temp_password()
-    try:
-        await reset_password(user_id=profile.id, password=temp_password)
-    except SupabaseAdminError as exc:
-        raise AccountError(str(exc), status_code=424) from exc
+    if _using_local():
+        await local_auth.admin_reset_password(session, profile_id=profile.id, password=temp_password)
+    else:
+        try:
+            await _supabase_reset_password(user_id=profile.id, password=temp_password)
+        except SupabaseAdminError as exc:
+            raise AccountError(str(exc), status_code=424) from exc
 
     profile.must_change_password = True
     profile.is_active = True
@@ -247,17 +272,20 @@ async def reissue(
     )
 
 
-async def revoke(profile: Profile) -> bool:
-    """Delete the Supabase Auth login behind a profile.
+async def revoke(session: AsyncSession, profile: Profile) -> bool:
+    """Ends the login behind a profile — revokes every refresh token
+    locally, or deletes the Supabase Auth user on the rollback path.
 
     Returns whether it succeeded rather than raising: the caller has already
     deactivated the profile, which is what actually blocks access, so a failure
     here is a shortfall to report — not a reason to leave the account enabled.
     """
-    if not is_configured():
+    if _using_local():
+        return await local_auth.admin_revoke_user(session, profile_id=profile.id)
+    if not _supabase_is_configured():
         return False
     try:
-        await delete_auth_user(user_id=profile.id)
+        await _supabase_delete_auth_user(user_id=profile.id)
         return True
     except SupabaseAdminError as exc:
         log.warning("Could not revoke the Supabase login for %s: %s", profile.email, exc)
@@ -307,6 +335,16 @@ async def _client_engagement_summary(
     return services, deadlines
 
 
+async def _magic_link_token(session: AsyncSession, profile: Profile) -> str | None:
+    """A one-click sign-in token for the welcome email. Local auth always
+    succeeds (it's just a database insert); the Supabase rollback path
+    returns None on any failure — the invite still proceeds with the
+    temporary password alone, just without the one-click convenience."""
+    if _using_local():
+        return await local_auth.generate_magic_link(session, profile_id=profile.id)
+    return await _supabase_generate_magic_link(email=profile.email)
+
+
 async def _send_welcome(
     session: AsyncSession,
     *,
@@ -329,7 +367,7 @@ async def _send_welcome(
         if client is not None and client.owner_id is not None:
             owner = await session.get(Profile, client.owner_id)
             contact_name = owner.full_name if owner else None
-        magic_token = await generate_magic_link(email=profile.email)
+        magic_token = await _magic_link_token(session, profile)
         services, deadlines = await _client_engagement_summary(session, profile.client_id)
         return await send_email(
             to=profile.email,
@@ -358,7 +396,7 @@ async def _send_welcome(
     # Staff get a magic link too. `staff_welcome_html` has always accepted one;
     # it just was never passed, so an accountant had to type the temporary
     # password by hand while a client got one-click access.
-    staff_token = await generate_magic_link(email=profile.email)
+    staff_token = await _magic_link_token(session, profile)
     return await send_email(
         to=profile.email,
         subject=f"Your {tenant.name} practice account is ready",

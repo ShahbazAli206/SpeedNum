@@ -281,7 +281,7 @@ async def delete_user(
 
     label = profile.full_name or profile.email
     is_portal = profile.client_id is not None
-    login_revoked = await accounts.revoke(profile) if revoke_login else False
+    login_revoked = await accounts.revoke(session, profile) if revoke_login else False
 
     if is_portal:
         client = await session.get(Client, profile.client_id)

@@ -15,10 +15,39 @@ class Settings(BaseSettings):
     environment: str = Field(default="production", alias="ENVIRONMENT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
-    # --- Supabase -------------------------------------------------------------
+    database_url: str = Field(default="", alias="DATABASE_URL")
+
+    # --- Authentication ----------------------------------------------------------
+    # "local" (default): this application's own Ed25519-signed JWTs, Argon2id
+    # password hashing, and rotating refresh tokens — see services/local_auth.py.
+    # "supabase": the previous Supabase Auth integration, kept as a documented,
+    # inactive-by-default rollback rather than deleted (see SECURITY.md).
+    auth_provider: str = Field(default="local", alias="AUTH_PROVIDER")
+
+    # PEM-encoded Ed25519 private key used to sign access tokens (see
+    # services/jwt_keys.py). Generate with: openssl genpkey -algorithm ed25519
+    # Left unset, a fresh key is generated at boot and a warning logged —
+    # every session is invalidated on the next restart, so this must be set
+    # for any real deployment.
+    jwt_private_key: str = Field(default="", alias="JWT_PRIVATE_KEY")
+    # Comma-is-not-used-here on purpose (PEM blocks contain no commas that
+    # would collide): retired public keys, still accepted for *verifying*
+    # not-yet-expired tokens signed before a rotation. See jwt_keys.py.
+    jwt_previous_public_keys: str = Field(default="", alias="JWT_PREVIOUS_PUBLIC_KEYS")
+
+    access_token_ttl_seconds: int = Field(default=900, alias="ACCESS_TOKEN_TTL_SECONDS")
+    refresh_token_ttl_seconds: int = Field(default=60 * 60 * 24 * 30, alias="REFRESH_TOKEN_TTL_SECONDS")
+
+    # The refresh token cookie's own name and attributes. SameSite=None
+    # because the frontend (Vercel) and this API are on different domains —
+    # a same-site default would never be sent on the cross-origin
+    # fetch(..., {credentials: "include"}) calls the frontend makes.
+    refresh_cookie_name: str = Field(default="sn_refresh", alias="REFRESH_COOKIE_NAME")
+    refresh_cookie_domain: str = Field(default="", alias="REFRESH_COOKIE_DOMAIN")
+
+    # --- Supabase (rollback only when AUTH_PROVIDER=supabase; see SECURITY.md) --
     # Pooler connection string, e.g.
     #   postgresql://postgres.<ref>:<password>@aws-0-ca-central-1.pooler.supabase.com:6543/postgres
-    database_url: str = Field(default="", alias="DATABASE_URL")
     supabase_url: str = Field(default="", alias="SUPABASE_URL")
     supabase_anon_key: str = Field(default="", alias="SUPABASE_ANON_KEY")
     supabase_service_role_key: str = Field(default="", alias="SUPABASE_SERVICE_ROLE_KEY")

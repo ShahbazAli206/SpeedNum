@@ -721,3 +721,36 @@ def invite_html(*, firm_name: str, url: str, brand_color: str = "#1d4ed8") -> st
   </div>
 </div>
 """
+
+
+def verify_email_html(*, url: str, brand_color: str = "#1d4ed8") -> str:
+    return f"""
+<div style="font-family:ui-sans-serif,system-ui,sans-serif;background:#f8fafc;padding:32px">
+  <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:14px;
+              border:1px solid #e2e8f0;padding:28px;color:#0f172a;line-height:1.6">
+    <h2 style="margin:0 0 12px;font-size:20px">Confirm your email address</h2>
+    <p style="margin:0 0 20px">Click below to verify your SpeedNum account. This link expires in 24 hours.</p>
+    <a href="{url}" style="display:inline-block;background:{brand_color};color:#fff;
+       text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600">Verify email</a>
+    <p style="margin:20px 0 0;font-size:13px;color:#64748b">
+      If you didn't create this account, you can ignore this email.</p>
+  </div>
+</div>
+"""
+
+
+def password_reset_html(*, url: str, brand_color: str = "#1d4ed8") -> str:
+    return f"""
+<div style="font-family:ui-sans-serif,system-ui,sans-serif;background:#f8fafc;padding:32px">
+  <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:14px;
+              border:1px solid #e2e8f0;padding:28px;color:#0f172a;line-height:1.6">
+    <h2 style="margin:0 0 12px;font-size:20px">Reset your password</h2>
+    <p style="margin:0 0 20px">Click below to choose a new password. This link expires in one hour
+       and can only be used once.</p>
+    <a href="{url}" style="display:inline-block;background:{brand_color};color:#fff;
+       text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600">Reset password</a>
+    <p style="margin:20px 0 0;font-size:13px;color:#64748b">
+      If you didn't request this, you can ignore this email — your password will not change.</p>
+  </div>
+</div>
+"""

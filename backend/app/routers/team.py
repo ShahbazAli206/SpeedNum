@@ -316,7 +316,7 @@ async def remove_member(
 
     # The profile is already deactivated, so access is blocked either way —
     # accounts.revoke reports a shortfall rather than failing the request.
-    login_revoked = await accounts.revoke(member) if revoke_login else False
+    login_revoked = await accounts.revoke(session, member) if revoke_login else False
 
     await audit.record(
         session,
