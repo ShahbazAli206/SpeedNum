@@ -400,20 +400,78 @@ cp api.env.example api.env && chmod 600 api.env && nano api.env
 
 # 4. Start it
 docker compose up -d --build
-curl -s localhost:8000/health          # expect {"status":"ok","database":"ok",...}
+# The api container publishes no host port (Caddy reaches it by container
+# name over the `web` network instead), so check from inside the container:
+docker compose exec -T api python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read().decode())"
 
-# 5. Apply migrations against the fresh, empty VPS Postgres (see "Applying
+# 5. Create the least-privilege application role — ONE TIME per fresh
+#    Postgres data directory, not on every deploy. See "Least-privilege
+#    database role" below for why this step exists at all.
+#    (Fill in POSTGRES_APP_USER/POSTGRES_APP_PASSWORD in .env first.)
+
+# 6. Apply migrations against the fresh, empty VPS Postgres (see "Applying
 #    migrations" below — this is a brand-new database, so it starts from
 #    nothing rather than needing a `baseline` step).
 docker compose run --rm migrate apply
 docker compose run --rm migrate status  # expect "Schema is up to date."
 
-# 6. Reverse proxy — add this app's site block to the VPS's existing Caddy
+# 7. Reverse proxy — add this app's site block to the VPS's existing Caddy
 #    (a separate compose project; see deploy/Caddyfile.example for why).
 scp Caddyfile.example deploy@2.25.108.16:/home/deploy/apps/caddy/Caddyfile
 ssh deploy@2.25.108.16 'docker exec caddy caddy validate --config /etc/caddy/Caddyfile'
 ssh deploy@2.25.108.16 'docker exec caddy caddy reload --config /etc/caddy/Caddyfile'
 ```
+
+### Least-privilege database role
+
+The official `postgres` Docker image makes `POSTGRES_USER` a full superuser at cluster init —
+`rolsuper`/`rolcreatedb`/`rolcreaterole`/`rolreplication`/`rolbypassrls` all `true`, with no
+image option to avoid it (confirmed by querying `pg_roles` on the live deploy). The
+application must not run as this role — see [`SECURITY.md`](SECURITY.md). Instead, `api`/
+`migrate` connect as a separate `POSTGRES_APP_USER` (`speednum_app` by default), created once
+against a fresh data directory:
+
+```bash
+cd /home/deploy/apps/speednum/deploy
+PG_PASS=$(grep POSTGRES_PASSWORD .env | cut -d= -f2)
+APP_PASS=$(grep POSTGRES_APP_PASSWORD .env | cut -d= -f2)  # fill this in first
+
+cat > /tmp/create_app_role.sql <<SQL
+do \$\$
+begin
+  if not exists (select from pg_roles where rolname = 'speednum_app') then
+    create role speednum_app with login password '${APP_PASS}';
+  else
+    alter role speednum_app with password '${APP_PASS}';
+  end if;
+end
+\$\$;
+alter database speednum owner to speednum_app;
+grant all privileges on database speednum to speednum_app;
+grant all on schema public to speednum_app;
+grant all privileges on all tables in schema public to speednum_app;
+grant all privileges on all sequences in schema public to speednum_app;
+grant execute on all functions in schema public to speednum_app;
+alter default privileges for role speednum_app in schema public grant all on tables to speednum_app;
+alter default privileges for role speednum_app in schema public grant all on sequences to speednum_app;
+alter default privileges for role speednum_app in schema public grant all on functions to speednum_app;
+SQL
+docker cp /tmp/create_app_role.sql speednum-postgres:/tmp/create_app_role.sql
+docker exec -e PGPASSWORD="$PG_PASS" speednum-postgres psql -U speednum -d speednum -f /tmp/create_app_role.sql
+rm -f /tmp/create_app_role.sql
+docker compose up -d --build api migrate  # picks up POSTGRES_APP_USER/PASSWORD
+```
+
+`ALTER DATABASE ... OWNER TO` grants `speednum_app` implicit `CREATE` on the `public` schema
+(via Postgres's `pg_database_owner` membership) so future migrations keep working without the
+role ever being a superuser; the explicit `GRANT`s cover objects that already existed before
+this role did. `REASSIGN OWNED BY` is deliberately **not** used here — it fails against objects
+the `pgcrypto`/`citext` extensions created ("required by the database system"), and isn't
+needed anyway once the grants above are in place.
+
+Verify: `docker exec speednum-api python -c "..."` querying `select current_user` should report
+`speednum_app`, and `pg_roles` should show all five privilege flags `f` for it (see
+`SECURITY.md` for the exact commands run to confirm this on the live deploy).
 
 Then point the frontend at it: set `NEXT_PUBLIC_API_URL=https://test.spidnums.com` on Vercel
 (no trailing slash, no `/api/v1` — the client appends it; swap to `api.spidnums.com` once that
