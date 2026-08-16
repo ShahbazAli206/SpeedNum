@@ -105,7 +105,7 @@ async def lifespan(app: FastAPI):
     try:
         async with engine.connect() as connection:
             await connection.execute(text("select 1"))
-        log.info("Connected to Supabase Postgres")
+        log.info("Connected to Postgres")
     except Exception as exc:  # noqa: BLE001 - the Space should still boot and report why
         log.error("Database connection failed at startup: %s", exc)
 
