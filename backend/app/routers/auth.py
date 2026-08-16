@@ -21,6 +21,7 @@ from ..models import Notification, Tenant
 from ..schemas import (
     AuthResult,
     BootstrapRequest,
+    ChangePasswordRequest,
     ForgotPasswordRequest,
     LoginRequest,
     MagicLoginRequest,
@@ -264,10 +265,29 @@ async def update_me(payload: ProfileUpdate, session: SessionDep, user: CurrentUs
 
 @router.post("/complete-password-change", response_model=ProfileRead)
 async def complete_password_change(session: SessionDep, user: CurrentUserDep) -> ProfileRead:
-    """Called after the client (or any user) has set a real password to
-    replace a temporary one, so the forced "set a new password" prompt does
-    not keep reappearing. Uses CurrentUserDep, not TenantUserDep — a
-    client-portal account must be able to call this about itself."""
+    """Flips must_change_password off without touching the password itself —
+    kept for the Supabase rollback path, where the frontend calls Supabase's
+    own updateUser() first and then just this. AUTH_PROVIDER=local's
+    ForcePasswordModal calls /auth/change-password instead, which does both
+    in one request. Uses CurrentUserDep, not TenantUserDep — a client-portal
+    account must be able to call this about itself."""
+    user.profile.must_change_password = False
+    await session.flush()
+    return ProfileRead.model_validate(user.profile)
+
+
+@router.post("/change-password", response_model=ProfileRead)
+async def change_password(
+    payload: ChangePasswordRequest, session: SessionDep, user: CurrentUserDep
+) -> ProfileRead:
+    """Sets a new password for the signed-in account and clears
+    must_change_password in one call — the local-auth equivalent of the
+    old Supabase updateUser() + complete-password-change pair. Uses
+    CurrentUserDep, not TenantUserDep — a client-portal account must be able
+    to call this about itself."""
+    await local_auth.change_own_password(
+        session, profile_id=user.profile.id, new_password=payload.new_password
+    )
     user.profile.must_change_password = False
     await session.flush()
     return ProfileRead.model_validate(user.profile)

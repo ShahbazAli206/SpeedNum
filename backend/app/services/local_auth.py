@@ -493,6 +493,24 @@ async def create_credentials(session: AsyncSession, *, profile_id: uuid.UUID, pa
     )
 
 
+async def change_own_password(session: AsyncSession, *, profile_id: uuid.UUID, new_password: str) -> None:
+    """The authenticated user replacing their own password (routers/auth.py's
+    /auth/change-password — used to retire an admin-issued temporary
+    password, or a general "change my password" action). Revokes every
+    refresh token including the one behind the current page's session, the
+    same defensive default as a forgot-password reset — the short-lived
+    access token already in the browser keeps working until it naturally
+    expires, so this doesn't abruptly log the user out mid-flow."""
+    await session.execute(
+        text(
+            "update public.auth_credentials set password_hash = :password_hash, "
+            "failed_logins = 0, locked_until = null where profile_id = :profile_id"
+        ),
+        {"password_hash": hash_password(new_password), "profile_id": profile_id},
+    )
+    await revoke_all_sessions(session, profile_id)
+
+
 async def admin_reset_password(session: AsyncSession, *, profile_id: uuid.UUID, password: str) -> None:
     await session.execute(
         text(

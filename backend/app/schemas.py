@@ -229,6 +229,16 @@ class VerifyEmailRequest(BaseModel):
     token: str = Field(min_length=1)
 
 
+class ChangePasswordRequest(BaseModel):
+    """No current-password check: this is the "replace an admin-issued
+    temporary password" flow, gated by already holding a valid session for
+    the account, not by the temporary password itself. A general
+    "change my password" settings feature might want to require the current
+    password too — not needed for the flow that exists today."""
+
+    new_password: str = Field(min_length=8, max_length=200)
+
+
 class MagicLoginRequest(BaseModel):
     token: str = Field(min_length=1)
 
