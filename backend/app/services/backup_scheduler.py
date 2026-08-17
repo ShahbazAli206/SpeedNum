@@ -33,7 +33,7 @@ from sqlalchemy import func, select, text
 
 from ..config import settings
 from ..db import SessionLocal
-from . import backup_snapshots
+from . import backup_retention, backup_snapshots
 
 log = logging.getLogger(__name__)
 
@@ -82,6 +82,14 @@ async def run_backup_once(*, trigger_source: str = "scheduled") -> dict[str, obj
             return {"locked_out": True}
 
         result = await backup_snapshots.run_backup(session, trigger_source=trigger_source, triggered_by=None)
+        if result.status == "ready":
+            # Same lock/session — retention runs right after a fresh snapshot
+            # lands, not on its own separate schedule, so there is only ever
+            # one place that decides "is it time to prune" to reason about.
+            try:
+                await backup_retention.run_retention_once(session)
+            except Exception:  # noqa: BLE001 - a retention failure must never fail the backup that just succeeded
+                log.exception("Backup retention sweep failed after snapshot %s", result.id)
         return {
             "locked_out": False,
             "snapshot_id": str(result.id),

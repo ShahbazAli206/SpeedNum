@@ -74,14 +74,20 @@ class Settings(BaseSettings):
     jwt_audience: str = Field(default="authenticated", alias="JWT_AUDIENCE")
 
     # --- Storage ----------------------------------------------------------------
-    # "supabase" keeps the original Supabase Storage REST signing path.
-    # "s3" targets any S3-compatible endpoint (MinIO on the VPS, or a managed
-    # bucket) — see services/storage_s3.py. Both implement the same
-    # create_upload_url/create_download_url/delete_object contract, so
-    # switching providers is a config change, not a code change; the frontend
-    # never sees which one is in effect (it just PUTs to whatever `url` comes
-    # back and never reads `token` unless the provider supplies one).
-    storage_provider: str = Field(default="supabase", alias="STORAGE_PROVIDER")
+    # "s3" (default): any S3-compatible endpoint — MinIO on the VPS, or a managed
+    # bucket — see services/storage_s3.py. "supabase" keeps the original Supabase
+    # Storage REST signing path as a documented, inactive-by-default rollback
+    # (see SECURITY.md's "Authentication decision"). Both implement the same
+    # create_upload_url/create_download_url/delete_object contract, so switching
+    # providers is a config change, not a code change; the frontend never sees
+    # which one is in effect (it just PUTs to whatever `url` comes back and never
+    # reads `token` unless the provider supplies one).
+    #
+    # Defaulting to "s3" rather than "supabase" matters beyond style: an unset
+    # STORAGE_PROVIDER on a fresh or misconfigured deploy must fail toward the
+    # self-hosted path, not silently attempt Supabase, which is otherwise out of
+    # the active request path entirely.
+    storage_provider: str = Field(default="s3", alias="STORAGE_PROVIDER")
 
     # Two separate endpoints on purpose. `s3_endpoint_url` is what the backend
     # dials directly (the internal Docker hostname, e.g. http://minio:9000) —
@@ -191,6 +197,12 @@ class Settings(BaseSettings):
     # Bucket for backup archives — deliberately separate from `s3_bucket`
     # (documents) so a policy mistake on one can never expose the other.
     backup_s3_bucket: str = Field(default="backups", alias="BACKUP_S3_BUCKET")
+    # How many ready snapshots to keep before services/backup_retention.py
+    # starts pruning the oldest — subject to the safety rules in that
+    # module's docstring (never below 1, never an ancestor a kept
+    # incremental snapshot depends on, never one with no confirmed off-VPS
+    # copy). At one snapshot/day this is roughly a month of history.
+    backup_retention_keep: int = Field(default=30, ge=1, alias="BACKUP_RETENTION_KEEP")
     # Set at deploy time (e.g. the git short SHA) so a backup manifest records
     # something meaningful. No clean source of truth existed before this.
     app_version: str = Field(default="dev", alias="APP_VERSION")

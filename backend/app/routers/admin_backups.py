@@ -20,16 +20,24 @@ import json
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from ..config import settings
 from ..deps import SessionDep, SuperadminDep, client_ip
-from ..services import backup_scheduler, storage_s3
+from ..services import backup_retention, backup_scheduler, storage_s3
+from ..services.rate_limit import rate_limit_by_ip
 from ..services.storage_errors import StorageError
+from .admin_devices import ActiveDeviceDep
 
 router = APIRouter(prefix="/admin/backups", tags=["admin"])
+
+# The data-exfiltration point (a stolen/compromised superadmin session or a
+# revoked device retrying) — worth its own limit distinct from ordinary
+# listing/triggering. 20/5min is generous for legitimate sync (4 components
+# per snapshot) while still bounding a scripted enumeration attempt.
+_download_url_rate_limit = rate_limit_by_ip("backup-download-url", limit=20, window_seconds=300)
 
 
 async def _audit(
@@ -41,12 +49,13 @@ async def _audit(
     snapshot_id: uuid.UUID | None = None,
     snapshot_sequence: int | None = None,
     detail: dict[str, Any] | None = None,
+    device_id: uuid.UUID | None = None,
 ) -> None:
     await session.execute(
         text(
             "insert into public.backup_audit_log "
-            "(snapshot_id, snapshot_sequence, actor_profile_id, action, detail, ip_address, user_agent) "
-            "values (:snapshot_id, :sequence, :actor, :action, cast(:detail as jsonb), :ip, :ua)"
+            "(snapshot_id, snapshot_sequence, actor_profile_id, action, detail, ip_address, user_agent, device_id) "
+            "values (:snapshot_id, :sequence, :actor, :action, cast(:detail as jsonb), :ip, :ua, :device_id)"
         ),
         {
             "snapshot_id": snapshot_id,
@@ -59,6 +68,7 @@ async def _audit(
             "detail": json.dumps(detail or {}),
             "ip": client_ip(request),
             "ua": request.headers.get("user-agent", "")[:500],
+            "device_id": device_id,
         },
     )
     await session.commit()
@@ -126,14 +136,19 @@ class DownloadUrlResponse(BaseModel):
     expires_in: int
 
 
-@router.post("/{snapshot_id}/download-url")
+@router.post("/{snapshot_id}/download-url", dependencies=[Depends(_download_url_rate_limit)])
 async def download_url(
     snapshot_id: uuid.UUID,
     component: str,
     session: SessionDep,
     user: SuperadminDep,
     request: Request,
+    device_id: ActiveDeviceDep,
 ) -> DownloadUrlResponse:
+    """Requires a registered, non-revoked device (see admin_devices.py) —
+    this is the actual bytes-exfiltration point, unlike listing or
+    triggering, which the web admin portal also needs to reach without a
+    registered device."""
     if component not in _ALLOWED_COMPONENTS:
         # A closed allow-list, not "whatever string the caller sent" — the
         # object key is built server-side from this value, so an unchecked
@@ -165,6 +180,7 @@ async def download_url(
         snapshot_id=row["id"],
         snapshot_sequence=row["sequence"],
         detail={"component": component},
+        device_id=device_id,
     )
     return DownloadUrlResponse(url=url, expires_in=settings.backup_download_ttl_seconds)
 
@@ -190,12 +206,14 @@ async def trigger_backup(session: SessionDep, user: SuperadminDep, request: Requ
 
 @router.post("/{snapshot_id}/ack-download")
 async def ack_download(
-    snapshot_id: uuid.UUID, session: SessionDep, user: SuperadminDep, request: Request
+    snapshot_id: uuid.UUID, session: SessionDep, user: SuperadminDep, request: Request, device_id: ActiveDeviceDep
 ) -> dict[str, Any]:
     """The desktop app confirms a full, checksum-verified download of every
-    component landed locally. This is what lets retention logic (not yet
-    triggered by anything automatic — see BACKUP_ARCHITECTURE.md) prefer
-    pruning snapshots that are known to exist somewhere off the VPS."""
+    component landed locally, tied to the specific device that has it
+    (backup_snapshot_devices) — this is what retention (services/
+    backup_retention.py) checks before ever pruning a snapshot: "the server
+    deleted its copy" must never mean "every copy is gone," so retention only
+    removes a snapshot once at least one still-active device confirmed one."""
     row = (
         await session.execute(
             text("select id, sequence from public.backup_snapshots where id = :id and status = 'ready'"),
@@ -209,9 +227,17 @@ async def ack_download(
         text("update public.backup_snapshots set downloaded_at = now() where id = :id"),
         {"id": snapshot_id},
     )
+    await session.execute(
+        text(
+            "insert into public.backup_snapshot_devices (snapshot_id, device_id) "
+            "values (:snapshot_id, :device_id) "
+            "on conflict (snapshot_id, device_id) do update set downloaded_at = now()"
+        ),
+        {"snapshot_id": snapshot_id, "device_id": device_id},
+    )
     await _audit(
         session, request=request, user=user, action="download_confirmed",
-        snapshot_id=row["id"], snapshot_sequence=row["sequence"],
+        snapshot_id=row["id"], snapshot_sequence=row["sequence"], device_id=device_id,
     )
     return {"ok": True}
 
@@ -221,6 +247,17 @@ class RestoreDrillResult(BaseModel):
     detail: dict[str, Any] = Field(default_factory=dict)
 
 
+@router.post("/retention/run")
+async def trigger_retention(session: SessionDep, user: SuperadminDep, request: Request) -> dict[str, Any]:
+    """Retention normally runs automatically right after each scheduled
+    snapshot (see backup_scheduler.py) — this exists for an operator who
+    wants to see the effect immediately, e.g. right after lowering
+    BACKUP_RETENTION_KEEP or confirming a batch of ack-downloads."""
+    result = await backup_retention.run_retention_once(session)
+    await _audit(session, request=request, user=user, action="prune", detail=result)
+    return result
+
+
 @router.post("/{snapshot_id}/restore-drill")
 async def report_restore_drill(
     snapshot_id: uuid.UUID,
@@ -228,6 +265,7 @@ async def report_restore_drill(
     session: SessionDep,
     user: SuperadminDep,
     request: Request,
+    device_id: ActiveDeviceDep,
 ) -> dict[str, Any]:
     """The desktop app reports the outcome of a restore drill it ran locally
     against a disposable Docker stack (see BACKUP_ARCHITECTURE.md) — this
@@ -252,5 +290,6 @@ async def report_restore_drill(
     await _audit(
         session, request=request, user=user, action="restore_drill_result",
         snapshot_id=row["id"], snapshot_sequence=row["sequence"], detail=payload.detail | {"ok": payload.ok},
+        device_id=device_id,
     )
     return {"ok": True}

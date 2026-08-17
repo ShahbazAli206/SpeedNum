@@ -18,6 +18,7 @@ from .db import engine
 from .routers import (
     admin,
     admin_backups,
+    admin_devices,
     auth,
     client_documents,
     client_expenses,
@@ -67,7 +68,7 @@ def _warn_about_configuration() -> None:
             "CORS_ORIGINS=https://your-app.vercel.app"
         )
     using_supabase_auth = (settings.auth_provider or "local").strip().lower() == "supabase"
-    using_supabase_storage = (settings.storage_provider or "supabase").strip().lower() == "supabase"
+    using_supabase_storage = (settings.storage_provider or "s3").strip().lower() == "supabase"
     if settings.is_production and (using_supabase_auth or using_supabase_storage) and not settings.supabase_service_role_key:
         what = " and ".join(
             filter(
@@ -182,6 +183,7 @@ for router in (
     settings_router.router,
     admin.router,
     admin_backups.router,
+    admin_devices.router,
     portal.router,
     public.router,
     client_invoices.router,
@@ -235,14 +237,14 @@ async def root() -> str:
   <body>
     <div class="card">
       <h1>SpeedNum API <small style="color:#64748b">v{__version__}</small></h1>
-      <p>Practice-management backend for accounting firms. This Space serves the JSON API
+      <p>Practice-management backend for accounting firms. This API serves the JSON API
          consumed by the SpeedNum web app.</p>
       <p>
         <a href="/docs">Interactive docs</a> &middot;
         <a href="/redoc">ReDoc</a> &middot;
         <a href="/health">Health</a>
       </p>
-      <p>All endpoints live under <code>{API_PREFIX}</code> and expect a Supabase
+      <p>All endpoints live under <code>{API_PREFIX}</code> and expect a SpeedNum
          access token in the <code>Authorization: Bearer</code> header.</p>
     </div>
   </body>
