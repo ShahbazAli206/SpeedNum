@@ -1,14 +1,15 @@
 "use client";
 
 /**
- * Live firm branding for the staff app.
- *
- * globals.css documents the intent ("Firm branding may override --brand at
- * runtime from the tenant record") but nothing wired it up until now. There is
- * no tenant-settings API for this demo shell to call, so the Settings page
- * writes here instead: colours and font apply immediately, app-wide, via CSS
- * custom properties, and persist to localStorage so they survive a reload —
- * the same trick FirmShell already uses for the collapsed-rail preference.
+ * Live firm branding for the staff app, backed by the real tenant record
+ * (`GET/PATCH /settings/tenant`) rather than localStorage — the tenant's
+ * `brand_color`/`accent_color` are the same fields emails (letter_invite_html,
+ * portal.py's PortalBrand) and the engagement-letter PDF already read, so a
+ * change here now actually reaches those surfaces instead of being a
+ * per-browser-only visual preference. Colour/font apply immediately via CSS
+ * custom properties, same as before; `font`/`tagline`/`phone`/`address` have
+ * no first-class Tenant column, so they ride in the tenant's own free-form
+ * `settings` JSONB (already exists for exactly this kind of extra field).
  */
 
 import {
@@ -19,9 +20,9 @@ import {
   type ReactNode,
 } from "react";
 
-import { FIRM } from "@/lib/firm-demo";
-
-const STORAGE_KEY = "speednum-firm-branding";
+import { patch } from "@/lib/api";
+import { useSession } from "@/lib/session";
+import type { Tenant } from "@/lib/types";
 
 export interface FontOption {
   value: string;
@@ -52,37 +53,38 @@ export interface FirmBranding {
   phone: string;
   email: string;
   address: string;
-  logoDataUrl: string | null;
+  logoUrl: string;
 }
 
-export const DEFAULT_BRANDING: FirmBranding = {
-  name: FIRM.name,
-  tagline: "Tax, Accounting & Compliance",
-  primary: "#0a8f4e",
-  primaryDark: "#077a42",
+export const FALLBACK_BRANDING: FirmBranding = {
+  name: "Your Firm",
+  tagline: "",
+  primary: "#1d4ed8",
+  primaryDark: "#0f172a",
   font: "default",
-  phone: "+1 (416) 555-0100",
-  email: "hello@harrisoncpa.ca",
-  address: `${FIRM.city}, ${FIRM.province} · Canada`,
-  logoDataUrl: null,
+  phone: "",
+  email: "",
+  address: "",
+  logoUrl: "",
 };
 
-function loadBranding(): FirmBranding {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_BRANDING;
-    return { ...DEFAULT_BRANDING, ...JSON.parse(raw) };
-  } catch {
-    return DEFAULT_BRANDING;
-  }
-}
-
-function saveBranding(branding: FirmBranding) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(branding));
-  } catch {
-    // Private-mode quota failure — the in-memory value still applies this session.
-  }
+function fromTenant(tenant: Tenant | null): FirmBranding {
+  if (!tenant) return FALLBACK_BRANDING;
+  const extra = (tenant.settings ?? {}) as Record<string, unknown>;
+  return {
+    name: tenant.name,
+    tagline: typeof extra.tagline === "string" ? extra.tagline : "",
+    primary: tenant.brand_color || FALLBACK_BRANDING.primary,
+    primaryDark: tenant.accent_color || FALLBACK_BRANDING.primaryDark,
+    font: typeof extra.font === "string" ? extra.font : "default",
+    phone: tenant.phone || "",
+    email: tenant.email || "",
+    address:
+      typeof extra.address === "string"
+        ? extra.address
+        : [tenant.city, tenant.province].filter(Boolean).join(", "),
+    logoUrl: tenant.logo_url || "",
+  };
 }
 
 const FONT_LINK_ID = "firm-branding-font";
@@ -121,29 +123,45 @@ function applyBranding(branding: FirmBranding) {
 
 const BrandingContext = createContext<{
   branding: FirmBranding;
-  setBranding: (next: FirmBranding) => void;
+  /** Persists to the tenant record via PATCH /settings/tenant (admin-only —
+   * the backend enforces this regardless of what the form shows) and
+   * re-themes immediately on success. Throws on failure so the caller's
+   * save button can show a real error instead of a fabricated success toast. */
+  saveBranding: (next: FirmBranding) => Promise<void>;
 } | null>(null);
 
 export function FirmBrandingProvider({ children }: { children: ReactNode }) {
-  const [branding, setBrandingState] = useState<FirmBranding>(DEFAULT_BRANDING);
+  const { me, refresh } = useSession();
+  const [branding, setBrandingState] = useState<FirmBranding>(FALLBACK_BRANDING);
 
   useEffect(() => {
-    const loaded = loadBranding();
-    // One-shot read of an external store the server cannot see, applied
-    // immediately so the very first paint on this device is already themed.
+    const next = fromTenant(me?.tenant ?? null);
+    // One-shot sync from an external store (the session's tenant fetch) the
+    // server render can't see, applied immediately so the first paint on
+    // this device already reflects the saved brand colours.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setBrandingState(loaded);
-    applyBranding(loaded);
-  }, []);
-
-  const setBranding = (next: FirmBranding) => {
     setBrandingState(next);
-    saveBranding(next);
     applyBranding(next);
+  }, [me?.tenant]);
+
+  const saveBranding = async (next: FirmBranding) => {
+    const previousSettings = (me?.tenant?.settings ?? {}) as Record<string, unknown>;
+    await patch("/settings/tenant", {
+      name: next.name,
+      phone: next.phone || null,
+      email: next.email || null,
+      brand_color: next.primary,
+      accent_color: next.primaryDark,
+      logo_url: next.logoUrl || null,
+      settings: { ...previousSettings, tagline: next.tagline, font: next.font, address: next.address },
+    });
+    setBrandingState(next);
+    applyBranding(next);
+    refresh(); // re-pulls /auth/me so other components (sidebar name, etc.) see the change too
   };
 
   return (
-    <BrandingContext.Provider value={{ branding, setBranding }}>{children}</BrandingContext.Provider>
+    <BrandingContext.Provider value={{ branding, saveBranding }}>{children}</BrandingContext.Provider>
   );
 }
 

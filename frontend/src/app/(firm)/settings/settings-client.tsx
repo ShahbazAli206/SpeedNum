@@ -6,9 +6,10 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useToast } from "@/components/toast";
 import { Button, Checkbox, Field, Input, Select } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import { post } from "@/lib/api";
 
 import {
-  DEFAULT_BRANDING,
+  FALLBACK_BRANDING,
   FONT_OPTIONS,
   useBranding,
   type FirmBranding,
@@ -40,14 +41,16 @@ function loadAlerts(): AlertPrefs {
 
 export function SettingsClient() {
   const toast = useToast();
-  const { branding, setBranding } = useBranding();
+  const { branding, saveBranding } = useBranding();
 
   const [form, setForm] = useState<FirmBranding>(branding);
+  const [saving, setSaving] = useState(false);
+  const [sendingTest, setSendingTest] = useState(false);
   const [alerts, setAlerts] = useState<AlertPrefs>(DEFAULT_ALERTS);
 
-  // Sync once the provider has hydrated from localStorage (it starts from
-  // DEFAULT_BRANDING on first render, then applies the saved value an effect
-  // later) — without this the form would keep showing stale defaults.
+  // Sync once the provider has hydrated from the tenant record (it starts
+  // from FALLBACK_BRANDING on first render, then applies the real value once
+  // /auth/me resolves) — without this the form would keep showing stale defaults.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setForm(branding);
@@ -63,13 +66,23 @@ export function SettingsClient() {
     setForm((current) => ({ ...current, [key]: value }));
   };
 
-  const saveBranding = () => {
+  const handleSaveBranding = async () => {
     if (!form.name.trim()) {
       toast.error("Firm name is required");
       return;
     }
-    setBranding(form);
-    toast.success("Branding saved", "Applied across your portal, emails and engagement letters.");
+    setSaving(true);
+    try {
+      await saveBranding(form);
+      toast.success("Branding saved", "Applied across your portal, emails and engagement letters.");
+    } catch (error) {
+      toast.error(
+        "Couldn't save branding",
+        error instanceof Error ? error.message : "Something went wrong. Try again.",
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   const saveAlerts = () => {
@@ -81,11 +94,27 @@ export function SettingsClient() {
     toast.success("Alert preferences saved");
   };
 
-  const sendNow = () => {
-    toast.info(
-      "Alerts not sent",
-      "Delivering the digest needs the Email integration wired to a real mail server.",
-    );
+  const sendNow = async () => {
+    if (!alerts.recipient.trim()) {
+      toast.error("Enter an alert recipient email first");
+      return;
+    }
+    setSendingTest(true);
+    try {
+      const result = await post<{ ok: boolean; message: string; error: string | null }>(
+        "/settings/email/test",
+        { to: alerts.recipient },
+      );
+      if (result.ok) {
+        toast.success("Test email sent", result.message);
+      } else {
+        toast.error("Delivery failed", result.error || result.message);
+      }
+    } catch (error) {
+      toast.error("Couldn't send test email", error instanceof Error ? error.message : "Try again.");
+    } finally {
+      setSendingTest(false);
+    }
   };
 
   return (
@@ -104,10 +133,10 @@ export function SettingsClient() {
           className="flex items-center gap-3.5 rounded-xl p-5 text-white shadow-[var(--shadow-card)] transition-[background]"
           style={{ background: `linear-gradient(135deg, ${form.primary} 0%, ${form.primaryDark} 100%)` }}
         >
-          {form.logoDataUrl ? (
+          {form.logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={form.logoDataUrl}
+              src={form.logoUrl}
               alt=""
               className="size-11 shrink-0 rounded-lg bg-white/90 object-contain p-1"
             />
@@ -124,7 +153,7 @@ export function SettingsClient() {
 
         <div className="mt-5">
           <p className="mb-1.5 text-[13px] font-medium text-ink-soft">Logo</p>
-          <LogoDropzone value={form.logoDataUrl} onChange={(value) => update("logoDataUrl", value)} />
+          <LogoDropzone value={form.logoUrl || null} onChange={(value) => update("logoUrl", value ?? "")} />
         </div>
 
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -138,13 +167,13 @@ export function SettingsClient() {
             label="Primary colour"
             value={form.primary}
             onChange={(value) => update("primary", value)}
-            placeholder={DEFAULT_BRANDING.primary}
+            placeholder={FALLBACK_BRANDING.primary}
           />
           <ColorField
             label="Primary (dark)"
             value={form.primaryDark}
             onChange={(value) => update("primaryDark", value)}
-            placeholder={DEFAULT_BRANDING.primaryDark}
+            placeholder={FALLBACK_BRANDING.primaryDark}
           />
           <Field label="Font family">
             <Select
@@ -172,7 +201,7 @@ export function SettingsClient() {
         </div>
 
         <div className="mt-5">
-          <Button icon={<Save className="size-4" />} onClick={saveBranding}>
+          <Button icon={<Save className="size-4" />} loading={saving} onClick={handleSaveBranding}>
             Save branding
           </Button>
         </div>
@@ -211,8 +240,13 @@ export function SettingsClient() {
           <Button icon={<Save className="size-4" />} onClick={saveAlerts}>
             Save
           </Button>
-          <Button variant="secondary" icon={<Mail className="size-4" />} onClick={sendNow}>
-            Send alerts now
+          <Button
+            variant="secondary"
+            icon={<Mail className="size-4" />}
+            loading={sendingTest}
+            onClick={sendNow}
+          >
+            Send test email
           </Button>
         </div>
       </Section>
@@ -270,7 +304,7 @@ function ColorField({
       <div className="flex items-center gap-2">
         <input
           type="color"
-          value={/^#[0-9a-fA-F]{6}$/.test(value) ? value : DEFAULT_BRANDING.primary}
+          value={/^#[0-9a-fA-F]{6}$/.test(value) ? value : FALLBACK_BRANDING.primary}
           onChange={(event) => onChange(event.target.value)}
           aria-label={label}
           className="size-9.5 shrink-0 cursor-pointer rounded-lg border border-line-strong bg-transparent p-0.5"
