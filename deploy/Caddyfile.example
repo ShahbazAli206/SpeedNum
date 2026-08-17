@@ -37,6 +37,14 @@ test.spidnums.com {
 		reverse_proxy speednum-minio:9000
 	}
 
+	# Same reasoning as /documents/* above, for the separate backups bucket
+	# (config.py's BACKUP_S3_BUCKET) — disaster-recovery snapshot downloads,
+	# also presigned-URL-only, also never rewritten. If BACKUP_S3_BUCKET is
+	# ever changed from "backups", update this matcher too.
+	handle /backups/* {
+		reverse_proxy speednum-minio:9000
+	}
+
 	handle {
 		# 12MB: the same limit the previously-written (never deployed)
 		# nginx config carried — the API itself never receives a document
@@ -86,6 +94,10 @@ test.spidnums.com {
 #
 # api.spidnums.com {
 # 	handle /documents/* {
+# 		reverse_proxy speednum-minio:9000
+# 	}
+#
+# 	handle /backups/* {
 # 		reverse_proxy speednum-minio:9000
 # 	}
 #
