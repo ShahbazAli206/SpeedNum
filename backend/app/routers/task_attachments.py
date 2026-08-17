@@ -52,6 +52,14 @@ def _mint_path(tenant_id: uuid.UUID, task_id: uuid.UUID, name: str) -> str:
     return f"{tenant_id}/tasks/{task_id}/{uuid.uuid4()}-{safe[:120]}"
 
 
+def _owns_storage_path(tenant_id: uuid.UUID, task_id: uuid.UUID, storage_path: str) -> bool:
+    """A registered attachment's storage_path must fall under this exact
+    tenant+task prefix minted by `_mint_path` above — otherwise a caller could
+    register a row pointing at an object outside this task (or another
+    tenant's) without ever calling upload-url for it."""
+    return storage_path.startswith(f"{tenant_id}/tasks/{task_id}/")
+
+
 def _storage_unavailable(exc: storage.StorageError) -> HTTPException:
     return HTTPException(status.HTTP_424_FAILED_DEPENDENCY, str(exc))
 
@@ -103,8 +111,7 @@ async def register_attachment(
 ) -> TaskAttachmentRead:
     task = await _load_task(session, user, task_id)
 
-    expected_prefix = f"{user.tenant_id}/tasks/{task_id}/"
-    if not payload.storage_path.startswith(expected_prefix):
+    if not _owns_storage_path(user.tenant_id, task_id, payload.storage_path):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "storage_path must come from POST /tasks/{task_id}/attachments/upload-url.",

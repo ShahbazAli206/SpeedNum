@@ -20,6 +20,31 @@ OPEN_TASK_STATES = ("todo", "in_progress", "review", "blocked")
 PERIODS_PER_YEAR = {"annual": 1, "semi_annual": 2, "quarterly": 4, "monthly": 12, "one_time": 1}
 
 
+def summarise_invoice_revenue(rows: list[tuple[str, object]]) -> RevenueSummary:
+    """Turn `(status, sum(amount+tax))` rows — already grouped by status and
+    already excluding void invoices — into the four real, invoice-derived
+    figures. An unpaid invoice is never counted as paid (section 20's explicit
+    requirement); `outstanding` is everything not yet paid, `overdue` is the
+    subset of that which is also overdue, so `overdue <= outstanding` always.
+    """
+    summary = RevenueSummary()
+    for invoice_status, total in rows:
+        amount = as_float(total)
+        summary.invoiced += amount
+        if invoice_status == "paid":
+            summary.paid += amount
+        elif invoice_status == "sent":
+            summary.outstanding += amount
+        elif invoice_status == "overdue":
+            summary.outstanding += amount
+            summary.overdue += amount
+    summary.invoiced = round(summary.invoiced, 2)
+    summary.paid = round(summary.paid, 2)
+    summary.outstanding = round(summary.outstanding, 2)
+    summary.overdue = round(summary.overdue, 2)
+    return summary
+
+
 @router.get("/dashboard", response_model=DashboardResponse)
 async def dashboard(session: SessionDep, user: TenantUserDep) -> DashboardResponse:
     tenant_id = user.tenant_id
@@ -105,21 +130,7 @@ async def dashboard(session: SessionDep, user: TenantUserDep) -> DashboardRespon
             .group_by(ClientInvoice.status)
         )
     ).all()
-    revenue_summary = RevenueSummary()
-    for invoice_status, total in invoice_rows:
-        amount = as_float(total)
-        revenue_summary.invoiced += amount
-        if invoice_status == "paid":
-            revenue_summary.paid += amount
-        elif invoice_status == "sent":
-            revenue_summary.outstanding += amount
-        elif invoice_status == "overdue":
-            revenue_summary.outstanding += amount
-            revenue_summary.overdue += amount
-    revenue_summary.invoiced = round(revenue_summary.invoiced, 2)
-    revenue_summary.paid = round(revenue_summary.paid, 2)
-    revenue_summary.outstanding = round(revenue_summary.outstanding, 2)
-    revenue_summary.overdue = round(revenue_summary.overdue, 2)
+    revenue_summary = summarise_invoice_revenue(invoice_rows)
 
     upcoming_rows = (
         await session.execute(
