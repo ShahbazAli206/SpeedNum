@@ -1,0 +1,14 @@
+{
+  "name": "speednum-desktop",
+  "version": "0.1.0",
+  "description": "SpeedNum admin desktop — encrypted disaster-recovery backup sync, restore drills, and a thin admin overview. Talks only to the same authenticated FastAPI backend every other SpeedNum client uses; never touches Postgres or MinIO directly.",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/"
+  },
+  "devDependencies": {
+    "electron": "^43.4.0"
+  }
+}

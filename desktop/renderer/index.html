@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>SpeedNum Desktop</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';" />
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, Segoe UI, sans-serif; margin: 0; background: #f6f7f9; color: #1e293b; }
+  header { padding: 16px 24px; background: #0f172a; color: white; display: flex; justify-content: space-between; align-items: center; }
+  header h1 { font-size: 16px; margin: 0; }
+  main { padding: 24px; max-width: 960px; margin: 0 auto; }
+  .card { background: white; border-radius: 10px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; margin-top: 12px; }
+  input { width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
+  button { background: #1d4ed8; color: white; border: none; padding: 9px 16px; border-radius: 6px; font-size: 14px; cursor: pointer; margin-top: 12px; }
+  button.secondary { background: #64748b; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid #e2e8f0; }
+  .status-ok { color: #16a34a; }
+  .status-failed { color: #dc2626; }
+  .hidden { display: none; }
+  #log { font-family: monospace; font-size: 12px; background: #0f172a; color: #86efac; padding: 12px; border-radius: 6px; height: 120px; overflow-y: auto; white-space: pre-wrap; }
+  .error { color: #dc2626; font-size: 13px; margin-top: 8px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>SpeedNum Desktop — Disaster Recovery</h1>
+    <button id="logoutBtn" class="secondary hidden">Sign out</button>
+  </header>
+  <main>
+    <section id="loginView" class="card">
+      <h2>Sign in</h2>
+      <p style="color:#64748b;font-size:13px">Superadmin credentials only — this app manages disaster-recovery backups.</p>
+      <label>Backend URL</label>
+      <input id="baseUrl" value="https://test.spidnums.com" />
+      <label>Email</label>
+      <input id="email" type="email" />
+      <label>Password</label>
+      <input id="password" type="password" />
+      <button id="loginBtn">Sign in</button>
+      <div id="loginError" class="error"></div>
+    </section>
+
+    <section id="dashboardView" class="hidden">
+      <div class="card">
+        <h2>Sync status</h2>
+        <div id="syncStatus">Loading…</div>
+        <label>Backup password (used to encrypt local backups — never sent to the server)</label>
+        <input id="backupPassword" type="password" />
+        <button id="syncNowBtn">Sync now</button>
+        <button id="triggerBackupBtn" class="secondary">Trigger a new server-side backup</button>
+        <div id="log"></div>
+      </div>
+
+      <div class="card">
+        <h2>Snapshots</h2>
+        <table>
+          <thead><tr><th>#</th><th>Status</th><th>Kind</th><th>Created</th><th>Downloaded</th><th>Last drill</th></tr></thead>
+          <tbody id="backupRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
