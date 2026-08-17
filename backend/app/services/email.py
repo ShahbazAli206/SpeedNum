@@ -396,6 +396,46 @@ def letter_invite_html(
 """
 
 
+def task_assigned_html(
+    *,
+    firm_name: str,
+    assignee_name: str,
+    task_title: str,
+    due_date: str | None,
+    client_name: str | None,
+    url: str,
+    brand_color: str = "#1d4ed8",
+) -> str:
+    details = []
+    if client_name:
+        details.append(f"Client: {client_name}")
+    if due_date:
+        details.append(f"Due: {due_date}")
+    detail_line = " &middot; ".join(details)
+    return f"""
+<div style="font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+            background:#f8fafc;padding:32px">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:14px;
+              border:1px solid #e2e8f0;overflow:hidden">
+    <div style="background:{brand_color};padding:20px 28px;color:#fff;font-weight:600;font-size:18px">
+      {firm_name}
+    </div>
+    <div style="padding:28px;color:#0f172a;line-height:1.6">
+      <p style="margin:0 0 12px">Hello {assignee_name},</p>
+      <p style="margin:0 0 20px">A task has been assigned to you.</p>
+      <p style="margin:0 0 24px;font-size:15px">
+        <strong>{task_title}</strong>
+        {f'<br /><span style="color:#64748b;font-size:13px">{detail_line}</span>' if detail_line else ""}
+      </p>
+      <a href="{url}"
+         style="display:inline-block;background:{brand_color};color:#fff;text-decoration:none;
+                padding:12px 22px;border-radius:8px;font-weight:600">View task</a>
+    </div>
+  </div>
+</div>
+"""
+
+
 def _friendly_date(iso: str) -> str:
     """2026-04-30 → 30 April 2026. Falls back to the raw value if unparseable,
     because a slightly ugly date in an email beats a crash while sending it."""

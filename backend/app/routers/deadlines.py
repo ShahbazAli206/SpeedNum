@@ -207,28 +207,43 @@ async def delete_deadline(deadline_id: uuid.UUID, session: SessionDep, user: Ten
     return Ok(message="Deadline removed")
 
 
-@router.post("/deadlines/generate", response_model=DeadlineGenerateResult)
-async def generate(
-    payload: DeadlineGenerateRequest, session: SessionDep, user: TenantUserDep, request: Request
+async def generate_deadlines(
+    session: SessionDep,
+    *,
+    tenant_id: uuid.UUID,
+    actor_id: uuid.UUID | None,
+    actor_email: str | None,
+    client_id: uuid.UUID | None = None,
+    horizon_months: int = 18,
+    ip_address: str | None = None,
+    notify: bool = True,
 ) -> DeadlineGenerateResult:
-    """Project every active service assignment forward into dated obligations."""
+    """Project every active service assignment forward into dated obligations.
+
+    Extracted from the `POST /deadlines/generate` endpoint so
+    `routers/services.py`'s `assign_service` can call the exact same
+    dedup-safe logic scoped to one client right after creating the
+    assignment, instead of leaving deadline generation as a separate
+    manual step an admin has to remember to run (section 13's "the system
+    must automatically establish the appropriate task/deadline lifecycle").
+    """
     today = today_utc()
     window_start = today - timedelta(days=90)
-    window_end = today + timedelta(days=int(payload.horizon_months * 30.5))
+    window_end = today + timedelta(days=int(horizon_months * 30.5))
 
     stmt = (
         select(ClientService, Client, Service)
         .join(Client, Client.id == ClientService.client_id)
         .join(Service, Service.id == ClientService.service_id)
         .where(
-            ClientService.tenant_id == user.tenant_id,
+            ClientService.tenant_id == tenant_id,
             ClientService.is_active.is_(True),
             Service.is_active.is_(True),
             Client.status.in_(("active", "prospect")),
         )
     )
-    if payload.client_id:
-        stmt = stmt.where(ClientService.client_id == payload.client_id)
+    if client_id:
+        stmt = stmt.where(ClientService.client_id == client_id)
 
     assignments = (await session.execute(stmt)).all()
     if not assignments:
@@ -266,7 +281,7 @@ async def generate(
                 continue
             session.add(
                 Deadline(
-                    tenant_id=user.tenant_id,
+                    tenant_id=tenant_id,
                     client_id=client.id,
                     service_id=service.id,
                     client_service_id=assignment.id,
@@ -287,25 +302,41 @@ async def generate(
     if created:
         await audit.record(
             session,
-            tenant_id=user.tenant_id,
-            actor_id=user.profile.id,
-            actor_email=user.profile.email,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            actor_email=actor_email,
             action="generated",
             entity="deadline",
             summary=f"Generated {created} deadline(s) across {len(clients)} client(s)",
             metadata={"created": created, "skipped": skipped},
-            ip_address=client_ip(request),
+            ip_address=ip_address,
         )
-        await audit.notify(
-            session,
-            tenant_id=user.tenant_id,
-            type="deadline",
-            title=f"{created} new deadlines added to your calendar",
-            body=f"Covering {len(clients)} client(s) over the next {payload.horizon_months} months.",
-            link="/deadlines",
-        )
+        if notify:
+            await audit.notify(
+                session,
+                tenant_id=tenant_id,
+                type="deadline",
+                title=f"{created} new deadlines added to your calendar",
+                body=f"Covering {len(clients)} client(s) over the next {horizon_months} months.",
+                link="/deadlines",
+            )
 
     return DeadlineGenerateResult(created=created, skipped=skipped, clients_processed=len(clients))
+
+
+@router.post("/deadlines/generate", response_model=DeadlineGenerateResult)
+async def generate(
+    payload: DeadlineGenerateRequest, session: SessionDep, user: TenantUserDep, request: Request
+) -> DeadlineGenerateResult:
+    return await generate_deadlines(
+        session,
+        tenant_id=user.tenant_id,
+        actor_id=user.profile.id,
+        actor_email=user.profile.email,
+        client_id=payload.client_id,
+        horizon_months=payload.horizon_months,
+        ip_address=client_ip(request),
+    )
 
 
 @router.post("/deadlines/{deadline_id}/workflow", response_model=ProjectRead, status_code=201)

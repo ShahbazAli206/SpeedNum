@@ -8,8 +8,8 @@ from fastapi import APIRouter
 from sqlalchemy import desc, func, select
 
 from ..deps import SessionDep, TenantUserDep
-from ..models import AuditLog, Client, ClientService, Deadline, EngagementLetter, Profile, Service, Task
-from ..schemas import AuditLogRead, DashboardResponse, DeadlineBuckets
+from ..models import AuditLog, Client, ClientInvoice, ClientService, Deadline, EngagementLetter, Profile, Service, Task
+from ..schemas import AuditLogRead, DashboardResponse, DeadlineBuckets, RevenueSummary
 from ..services.deadlines import urgency_for
 from ..utils import as_float, profile_names, today_utc
 from .deadlines import _decorate
@@ -92,6 +92,35 @@ async def dashboard(session: SessionDep, user: TenantUserDep) -> DashboardRespon
         unit = as_float(price if price is not None else default_price)
         revenue += unit * PERIODS_PER_YEAR.get(override or frequency, 1)
 
+    # Real invoice-derived figures, distinct from the contract-value
+    # projection above — an unpaid invoice is never counted as paid revenue
+    # (section 20's explicit requirement). `total` is amount+tax so
+    # outstanding/overdue reflect what a client actually owes, not the
+    # pre-tax line-item price.
+    invoice_total = (ClientInvoice.amount + ClientInvoice.tax)
+    invoice_rows = (
+        await session.execute(
+            select(ClientInvoice.status, func.coalesce(func.sum(invoice_total), 0))
+            .where(ClientInvoice.tenant_id == tenant_id, ClientInvoice.status != "void")
+            .group_by(ClientInvoice.status)
+        )
+    ).all()
+    revenue_summary = RevenueSummary()
+    for invoice_status, total in invoice_rows:
+        amount = as_float(total)
+        revenue_summary.invoiced += amount
+        if invoice_status == "paid":
+            revenue_summary.paid += amount
+        elif invoice_status == "sent":
+            revenue_summary.outstanding += amount
+        elif invoice_status == "overdue":
+            revenue_summary.outstanding += amount
+            revenue_summary.overdue += amount
+    revenue_summary.invoiced = round(revenue_summary.invoiced, 2)
+    revenue_summary.paid = round(revenue_summary.paid, 2)
+    revenue_summary.outstanding = round(revenue_summary.outstanding, 2)
+    revenue_summary.overdue = round(revenue_summary.overdue, 2)
+
     upcoming_rows = (
         await session.execute(
             select(Deadline, Client.legal_name, Service.code)
@@ -157,6 +186,7 @@ async def dashboard(session: SessionDep, user: TenantUserDep) -> DashboardRespon
         tasks_due_this_week=tasks_due_this_week,
         letters_awaiting_signature=letters_awaiting,
         revenue_under_contract=round(revenue, 2),
+        revenue=revenue_summary,
         next_deadlines=next_deadlines,
         recent_activity=recent_activity,
         workload=workload,

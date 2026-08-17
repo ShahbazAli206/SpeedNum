@@ -9,6 +9,7 @@ from sqlalchemy import func, select, text
 
 from ..deps import AdminUserDep, SessionDep, TenantUserDep, client_ip
 from ..models import Client, ClientService, Deadline, Service
+from .deadlines import generate_deadlines
 from ..schemas import (
     ClientServiceCreate,
     ClientServiceRead,
@@ -194,6 +195,25 @@ async def assign_service(
         entity_id=assignment.id,
         summary=f"Assigned {service.name} to {client.legal_name}",
         ip_address=client_ip(request),
+    )
+
+    # Project this one assignment forward into dated deadlines immediately,
+    # rather than leaving it to the next manually-triggered /deadlines/generate
+    # run — an admin assigning "Monthly Accounting" expects the compliance
+    # calendar to reflect it right away, not after a separate step they have
+    # to remember. Scoped to this client only (cheap; the dedup-safe
+    # generator would otherwise redo every other client's projection too),
+    # and silent (notify=False) since a single-assignment deadline batch
+    # isn't worth its own "N deadlines added" notification on top of the
+    # "assigned" audit entry just above.
+    await generate_deadlines(
+        session,
+        tenant_id=user.tenant_id,
+        actor_id=user.profile.id,
+        actor_email=user.profile.email,
+        client_id=client.id,
+        ip_address=client_ip(request),
+        notify=False,
     )
 
     names = await profile_names(session, user.tenant_id)

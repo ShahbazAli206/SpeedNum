@@ -8,8 +8,10 @@ from datetime import date, timedelta
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select
 
+from ..config import settings
 from ..deps import SessionDep, TenantUserDep, client_ip
-from ..models import Client, Project, Task
+from ..models import Client, Profile, Project, Task
+from ..services.email import deliver, task_assigned_html
 from ..schemas import (
     Ok,
     ProjectCreate,
@@ -207,6 +209,46 @@ async def _next_position(session: SessionDep, tenant_id: uuid.UUID, status_value
     return (current or 0) + 1
 
 
+async def _notify_assignee(session: SessionDep, *, tenant_id: uuid.UUID, tenant_name: str, task: Task) -> None:
+    """In-app notification always; email only if the assignee has a usable
+    address and a transport is actually configured (deliver() itself reports
+    why it didn't send rather than pretending success — see email.py)."""
+    if task.assignee_id is None:
+        return
+    assignee = await session.get(Profile, task.assignee_id)
+    if assignee is None or not assignee.is_active:
+        return
+
+    client_name = None
+    if task.client_id:
+        client = await session.get(Client, task.client_id)
+        client_name = client.legal_name if client else None
+
+    await audit.notify(
+        session,
+        tenant_id=tenant_id,
+        profile_id=task.assignee_id,
+        type="task",
+        title="New task assigned to you",
+        body=task.title,
+        link="/workflows",
+    )
+
+    if settings.email_is_configured:
+        await deliver(
+            to=assignee.email,
+            subject=f"Task assigned: {task.title}",
+            html=task_assigned_html(
+                firm_name=tenant_name,
+                assignee_name=assignee.full_name or assignee.email,
+                task_title=task.title,
+                due_date=task.due_date.isoformat() if task.due_date else None,
+                client_name=client_name,
+                url=f"{settings.public_app_url.rstrip('/')}/workflows",
+            ),
+        )
+
+
 @router.post("/tasks", response_model=TaskRead, status_code=status.HTTP_201_CREATED)
 async def create_task(
     payload: TaskCreate, session: SessionDep, user: TenantUserDep, request: Request
@@ -239,6 +281,7 @@ async def create_task(
         summary=f"Created task '{task.title}'",
         ip_address=client_ip(request),
     )
+    await _notify_assignee(session, tenant_id=user.tenant_id, tenant_name=user.tenant.name, task=task)
 
     return await _hydrate_task(session, user, task)
 
@@ -262,6 +305,7 @@ async def update_task(
     ensure_found(task, "Task")
 
     previous_status = task.status
+    previous_assignee = task.assignee_id
     apply_updates(task, payload)
 
     if task.status == "complete" and previous_status != "complete":
@@ -270,6 +314,10 @@ async def update_task(
         task.completed_at = None
 
     await session.flush()
+
+    if task.assignee_id is not None and task.assignee_id != previous_assignee:
+        await _notify_assignee(session, tenant_id=user.tenant_id, tenant_name=user.tenant.name, task=task)
+
     return await _hydrate_task(session, user, task)
 
 

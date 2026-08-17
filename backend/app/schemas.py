@@ -942,6 +942,18 @@ class DeadlineBuckets(BaseModel):
     filed_this_month: int = 0
 
 
+class RevenueSummary(BaseModel):
+    """Real invoice-derived figures — distinct from `revenue_under_contract`,
+    which is a contract-value *projection* (annualized service pricing, never
+    touches ClientInvoice). `paid` only ever counts invoices actually marked
+    paid; an unpaid invoice is never counted as received revenue."""
+
+    invoiced: float = 0.0
+    paid: float = 0.0
+    outstanding: float = 0.0
+    overdue: float = 0.0
+
+
 class DashboardResponse(BaseModel):
     firm_name: str
     clients_total: int
@@ -951,6 +963,7 @@ class DashboardResponse(BaseModel):
     tasks_due_this_week: int
     letters_awaiting_signature: int
     revenue_under_contract: float
+    revenue: RevenueSummary
     next_deadlines: list[DeadlineRead]
     recent_activity: list[AuditLogRead]
     workload: list[dict[str, Any]]
