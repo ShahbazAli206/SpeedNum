@@ -174,11 +174,34 @@ production snapshot on 2026-08-17: 3 tenants, 5 profiles, 2 clients restored and
 real login succeeded against the restored data. See the session's final report for the full
 transcript.
 
+## Device registration and revocation (added after this document's first draft)
+
+`backend/app/routers/admin_devices.py` + migration `0012_backup_devices.sql`: the desktop app
+registers itself once per installation (`POST /admin/devices/register`) and gets back a
+`device_id`, sent as `X-Device-Id` on every call that actually hands over backup bytes
+(download-url, ack-download, restore-drill) — `require_active_device` rejects a missing,
+unknown, or revoked device the same way (403), so a revoked device can't distinguish itself
+from one that was never registered. Deliberately independent of the JWT/refresh-token
+machinery: a stolen laptop's OS keychain can still hold a valid, unexpired refresh token, so
+revocation has to work without depending on that token ever expiring. Live-verified: a call
+without a device id is rejected, a revoked device is rejected, and a freshly registered device
+succeeds — see the 2026-08-17 session report.
+
+## Retention (added after this document's first draft)
+
+`backend/app/services/backup_retention.py` closes the gap this document originally flagged
+below: keeps the most recent `BACKUP_RETENTION_KEEP` ready snapshots, never pruning the last
+remaining one, an ancestor a kept incremental snapshot's parent chain depends on, or a snapshot
+with no confirmed off-VPS copy from a still-active device. Runs automatically after each
+scheduled snapshot; `POST /admin/backups/retention/run` for an on-demand pass. Both the backup
+list and device list are also now visible in the web admin dashboard
+(`frontend/src/app/(firm)/admin/backups/page.tsx`) — server-side trigger/retention/device-revoke
+actions live there; the desktop app remains the only thing that actually downloads, encrypts,
+and restore-drills a snapshot locally (see `DESKTOP.md`).
+
 ## Known Gaps / Future Work
 
 - Server-side snapshot components are not encrypted at rest in MinIO (see Encryption above).
-- No automated retention/pruning is wired up yet — `backup_audit_log`'s `prune` action exists
-  in the schema but nothing calls it.
 - The desktop app's restore drill requires Docker on the administrator's machine; it has not
   been packaged as a signed, distributable installer.
 - Incremental sync is per-object (MinIO storage delta only); the Postgres component is always
