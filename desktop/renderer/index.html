@@ -35,6 +35,28 @@
   .progress-detail { font-size: 12px; color: #64748b; }
   .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
   .modal-actions button { margin-top: 0; }
+
+  /* `color-scheme: light dark` above tells the OS this app supports both —
+     the actual dark palette lives here, following the system setting. There
+     is no in-app toggle: a disaster-recovery tool used a few times a year
+     has no reason to carry its own theme preference separate from the OS. */
+  @media (prefers-color-scheme: dark) {
+    body { background: #0b1220; color: #e2e8f0; }
+    header { background: #0a0f1c; }
+    .card, .modal { background: #111a2e; box-shadow: 0 1px 3px rgba(0,0,0,0.4); }
+    .modal { box-shadow: 0 20px 40px rgba(0,0,0,0.55); }
+    label { color: #cbd5e1; }
+    input { background: #0b1220; border-color: #334155; color: #e2e8f0; }
+    button.secondary { background: #475569; }
+    th, td { border-bottom-color: #1e293b; }
+    .version-tag { color: #64748b; }
+    .modal .version-compare { color: #94a3b8; }
+    .modal .version-compare b { color: #f1f5f9; }
+    .release-notes { background: #0b1220; color: #cbd5e1; }
+    .progress-track { background: #1e293b; }
+    .progress-detail { color: #94a3b8; }
+    #loginView p[style] { color: #94a3b8 !important; }
+  }
 </style>
 </head>
 <body>
