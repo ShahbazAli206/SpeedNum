@@ -500,6 +500,13 @@ async def start_oauth(session: AsyncSession, *, provider: str, next_path: str | 
     leaves this backend."""
     module = _oauth_provider(provider)
 
+    # Fail before writing anything: a caller of this module only ever
+    # expects AuthError, not the provider-specific OAuthProviderError, and
+    # checking up front also skips storing a state row for a request that
+    # was always going to fail.
+    if not module.is_configured():
+        raise AuthError(f"{provider.capitalize()} sign-in is not configured.", status_code=503)
+
     # Same rule as portal-login-client.tsx's safeNext: only ever a
     # same-origin-relative path. An open redirect handed to a browser
     # mid-OAuth-flow is exactly as dangerous as one in an email link.

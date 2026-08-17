@@ -48,8 +48,12 @@ class OAuthProviderError(RuntimeError):
     with the raw provider response, which can carry no user data at all."""
 
 
+def is_configured() -> bool:
+    return settings.google_oauth_configured
+
+
 def build_authorize_url(*, state: str, code_challenge: str, nonce: str) -> str:
-    if not settings.google_oauth_configured:
+    if not is_configured():
         raise OAuthProviderError("Google sign-in is not configured.")
     params = {
         "client_id": settings.google_client_id,
