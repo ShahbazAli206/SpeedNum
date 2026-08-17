@@ -20,6 +20,7 @@ import { AlertBell, UnreadDot } from "@/components/dashboard/alert-bell";
 import { CommandPalette } from "@/components/dashboard/command-palette";
 import { ForcePasswordModal } from "@/components/dashboard/force-password-modal";
 import { SignOutButton, useSignOut } from "@/components/dashboard/sign-out-button";
+import { UrgentDeadlineBanner } from "@/components/dashboard/urgent-deadline-banner";
 import { Icon } from "@/components/icon";
 import { Logo } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -374,6 +375,8 @@ function FirmShellInner({ children }: { children: ReactNode }) {
             />
           </div>
         </header>
+
+        <UrgentDeadlineBanner />
 
         <main id="main" className="flex-1 px-4 py-6 sm:px-6 sm:py-8">
           <div className="mx-auto max-w-7xl">{children}</div>
