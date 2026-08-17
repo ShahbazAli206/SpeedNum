@@ -817,3 +817,68 @@ infrastructure changes of this shape again.
    didn't have.
 6. Production data migration from Supabase (Postgres + Storage) was explicitly out of scope for
    this pass — nothing in Supabase was read, exported, or touched.
+
+# Session 6 — full auth/role/OAuth/export QA pass, Google login, desktop backup app (2026-08-17)
+
+Items 2 and 3 from Session 5's "still open" list above are now resolved: self-hosted auth (not
+Supabase) is the live default and was live-tested end to end, and `NEXT_PUBLIC_API_URL` is
+confirmed working (`speed-num.vercel.app` → `test.spidnums.com`). Item 4 (no offsite backup) is
+now partially addressed by the desktop sync app below, though it downloads on demand/interval
+rather than continuously.
+
+**Note:** partway through this session, a second, independent piece of work (the backup
+snapshot system, commit `318cb04`, plus three follow-up commits) was pushed to this same branch
+directly by the repo owner or their own tooling, while this session was still running. No
+conflicts occurred — `git fetch` before each push confirmed a clean fast-forward every time —
+but it's worth knowing this branch had concurrent writers during this window.
+
+**Full audit against a 26-part brief covering user/role model, client and staff onboarding,
+first-login forced password change, portal routing, session/token security, PDF/XLSX/CSV
+export and import, and email — all tested live against `test.spidnums.com` with disposable
+`qa+`-tagged accounts, not just read from code.** One real defect found and fixed: CSV/XLSX
+export had no spreadsheet-formula-injection sanitization (commit `bc940eb`). Everything else
+audited was already correctly built — see this session's chat transcript for the full test
+matrix; not reproduced here to avoid drift from the actual code.
+
+**Google OAuth** ("Continue with Google") built and live-verified up to the external-provider
+boundary: authorization-code + PKCE, ID-token verification against Google's real JWKS (12 unit
+tests with a real RSA keypair), verified-email-only account linking. `GOOGLE_CLIENT_ID`/
+`GOOGLE_CLIENT_SECRET` don't exist anywhere in this deployment, so the real browser flow through
+an actual Google consent screen is **BLOCKED** — `GET /auth/oauth/providers` correctly reports
+`{"google": false}` in production. Facebook/Microsoft/Apple evaluated and deliberately not
+built (see SECURITY.md's OAuth section for the reasoning).
+
+**Generic PDF export** added to the existing CSV/XLSX export menu (`data-table.tsx`), covering
+every table that already had CSV/XLSX. Found and fixed a real layout bug in the process (long
+unbroken tokens like emails overflowing into the next column instead of wrapping).
+
+**SpeedNum Desktop** (`desktop/`) — a new Electron app built on top of the backup-snapshot
+system from `318cb04`: syncs encrypted snapshots to local disk (AES-256-GCM, streaming, 12 unit
+tests), and runs real restore drills into disposable Docker containers. Electron rather than
+Tauri because this dev environment has no Rust/MSVC toolchain and installing one was
+impractical within the pass — see DESKTOP.md for the full reasoning. Live-verified against
+production: real login/list/download/encrypt/ack through the actual Electron GUI
+(Playwright-driven, screenshotted), and a real restore drill that decrypted a real snapshot,
+restored it into a disposable Postgres container, and logged in against the restored data. That
+drill surfaced a real gap — `pg_dump --no-owner` doesn't reliably carry every GRANT the app's
+non-superuser role needs — fixed by always re-applying `GRANT ALL ON ALL TABLES/SEQUENCES` after
+a restore, not left as a manual runbook step. Full feature parity with the web admin dashboard
+was explicitly scoped out; see DESKTOP.md's "what's real vs. scoped out" section.
+
+**Docs**: wrote `BACKUP_ARCHITECTURE.md` and `DESKTOP.md` (both previously promised in code
+comments/commit messages but never written), added an OAuth section to `SECURITY.md`, fixed the
+root `README.md` and `backend/README.md` (both still described the old Supabase/Hugging-Face
+architecture), and added the missing `GOOGLE_CLIENT_ID`/`BACKUP_*` variables to both
+`.env.example` files.
+
+**Still open:**
+1. Offsite backup exists now (the desktop sync), but nothing automated pushes it further
+   offsite (e.g., to cloud storage in a second region) — it lives on whichever machine ran the
+   desktop app.
+2. Server-side snapshot components are not encrypted at rest in MinIO (see
+   BACKUP_ARCHITECTURE.md's Encryption section for why this was deprioritized this pass).
+3. Google OAuth: blocked on real credentials, as above.
+4. Backend PDF export for invoices/reports/financial-data specifically (as opposed to the
+   generic tabular PDF export added this session) was not built — the generic export covers the
+   same tables, just not with bespoke per-document-type layouts.
+5. The desktop app has no signed installer and requires Docker for restore drills.

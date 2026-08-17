@@ -1,22 +1,32 @@
 # SpeedNum
 
 Practice-management platform for accounting firms — multi-tenant client CRM, task workflows,
-compliance deadline tracking, and engagement letters.
+compliance deadline tracking, engagement letters, and a client portal.
 
 ```
-Vercel (Next.js)  ──bearer token──▶  HF Space (FastAPI)  ──asyncpg──▶  Supabase Postgres
-        │                                                                    ▲
-        └────────────── Supabase Auth (sign-in, JWT) ────────────────────────┘
+Vercel (Next.js)  ──HTTPS──▶  Caddy  ──▶  FastAPI  ──asyncpg──▶  Postgres 16 (self-hosted VPS)
+                                            │
+                                            ├──▶ MinIO (documents + encrypted backup snapshots)
+                                            └──▶ Hostinger SMTP (transactional email)
 ```
+
+Authentication is self-hosted (Argon2id + Ed25519 JWTs + rotating refresh tokens — see
+[SECURITY.md](SECURITY.md)), with optional "Continue with Google" social login. Supabase is not
+part of the active request path; `AUTH_PROVIDER=supabase` / `STORAGE_PROVIDER=supabase` remain
+only as documented, inactive-by-default rollback paths.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
-| [backend/](backend/) | FastAPI API, deployed as a Hugging Face Docker Space — see [backend/README.md](backend/README.md) |
-| [frontend/](frontend/) | Next.js 16 / React 19 app with Tailwind 4 and Supabase SSR |
-| [db/migrations/](db/migrations/) | Postgres schema, row-level security policies, and functions |
-| [speednum_chatgpt_research.md](speednum_chatgpt_research.md) | Research notes on the SpidNums platform |
+| [backend/](backend/) | FastAPI API, deployed on a self-hosted VPS via Docker Compose |
+| [frontend/](frontend/) | Next.js 16 / React 19 app with Tailwind 4, deployed on Vercel |
+| [desktop/](desktop/) | Admin desktop app (Electron) — encrypted backup sync and restore drills, see [DESKTOP.md](DESKTOP.md) |
+| [db/migrations/](db/migrations/) | Postgres schema, functions, and (documented, inactive-by-default) RLS policies |
+| [deploy/](deploy/) | Docker Compose stack, Caddy config, and operational scripts for the VPS |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Full system architecture |
+| [SECURITY.md](SECURITY.md) | Authentication, authorization, and OAuth design |
+| [BACKUP_ARCHITECTURE.md](BACKUP_ARCHITECTURE.md) | Backup snapshot format, encryption, sync, and disaster recovery |
 | [PROGRESS.md](PROGRESS.md) | Running state of the repo and open items |
 
 ## Getting started
@@ -27,7 +37,7 @@ Vercel (Next.js)  ──bearer token──▶  HF Space (FastAPI)  ──asyncpg
 cd backend
 python -m venv .venv && .venv/Scripts/activate   # Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env                             # fill in your Supabase values
+cp .env.example .env                             # fill in DATABASE_URL and (optionally) SMTP/Google OAuth
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -41,7 +51,16 @@ npm install
 npm run dev
 ```
 
-**Database** — apply `db/migrations/*.sql` in filename order against your Supabase project.
+**Desktop** (disaster-recovery admin app)
+
+```bash
+cd desktop
+npm install
+npm start
+```
+
+**Database** — apply `db/migrations/*.sql` in filename order against a Postgres 16 instance you
+control (`python backend/scripts/migrate.py apply`).
 
 ## Cloning
 

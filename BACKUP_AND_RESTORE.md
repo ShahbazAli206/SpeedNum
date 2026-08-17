@@ -1,5 +1,11 @@
 # SpeedNum — Backup and Restore
 
+> This document covers the original cron/shell-script backups only (VPS-local disk, no
+> encryption, no desktop sync). A second, newer system — checksummed, versioned, synced and
+> encrypted to an administrator's desktop, and the one with an actual tested restore-drill
+> process — exists alongside it; see [`BACKUP_ARCHITECTURE.md`](BACKUP_ARCHITECTURE.md) for
+> that one. Both currently run; they are independent copies, not alternatives to pick between.
+
 ## What's backed up, and how
 
 | What | Script | Format | Schedule (UTC) |

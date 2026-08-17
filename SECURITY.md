@@ -223,23 +223,79 @@ only feeds `/api/auth/refresh`, which mints a token, not a state change, and eve
 mutation requires an explicit `Authorization: Bearer` header a CSRF attacker cannot forge
 cross-site.
 
+## Social login (OAuth 2.0 / OIDC)
+
+"Continue with Google" (`services/oauth_google.py`, `local_auth.py`'s `start_oauth`/
+`complete_oauth`) — identity verification only. Google never becomes a data store or a
+permanent dependency: every session, profile, and byte of business data stays in this
+application's own Postgres.
+
+- **Flow**: standard authorization-code grant with PKCE (S256), a random `state` and `nonce`
+  per attempt, both stored server-side keyed by `state` (`oauth_login_states`, single-use,
+  10-minute TTL) — never trusted from anything the browser could tamper with. The redirect URI
+  is a fixed, server-configured value; Google never receives or honors a caller-supplied one.
+- **ID token verification**: signature checked against Google's live JWKS (`PyJWT`'s
+  `PyJWKClient`, matched by `kid`), plus issuer, audience, and expiration — all in one
+  `jwt.decode()` call, not hand-rolled. Covered by 12 unit tests against a real RSA keypair
+  standing in for Google's (`backend/tests/test_oauth_google.py`), including forged-signature,
+  wrong-issuer, wrong-audience, expired, and nonce-mismatch cases.
+- **Account linking**: only on a *verified* email claim (`email_verified: true` from Google) —
+  a throwaway Google account cannot take over an existing password-based SpeedNum account
+  merely by sharing an unverified address. A brand-new signup (no existing profile, no existing
+  linked identity) gets the same tenant-less-profile-then-bootstrap path as a fresh
+  `/auth/register`.
+- **No provider token retained** — the scope requested is `openid email profile`; nothing
+  beyond the already-verified ID-token claims (`sub`, `email`, `email_verified`, `name`) is
+  ever stored (`oauth_identities` table).
+- **Never exposed until configured**: `GET /auth/oauth/providers` is the only way the frontend
+  learns whether a provider is live — no `NEXT_PUBLIC_*` variable ever carries a client secret,
+  and the button renders conditionally on that endpoint's answer.
+- **Live-tested**: signature/issuer/audience/expiration/nonce checks are real cryptographic
+  tests, not mocks. The actual browser flow (a real Google consent screen, a real callback) is
+  **BLOCKED** — no `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` exist anywhere in this deployment.
+  `GET /auth/oauth/providers` correctly reports `{"google": false}` in production.
+
+**Facebook, Microsoft, Apple — evaluated, not implemented.** SpeedNum's users are accounting
+firm staff and their clients signing in with a work email; Google Workspace is the dominant
+identity provider in that segment, which is why it was built first. Facebook Login has no
+plausible fit for a B2B practice-management tool and was not built. Microsoft (Entra ID) is a
+real candidate — plausibly *more* relevant than Google for firms on Microsoft 365 — but no
+credentials exist to build and verify it against, and per this session's own instructions
+("only implement providers that provide a real business benefit," "do not add unnecessary
+providers simply for quantity"), it was left as a scoped recommendation rather than built
+speculatively: the same `_OAUTH_PROVIDERS` dispatch table in `local_auth.py` and
+`oauth_<provider>.py` module shape used for Google already generalizes to it once someone
+decides to prioritize it and obtains a Microsoft Entra app registration. Apple Sign In requires
+a paid Apple Developer account and its own key-based client-secret JWT scheme; evaluated and
+not pursued for the same reason — no demonstrated need, no credentials, and disproportionate
+setup cost for this user base.
+
 ## Email / OTP
 
-Password reset, email verification, and magic-link generation are now this application's own
+Password reset, email verification, and magic-link generation are this application's own
 (`services/local_auth.py`), not Supabase's — see "Authentication decision" above. All
-transactional email, including these, goes through `services/email.py`'s existing SMTP/Resend
-abstraction (`EMAIL_PROVIDER=auto|smtp|resend`), already reviewed in an earlier session and
-unchanged here. **Not exercised with a real send this session** — the deployed SMTP credentials
-are placeholders (`smtp.hostinger.com` correctly rejected authentication, confirmed in the
-deploy logs), so the actual token values for the verify-email/reset-password/team-invite tests
-were read directly from the service functions that would otherwise have emailed them, not from
-a real inbox. Existing DNS: SPF (`v=spf1 include:_spf.mail.hostinger.com ~all`)
-covers the Hostinger-SMTP path this deployment defaults to; DMARC is currently `p=none`
-(monitor-only, no enforcement) — a reasonable early-stage setting, worth tightening to
-`quarantine`/`reject` later once SPF/DKIM alignment is confirmed solid, but not changed here
-since that's a DNS policy decision, not something broken. No mail server runs on the VPS
-itself; `EMAIL_PROVIDER=smtp` in the deployed config points at `smtp.hostinger.com`, an
-external mailbox, not a locally-hosted MTA.
+transactional email, including these, goes through `services/email.py`'s SMTP/Resend
+abstraction (`EMAIL_PROVIDER=auto|smtp|resend`). **Real SMTP delivery confirmed live** in the
+2026-08-17 session: `POST /settings/email/test` (admin-only, sends a real message through
+whatever transport is configured) returned `{"ok": true, "provider": "smtp", ...}` against the
+production deployment's actual Hostinger credentials — an earlier session's note that these
+credentials were still placeholders is now out of date. Existing DNS: SPF
+(`v=spf1 include:_spf.mail.hostinger.com ~all`) covers the Hostinger-SMTP path this deployment
+defaults to; DMARC is currently `p=none` (monitor-only, no enforcement) — a reasonable
+early-stage setting, worth tightening to `quarantine`/`reject` later once SPF/DKIM alignment is
+confirmed solid, but not changed here since that's a DNS policy decision, not something broken.
+No mail server runs on the VPS itself; `EMAIL_PROVIDER=smtp` in the deployed config points at
+`smtp.hostinger.com`, an external mailbox, not a locally-hosted MTA.
+
+## Disaster-recovery backups
+
+Covered in full in [`BACKUP_ARCHITECTURE.md`](BACKUP_ARCHITECTURE.md). The short version: every
+`/admin/backups/*` endpoint requires `is_superadmin` (verified against `deps.SuperadminDep`,
+not assumed), every action is audit-logged (`backup_audit_log`) including read-only ones like
+listing, a snapshot's manifest hash is re-verified against the database's recorded value on
+every read (Postgres is the trust root, not the MinIO object), and the desktop app that
+downloads these snapshots encrypts them at rest locally (AES-256-GCM) with a key that is never
+written anywhere, derived from a password only the administrator holds.
 
 ## What this session did not attempt
 

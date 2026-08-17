@@ -10,7 +10,7 @@ that mutate something.
 No endpoint here can write to or overwrite the live database/storage. That is
 deliberate: a "restore to this VPS" button does not exist over HTTP at all —
 live-target restore stays an SSH + typed-confirmation operation
-(deploy/scripts/restore-{postgres,storage}.sh --live), see DISASTER_RECOVERY.md.
+(deploy/scripts/restore-{postgres,storage}.sh --live), see BACKUP_ARCHITECTURE.md.
 """
 
 from __future__ import annotations
@@ -194,7 +194,7 @@ async def ack_download(
 ) -> dict[str, Any]:
     """The desktop app confirms a full, checksum-verified download of every
     component landed locally. This is what lets retention logic (not yet
-    triggered by anything automatic — see BACKUP_OPERATIONS.md) prefer
+    triggered by anything automatic — see BACKUP_ARCHITECTURE.md) prefer
     pruning snapshots that are known to exist somewhere off the VPS."""
     row = (
         await session.execute(
@@ -230,7 +230,7 @@ async def report_restore_drill(
     request: Request,
 ) -> dict[str, Any]:
     """The desktop app reports the outcome of a restore drill it ran locally
-    against a disposable Docker stack (see DISASTER_RECOVERY.md) — this
+    against a disposable Docker stack (see BACKUP_ARCHITECTURE.md) — this
     endpoint only records the result, it never runs or triggers a restore
     itself."""
     row = (
