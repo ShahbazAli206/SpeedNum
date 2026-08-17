@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
+import { GoogleSignInButton } from "@/components/auth/google-signin-button";
 import { Alert, Button, Checkbox, Field, Input } from "@/components/ui";
 import { get } from "@/lib/api";
 import { login } from "@/lib/auth-client";
@@ -171,6 +172,8 @@ export function LoginForm() {
           Sign in
         </Button>
       </form>
+
+      {AUTH_CONFIGURED ? <GoogleSignInButton next={requested} /> : null}
 
       <p className="mt-6 text-center text-[14px] text-muted">
         Don&apos;t have an account?{" "}

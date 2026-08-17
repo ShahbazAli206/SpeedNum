@@ -11,6 +11,7 @@ scattered across files.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import logging
 import secrets
@@ -24,7 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..models import Profile
-from . import jwt_keys
+from . import jwt_keys, oauth_google
+from .oauth_google import OAuthProviderError
 from .password_hash import hash_password, needs_rehash, verify_password
 
 log = logging.getLogger(__name__)
@@ -463,6 +465,192 @@ async def reset_password(session: AsyncSession, *, raw_token: str, new_password:
     profile = await session.get(Profile, row["profile_id"])
     assert profile is not None
     return profile
+
+
+# --- Social login (OAuth 2.0 / OIDC) -----------------------------------------
+# Provider-agnostic session/account-linking logic. Google is the only
+# provider wired up (services/oauth_google.py); a second provider only needs
+# its own oauth_<name>.py module with the same three functions plus an entry
+# in _OAUTH_PROVIDERS below.
+
+_OAUTH_PROVIDERS = {"google": oauth_google}
+
+
+def _oauth_provider(provider: str):
+    module = _OAUTH_PROVIDERS.get(provider)
+    if module is None:
+        raise AuthError(f"Unknown sign-in provider: {provider}.", status_code=404)
+    return module
+
+
+def _pkce_pair() -> tuple[str, str]:
+    verifier = secrets.token_urlsafe(64)[:128]  # RFC 7636: 43-128 chars
+    challenge = (
+        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    )
+    return verifier, challenge
+
+
+async def start_oauth(session: AsyncSession, *, provider: str, next_path: str | None) -> str:
+    """Begins one authorization-code+PKCE round trip: generates state, a PKCE
+    verifier/challenge pair and a nonce; stores the server-side half
+    (verifier + nonce, keyed by state) and returns the URL to send the
+    browser to. Google only ever sees the state and the challenge — the
+    verifier that proves this exact request made the token exchange never
+    leaves this backend."""
+    module = _oauth_provider(provider)
+
+    # Same rule as portal-login-client.tsx's safeNext: only ever a
+    # same-origin-relative path. An open redirect handed to a browser
+    # mid-OAuth-flow is exactly as dangerous as one in an email link.
+    safe_next = (
+        next_path if next_path and next_path.startswith("/") and not next_path.startswith("//") else None
+    )
+
+    state = secrets.token_urlsafe(32)
+    verifier, challenge = _pkce_pair()
+    nonce = secrets.token_urlsafe(24)
+
+    await session.execute(
+        text(
+            "insert into public.oauth_login_states "
+            "(state, provider, code_verifier, nonce, next_path, expires_at) "
+            "values (:state, :provider, :code_verifier, :nonce, :next_path, :expires_at)"
+        ),
+        {
+            "state": state,
+            "provider": provider,
+            "code_verifier": verifier,
+            "nonce": nonce,
+            "next_path": safe_next,
+            "expires_at": datetime.now(timezone.utc) + timedelta(seconds=settings.oauth_state_ttl_seconds),
+        },
+    )
+    await session.commit()  # durable before the browser ever leaves for Google
+
+    return module.build_authorize_url(state=state, code_challenge=challenge, nonce=nonce)
+
+
+@dataclass(slots=True)
+class OAuthResult:
+    profile: Profile
+    tokens: TokenPair
+    is_new_account: bool
+    next_path: str | None
+
+
+async def complete_oauth(
+    session: AsyncSession,
+    *,
+    provider: str,
+    code: str,
+    state: str,
+    user_agent: str | None,
+    ip_address: str | None,
+) -> OAuthResult:
+    module = _oauth_provider(provider)
+
+    # Deleted unconditionally, whether or not it turns out to be valid below
+    # — single-use, so a leaked (code, state) pair can never be tried twice.
+    row = (
+        await session.execute(
+            text(
+                "delete from public.oauth_login_states where state = :state and provider = :provider "
+                "returning code_verifier, nonce, next_path, expires_at"
+            ),
+            {"state": state, "provider": provider},
+        )
+    ).mappings().first()
+    if row is None:
+        raise AuthError(
+            "This sign-in attempt has expired or was already used. Please try again.", status_code=400
+        )
+    if row["expires_at"] < datetime.now(timezone.utc):
+        raise AuthError("This sign-in attempt has expired. Please try again.", status_code=400)
+
+    try:
+        token_response = await module.exchange_code(code=code, code_verifier=row["code_verifier"])
+        claims = module.verify_id_token(token_response["id_token"], expected_nonce=row["nonce"])
+    except OAuthProviderError as exc:
+        raise AuthError(str(exc), status_code=401) from exc
+
+    provider_user_id = str(claims["sub"])
+    email = (claims.get("email") or "").strip().lower()
+    email_verified = bool(claims.get("email_verified"))
+    full_name = claims.get("name") or email or "New user"
+
+    linked = (
+        await session.execute(
+            text(
+                "select profile_id from public.oauth_identities "
+                "where provider = :provider and provider_user_id = :sub"
+            ),
+            {"provider": provider, "sub": provider_user_id},
+        )
+    ).mappings().first()
+
+    is_new_account = False
+
+    if linked is not None:
+        profile = await session.get(Profile, linked["profile_id"])
+        if profile is None:
+            raise AuthError("This account is no longer available.", status_code=403)
+    else:
+        if not email:
+            raise AuthError(
+                "Your Google account did not share an email address, so it can't be used to sign "
+                "in. Grant email access, or use a different sign-in method.",
+                status_code=422,
+            )
+
+        existing_profile = await session.scalar(select(Profile).where(Profile.email == email))
+
+        if existing_profile is not None:
+            # Link only on a *verified* email claim from the provider — an
+            # unverified claim is just an assertion, and trusting it would
+            # let anyone with a throwaway OAuth account take over a
+            # SpeedNum account that merely shares its (unverified) address.
+            if not email_verified:
+                raise AuthError(
+                    "An account already exists for this email. Verify your email address with "
+                    "Google, or sign in with your SpeedNum password instead.",
+                    status_code=409,
+                )
+            profile = existing_profile
+        else:
+            # Brand-new signup via Google — same shape as a fresh
+            # /auth/register: no tenant yet, the frontend sends the user
+            # through the firm-bootstrap step next. No auth_credentials row
+            # is created, so a password-login attempt on this address
+            # correctly fails (a missing credentials row reads as "wrong
+            # password") until the user sets one explicitly.
+            profile = Profile(
+                id=uuid.uuid4(),
+                tenant_id=None,
+                email=email,
+                full_name=full_name,
+                role="owner",
+                is_active=True,
+            )
+            session.add(profile)
+            await session.flush()
+            is_new_account = True
+
+        await session.execute(
+            text(
+                "insert into public.oauth_identities (profile_id, provider, provider_user_id, email) "
+                "values (:profile_id, :provider, :sub, :email)"
+            ),
+            {"profile_id": profile.id, "provider": provider, "sub": provider_user_id, "email": email},
+        )
+
+    if not profile.is_active:
+        raise AuthError("This account has been deactivated.", status_code=403)
+
+    tokens = await issue_tokens(session, profile, user_agent=user_agent, ip_address=ip_address)
+    return OAuthResult(
+        profile=profile, tokens=tokens, is_new_account=is_new_account, next_path=row["next_path"]
+    )
 
 
 # --- Admin-facing provisioning: same call shape as the old ------------------

@@ -12,7 +12,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select, text
 
 from ..config import settings
@@ -26,6 +27,9 @@ from ..schemas import (
     LoginRequest,
     MagicLoginRequest,
     MeResponse,
+    OAuthCallbackRequest,
+    OAuthResult as OAuthResultSchema,
+    OAuthStartResponse,
     Ok,
     ProfileRead,
     ProfileUpdate,
@@ -51,6 +55,7 @@ _register_rate_limit = rate_limit_by_ip("auth-register", limit=5, window_seconds
 _forgot_password_rate_limit = rate_limit_by_ip("auth-forgot-password", limit=5, window_seconds=3600)
 _verify_email_rate_limit = rate_limit_by_ip("auth-verify-email", limit=10, window_seconds=3600)
 _refresh_rate_limit = rate_limit_by_ip("auth-refresh", limit=60, window_seconds=300)
+_oauth_rate_limit = rate_limit_by_ip("auth-oauth", limit=20, window_seconds=300)
 
 
 def _set_refresh_cookie(response: Response, tokens: TokenPair) -> None:
@@ -193,6 +198,71 @@ async def magic_login(
 
     _set_refresh_cookie(response, tokens)
     return _auth_result(profile, tokens)
+
+
+@router.get("/oauth/providers")
+async def oauth_providers() -> dict[str, bool]:
+    """Which "Continue with X" buttons the login/signup pages should render.
+    A GET the frontend can call at build time or render time — no
+    NEXT_PUBLIC_* env var needed just to know whether a button should
+    exist, and it can never drift from what the backend actually has
+    credentials for."""
+    return {"google": settings.google_oauth_configured}
+
+
+@router.get(
+    "/oauth/{provider}/start",
+    dependencies=[Depends(_oauth_rate_limit)],
+)
+async def oauth_start(
+    provider: str,
+    session: SessionDep,
+    next: str | None = Query(default=None),  # noqa: A002 - matches the query param name
+) -> RedirectResponse:
+    """The browser navigates here directly (not a fetch — a real OAuth
+    redirect needs a top-level navigation), so this returns a 302 straight
+    to the provider rather than JSON."""
+    try:
+        authorize_url = await local_auth.start_oauth(session, provider=provider, next_path=next)
+    except AuthError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+    return RedirectResponse(authorize_url, status_code=status.HTTP_302_FOUND)
+
+
+@router.post(
+    "/oauth/{provider}/callback",
+    response_model=OAuthResultSchema,
+    dependencies=[Depends(_oauth_rate_limit)],
+)
+async def oauth_callback(
+    provider: str,
+    payload: OAuthCallbackRequest,
+    request: Request,
+    response: Response,
+    session: SessionDep,
+) -> OAuthResultSchema:
+    """Called by the frontend's own callback page (Google redirects the
+    browser there with ?code&state in the URL) rather than being the
+    redirect target itself — keeps the code+state exchange as an ordinary
+    authenticated-JSON call, the same shape as /auth/magic-login."""
+    try:
+        result = await local_auth.complete_oauth(
+            session,
+            provider=provider,
+            code=payload.code,
+            state=payload.state,
+            user_agent=request.headers.get("user-agent"),
+            ip_address=client_ip(request),
+        )
+    except AuthError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+
+    _set_refresh_cookie(response, result.tokens)
+    return OAuthResultSchema(
+        **_auth_result(result.profile, result.tokens).model_dump(),
+        is_new_account=result.is_new_account,
+        next_path=result.next_path,
+    )
 
 
 @router.post(

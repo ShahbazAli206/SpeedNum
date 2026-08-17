@@ -216,6 +216,24 @@ class AuthResult(BaseModel):
     profile: ProfileRead
 
 
+class OAuthStartResponse(BaseModel):
+    authorize_url: str
+
+
+class OAuthCallbackRequest(BaseModel):
+    code: str = Field(min_length=1)
+    state: str = Field(min_length=1)
+
+
+class OAuthResult(AuthResult):
+    """Same shape as a password login, plus whether this was a brand-new
+    account — the frontend sends a new account through firm-bootstrap next,
+    same as a fresh /auth/register, since it has no tenant yet."""
+
+    is_new_account: bool
+    next_path: str | None = None
+
+
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 

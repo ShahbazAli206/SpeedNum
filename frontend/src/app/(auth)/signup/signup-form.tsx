@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
+import { GoogleSignInButton } from "@/components/auth/google-signin-button";
 import { Alert, Button, Checkbox, Field, Input } from "@/components/ui";
 import { post } from "@/lib/api";
 import { register } from "@/lib/auth-client";
@@ -285,6 +286,11 @@ export function SignupForm() {
           Create account
         </Button>
       </form>
+
+      {/* Google can't accept a pending firm invitation on its own — an invited
+          visitor still sets a password so /team/invitations/accept has a
+          normal account to attach the role to. */}
+      {!isInvited && AUTH_CONFIGURED ? <GoogleSignInButton /> : null}
 
       <p className="mt-6 text-center text-[14px] text-muted">
         Already have an account?{" "}

@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronsUpDown,
   Download,
+  FileStack,
   FileText,
   Search,
   Sheet,
@@ -15,6 +16,8 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useToast } from "@/components/toast";
 import { EmptyState, Menu, Pagination, Select } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import { formatDateTime } from "@/lib/format";
+import { useSession } from "@/lib/session";
 
 export interface Column<T> {
   key: string;
@@ -73,6 +76,7 @@ export function DataTable<T extends { id: string }>({
   exportName?: string;
 }) {
   const toast = useToast();
+  const session = useSession();
   const [query, setQuery] = useState("");
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
   const [sort, setSort] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
@@ -134,20 +138,23 @@ export function DataTable<T extends { id: string }>({
     /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
 
   // Read exportValue (falling back to sortValue) so the file carries raw
-  // values rather than the rendered React nodes.
-  const exportRows = () => {
+  // values rather than the rendered React nodes. `sanitize` is off for PDF —
+  // it isn't a spreadsheet, so there's nothing to neutralize and the leading
+  // quote would just show up as stray punctuation.
+  const exportRows = (sanitize: boolean) => {
     const header = columns.map((column) => column.header);
     const body = filtered.map((row) =>
       columns.map((column) => {
         const value = column.exportValue ? column.exportValue(row) : column.sortValue ? column.sortValue(row) : "";
-        return sanitizeForSpreadsheet(String(value));
+        const text = String(value);
+        return sanitize ? sanitizeForSpreadsheet(text) : text;
       }),
     );
     return { header, body };
   };
 
   const exportCsv = () => {
-    const { header, body } = exportRows();
+    const { header, body } = exportRows(true);
     const csv = [header, ...body]
       .map((line) => line.map((cell) => `"${cell.replace(/"/g, '""')}"`).join(","))
       .join("\n");
@@ -168,7 +175,7 @@ export function DataTable<T extends { id: string }>({
     setExporting(true);
     try {
       const { Workbook } = await import("exceljs");
-      const { header, body } = exportRows();
+      const { header, body } = exportRows(true);
       const workbook = new Workbook();
       const sheet = workbook.addWorksheet("Export");
       sheet.addRow(header).font = { bold: true };
@@ -188,6 +195,103 @@ export function DataTable<T extends { id: string }>({
       link.click();
       URL.revokeObjectURL(url);
       toast.success("Export ready", `${filtered.length} rows downloaded as Excel.`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const exportPdf = async () => {
+    setExporting(true);
+    try {
+      const { Document, Page, View, Text, StyleSheet, Font, pdf } = await import(
+        "@react-pdf/renderer"
+      );
+      // Table cells hold long unbroken tokens (emails, URLs) that don't fit a
+      // flex-width cell — unlike prose, where letter-pdf.tsx's `[word]` (never
+      // split) is the right call, here an unsplittable long word overflows
+      // into the next cell instead of wrapping. Split only long tokens into
+      // characters so the layout engine can break them; short words are
+      // unaffected.
+      Font.registerHyphenationCallback((word) => (word.length > 20 ? word.split("") : [word]));
+
+      const { header, body } = exportRows(false);
+      const title = (exportName ?? "export")
+        .replace(/^speednum-/, "")
+        .replace(/[-_]+/g, " ")
+        .replace(/\b\w/g, (letter) => letter.toUpperCase());
+      const tenantName = session.me?.tenant?.name ?? null;
+      const generated = `Generated ${formatDateTime(new Date().toISOString())}`;
+
+      const styles = StyleSheet.create({
+        page: { padding: 28, fontSize: 8, fontFamily: "Helvetica", color: "#1e293b" },
+        headerRow: {
+          flexDirection: "row",
+          justifyContent: "space-between",
+          alignItems: "flex-end",
+          borderBottomWidth: 1,
+          borderBottomColor: "#cdd6e2",
+          paddingBottom: 8,
+          marginBottom: 8,
+        },
+        titleBlock: { flexDirection: "column" },
+        title: { fontSize: 13, fontFamily: "Helvetica-Bold" },
+        tenant: { fontSize: 9, color: "#64748b", marginTop: 2 },
+        meta: { fontSize: 8, color: "#94a3b8" },
+        tHeadRow: {
+          flexDirection: "row",
+          backgroundColor: "#f1f5f9",
+          borderBottomWidth: 1,
+          borderBottomColor: "#cdd6e2",
+          paddingVertical: 4,
+        },
+        tRow: {
+          flexDirection: "row",
+          borderBottomWidth: 0.5,
+          borderBottomColor: "#e4e9f0",
+          paddingVertical: 3,
+        },
+        cell: { flex: 1, paddingHorizontal: 3 },
+        headCell: { flex: 1, paddingHorizontal: 3, fontFamily: "Helvetica-Bold", color: "#475569" },
+      });
+
+      const PdfDocument = (
+        <Document title={title}>
+          <Page size="A4" orientation="landscape" style={styles.page} wrap>
+            <View style={styles.headerRow} fixed>
+              <View style={styles.titleBlock}>
+                <Text style={styles.title}>{title}</Text>
+                {tenantName ? <Text style={styles.tenant}>{tenantName}</Text> : null}
+              </View>
+              <Text style={styles.meta}>{generated}</Text>
+            </View>
+            <View style={styles.tHeadRow} fixed>
+              {header.map((cell, index) => (
+                <Text key={index} style={styles.headCell}>
+                  {cell}
+                </Text>
+              ))}
+            </View>
+            {body.map((row, rowIndex) => (
+              <View key={rowIndex} style={styles.tRow} wrap={false}>
+                {row.map((cell, cellIndex) => (
+                  <Text key={cellIndex} style={styles.cell}>
+                    {cell}
+                  </Text>
+                ))}
+              </View>
+            ))}
+          </Page>
+        </Document>
+      );
+
+      const blob = await pdf(PdfDocument).toBlob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${exportName}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success("Export ready", `${filtered.length} rows downloaded as PDF.`);
     } finally {
       setExporting(false);
     }
@@ -258,6 +362,13 @@ export function DataTable<T extends { id: string }>({
                 icon: <Sheet className="size-3.5" />,
                 disabled: exporting,
                 onSelect: () => void exportXlsx(),
+              },
+              {
+                label: "PDF",
+                description: "Printable table, all rows",
+                icon: <FileStack className="size-3.5" />,
+                disabled: exporting,
+                onSelect: () => void exportPdf(),
               },
             ]}
           />

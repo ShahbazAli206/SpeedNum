@@ -45,6 +45,23 @@ class Settings(BaseSettings):
     refresh_cookie_name: str = Field(default="sn_refresh", alias="REFRESH_COOKIE_NAME")
     refresh_cookie_domain: str = Field(default="", alias="REFRESH_COOKIE_DOMAIN")
 
+    # --- Social login (Google) --------------------------------------------------
+    # Optional: only "Continue with Google" is offered when both are set — no
+    # provider is ever required to use SpeedNum. This is identity verification
+    # only; Google never sees business data and no provider access/refresh
+    # token is ever stored (see services/oauth_google.py). Get these from a
+    # Google Cloud OAuth 2.0 Client ID (Web application type) — never put the
+    # secret in a NEXT_PUBLIC_* variable, it's read by this backend only.
+    google_client_id: str = Field(default="", alias="GOOGLE_CLIENT_ID")
+    google_client_secret: str = Field(default="", alias="GOOGLE_CLIENT_SECRET")
+    # Must exactly match a "Authorized redirect URI" configured on the Google
+    # Cloud OAuth client. Left unset, it's derived from PUBLIC_APP_URL — a
+    # frontend page that hands the code+state to POST /auth/oauth/google/callback,
+    # never a bare API URL (Google redirects the browser here, so it has to be
+    # a page, not a JSON endpoint).
+    google_redirect_uri: str = Field(default="", alias="GOOGLE_REDIRECT_URI")
+    oauth_state_ttl_seconds: int = Field(default=600, alias="OAUTH_STATE_TTL_SECONDS")
+
     # --- Supabase (rollback only when AUTH_PROVIDER=supabase; see SECURITY.md) --
     # Pooler connection string, e.g.
     #   postgresql://postgres.<ref>:<password>@aws-0-ca-central-1.pooler.supabase.com:6543/postgres
@@ -251,6 +268,14 @@ class Settings(BaseSettings):
     @property
     def jwks_url(self) -> str:
         return f"{self.supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+
+    @property
+    def google_oauth_configured(self) -> bool:
+        return bool(self.google_client_id and self.google_client_secret)
+
+    @property
+    def google_oauth_redirect_uri(self) -> str:
+        return self.google_redirect_uri or f"{self.public_app_url.rstrip('/')}/oauth/callback/google"
 
     @property
     def is_configured(self) -> bool:

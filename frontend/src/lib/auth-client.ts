@@ -84,7 +84,7 @@ export interface AuthResult {
   profile: Me["profile"];
 }
 
-async function postAuth(path: string, body: unknown): Promise<AuthResult> {
+async function postAuth<T extends AuthResult = AuthResult>(path: string, body: unknown): Promise<T> {
   const response = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -100,7 +100,7 @@ async function postAuth(path: string, body: unknown): Promise<AuthResult> {
     throw new Error(message);
   }
   setAccessToken(parsed.access_token);
-  return parsed as AuthResult;
+  return parsed as T;
 }
 
 export function register(email: string, password: string, fullName: string): Promise<AuthResult> {
@@ -113,6 +113,30 @@ export function login(email: string, password: string): Promise<AuthResult> {
 
 export function magicLogin(token: string): Promise<AuthResult> {
   return postAuth("/api/auth/magic-login", { token });
+}
+
+export interface OAuthResult extends AuthResult {
+  is_new_account: boolean;
+  next_path: string | null;
+}
+
+/** The frontend's own callback page (Google redirects the browser there
+ * with ?code&state) calls this once it has both — same shape as
+ * magicLogin above, just with the extra is_new_account/next_path fields a
+ * password login never has. */
+export function oauthCallback(provider: string, code: string, state: string): Promise<OAuthResult> {
+  return postAuth<OAuthResult>(`/api/auth/oauth/${provider}/callback`, { code, state });
+}
+
+/** Full-page navigation, not a fetch — the browser needs to actually land
+ * on Google, which only a top-level navigation can do. Goes straight to
+ * the backend (not through a Next.js route) since a redirect chain has no
+ * CORS to worry about. */
+export function googleSignInUrl(next?: string | null): string {
+  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  const url = new URL(`${base.replace(/\/+$/, "")}/api/v1/auth/oauth/google/start`);
+  if (next) url.searchParams.set("next", next);
+  return url.toString();
 }
 
 export async function logout(): Promise<void> {
