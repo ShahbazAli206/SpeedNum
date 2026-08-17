@@ -882,3 +882,60 @@ architecture), and added the missing `GOOGLE_CLIENT_ID`/`BACKUP_*` variables to 
    generic tabular PDF export added this session) was not built — the generic export covers the
    same tables, just not with bespoke per-document-type layouts.
 5. The desktop app has no signed installer and requires Docker for restore drills.
+
+## Session 7 — device registration, retention, admin backup page, independent DR re-verification (2026-08-17)
+
+Continuation of Session 6's desktop backup work, done concurrently with (and reacting to) the
+other session's own continuation — both landed commits on this branch in the same window;
+`git fetch` before every push kept both fast-forwarding cleanly.
+
+**Device registration and revocation** (`db/migrations/0012_backup_devices.sql`,
+`backend/app/routers/admin_devices.py`): the desktop app registers itself and gets a
+`device_id`, required as `X-Device-Id` on the endpoints that actually hand over backup bytes.
+Revoking a device blocks it immediately regardless of its JWT/refresh-token state — the
+stolen-laptop scenario a session-level control alone can't cover. **This briefly broke the
+existing desktop app** (the previous session's code didn't send the header yet) — the other
+session found and fixed this independently (commit `2091418`) before it became this session's
+problem to solve.
+
+**Retention** (`backend/app/services/backup_retention.py`): closes the "nothing prunes yet" gap
+from Session 6 — keeps the most recent `BACKUP_RETENTION_KEEP` ready snapshots, refusing to
+prune the last remaining one, an ancestor a kept incremental snapshot depends on, or one with no
+confirmed off-VPS copy from a still-active device. Runs automatically after each scheduled
+snapshot.
+
+**Rate limiting** added to the backup API (previously none): `backup-download-url` (20/5min),
+`backup-device-register` (10/hour).
+
+**Admin web portal**: a real (non-demo) `Backup & Recovery` page
+(`frontend/src/app/(firm)/admin/backups/page.tsx`) — snapshot list, device list with revoke,
+backup-now/run-retention actions. Everywhere else in the admin console still runs on demo data;
+this page is the one exception, wired to the real endpoints above.
+
+**Independent re-verification, not just re-reading the prior session's report**: registered a
+fresh disposable superadmin account, ran the actual unmodified `desktop/src/{backup-client,sync}.js`
+(no Electron, no monkey-patching) against production for real — login, device registration,
+trigger, full 4-component sync, checksum verification, encryption. Then the critical proof
+Section 20 of this continuation's brief called for: copied the resulting *desktop-encrypted*
+`postgres_dump.snbk` to the VPS (a machine that never encrypted it), decrypted it inside a
+throwaway `node:22` container using only the backup password, restored it into a disposable
+`postgres:16` container, applied the known `GRANT ALL` fixup, verified real row counts (3
+tenants, 6 profiles, 2 clients, 6 credential rows), booted a scratch `speednum-api` container
+against the restored database, and logged in for real against the restored data (200, valid
+JWT). This is a second, independent restore from the desktop's own copy, on a machine that never
+touched the original snapshot — proving the backup is genuinely portable, not just present.
+All test data (devices, snapshots, tenants, profiles, disposable containers) cleaned up after.
+
+**Also found and fixed**: `admin_backups.py`'s audit-log insert 500'd — asyncpg's `jsonb` codec
+needs a JSON string, not a bare Python dict — and the presigned backup-archive download 404'd
+until Caddy got a `handle /backups/*` route mirroring the existing `/documents/*` one.
+
+**Still open, updated from Session 6's list:**
+1–4 unchanged (offsite-beyond-the-desktop, server-side encryption at rest, Google OAuth
+credentials, bespoke financial PDF layouts).
+5. The desktop app still has no signed installer; restore drills still require Docker on
+   whichever machine runs them (the VPS's Docker was used for this session's drill, matching
+   how the administrator's own machine would need to work).
+6. No automated performance/load testing beyond real numbers at current production scale
+   (pg_dump: ~0.25s, ~32KB compressed for the current tenant/client count) — not yet exercised
+   at meaningfully larger data volumes.
