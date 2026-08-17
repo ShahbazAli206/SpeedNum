@@ -11,18 +11,23 @@ ENV PYTHONUNBUFFERED=1 \
 RUN useradd -m -u 1000 user
 WORKDIR /app
 
-# pg_dump for services/backup_snapshots.py. Debian bookworm's own
-# `postgresql-client` package is v15, and pg_dump must be >= the server's
-# major version (16) or it can misdump newer catalogs — so this pulls the
-# matching v16 client from the official PGDG apt repo instead of the distro
-# default. gnupg/curl/ca-certificates are build-time only for adding that
-# repo's signing key; nothing here is needed at runtime beyond the client.
+# pg_dump for services/backup_snapshots.py. The distro's own
+# `postgresql-client` package doesn't reliably match Postgres 16, and
+# pg_dump must be >= the server's major version or it can misdump newer
+# catalogs — so this pulls the matching v16 client from the official PGDG
+# apt repo instead. The codename is read from /etc/os-release rather than
+# hardcoded: python:3.12-slim's underlying Debian release has changed
+# before (bookworm -> trixie) and will again, and a hardcoded codename
+# fails closed (apt 404s) rather than silently installing the wrong thing.
+# gnupg/curl/ca-certificates are build-time only for adding that repo's
+# signing key; nothing here is needed at runtime beyond the client itself.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
     && install -d /usr/share/postgresql-common/pgdg \
     && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
        -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+    && . /etc/os-release \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
        > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends postgresql-client-16 \
