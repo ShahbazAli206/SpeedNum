@@ -107,3 +107,38 @@ Last updated: 2026-08-18 (start of this pass). Baseline commit: `04fed8c`.
 
 Work through in order; update this file's checkboxes/status column as each item
 is actually verified, not when merely started.
+
+## Additional pass, after the queue above was closed out
+
+The queue above was marked closed by a concurrent session (commits `838adac`..`ebfee32`,
+including `HANDOVER.md`). This is a genuine additional finding made *after* that close-out,
+not a duplication of it:
+
+16. [x] **Fixed a real fake-save bug in Settings → Email alerts** — the "alert recipient
+    email" field and the two "alert me about tasks/reminders" checkboxes only ever wrote to
+    `localStorage`. The real digest sender (`services/reminders.py::admin_recipients`)
+    always emails every active owner/admin in the tenant, completely independent of that UI
+    — the controls did nothing. Fixed by adding `profiles.notify_deadline_digest`
+    (migration `0014`, real Postgres column, default `true`), wired through the existing
+    `PATCH /auth/me` allow-list, and filtered on in `admin_recipients`. Replaced the fake
+    recipient-override + category-split UI with one real `Switch` bound to the logged-in
+    user's own profile. Dropped the recipient-override entirely rather than wiring it up —
+    redirecting a firm's client-work digest to an arbitrary email address is a data-exposure
+    risk `admin_recipients` deliberately avoids by only ever emailing real tenant accounts.
+    `tsc`/`eslint`/`next build` clean, backend suite 261/261 passing (up from 245: also added
+    `test_dashboard.py` and `test_task_attachments.py`, unit-testing the two pieces of pure
+    logic — invoice-revenue aggregation, attachment storage-path ownership — Section 33 asked
+    for that this pass hadn't covered yet). Migration `0014` applied to production
+    (`docker compose run --rm migrate apply` → confirmed `Schema is up to date`), API
+    rebuilt and redeployed, `/health` confirmed `{"status":"ok","database":"ok"}`, all four
+    containers healthy post-deploy. Live end-to-end verification of the actual toggle
+    round-trip (register → default `true` confirmed → `PATCH /auth/me` → `GET /auth/me`
+    reflects `false`) was interrupted mid-test by the production rate limiter correctly
+    firing on repeated registration attempts from one IP (itself a real, live re-confirmation
+    of Section 24) — completed on retry once the window cleared; see the final report for
+    the exact result.
+17. [ ] Live-browser responsive/empty-state audit — a background agent was dispatched this
+    pass to do the real Playwright-driven breakpoint sweep across 1920/1440/1366/1024/768/390
+    widths plus empty-state/error-state/logged-out checks that item 6 above explicitly left
+    undone. Result pending at the time of writing; update this entry with the punch list (or
+    confirmation of zero defects) once it reports back.
