@@ -126,6 +126,13 @@ export function DataTable<T extends { id: string }>({
   // Outside-click and Escape used to be hand-rolled here; `Menu` owns both now.
   const [exporting, setExporting] = useState(false);
 
+  // Spreadsheet formula injection: Excel/Sheets treat a cell whose first
+  // character is one of these as a formula, even in files we generate
+  // ourselves from plain data. Prefixing with a quote forces literal text —
+  // the standard OWASP CSV-injection mitigation.
+  const sanitizeForSpreadsheet = (value: string) =>
+    /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+
   // Read exportValue (falling back to sortValue) so the file carries raw
   // values rather than the rendered React nodes.
   const exportRows = () => {
@@ -133,7 +140,7 @@ export function DataTable<T extends { id: string }>({
     const body = filtered.map((row) =>
       columns.map((column) => {
         const value = column.exportValue ? column.exportValue(row) : column.sortValue ? column.sortValue(row) : "";
-        return String(value);
+        return sanitizeForSpreadsheet(String(value));
       }),
     );
     return { header, body };
