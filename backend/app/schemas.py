@@ -976,6 +976,13 @@ class AuditLogRead(BaseModel):
     created_at: datetime
 
 
+class PlatformAuditLogRead(AuditLogRead):
+    """Same shape as AuditLogRead, plus which tenant it happened in — only
+    meaningful across the platform superadmin's cross-tenant view."""
+
+    tenant_name: str | None = None
+
+
 # --- Dashboard & reporting ----------------------------------------------------
 class DeadlineBuckets(BaseModel):
     overdue: int = 0

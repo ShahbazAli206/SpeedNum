@@ -5,70 +5,93 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { useToast } from "@/components/toast";
-import { Button, Checkbox, Field, Input, Select, toOptions } from "@/components/ui";
+import { Button, Checkbox, Field, Input, Select } from "@/components/ui";
+import { del, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import type { CustomField } from "@/lib/firm-demo";
+import { useAction, useApi } from "@/lib/hooks";
+import type { CustomField, FieldType } from "@/lib/types";
 
-const FIELD_TYPES = ["Text", "Paragraph", "Number", "Date", "Dropdown", "Checkbox"] as const;
-type FieldTypeLabel = (typeof FIELD_TYPES)[number];
+const TYPE_OPTIONS: { value: FieldType; label: string }[] = [
+  { value: "text", label: "Text" },
+  { value: "number", label: "Number" },
+  { value: "date", label: "Date" },
+  { value: "select", label: "Dropdown" },
+  { value: "checkbox", label: "Checkbox" },
+  { value: "email", label: "Email" },
+  { value: "phone", label: "Phone" },
+];
 
-interface DraftField {
-  id: string;
-  label: string;
-  fieldType: FieldTypeLabel;
-  required: boolean;
-}
-
-const TYPE_LABEL: Record<CustomField["field_type"], FieldTypeLabel> = {
+const TYPE_LABEL: Record<FieldType, string> = {
   text: "Text",
   number: "Number",
   date: "Date",
   select: "Dropdown",
   checkbox: "Checkbox",
-  email: "Text",
-  phone: "Text",
+  email: "Email",
+  phone: "Phone",
 };
 
-let draftSeq = 0;
-function nextDraftId() {
-  draftSeq += 1;
-  return `client-field-${draftSeq}`;
+/** Pull a human-readable reason out of an ApiError without leaking `[object]`. */
+function message(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
-export function ClientSettingsClient({ initialFields }: { initialFields: CustomField[] }) {
-  const toast = useToast();
+function slugify(label: string) {
+  return label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48);
+}
 
-  const [fields, setFields] = useState<DraftField[]>(() =>
-    initialFields
-      .sort((a, b) => a.position - b.position)
-      .map((field) => ({
-        id: field.id,
-        label: field.label,
-        fieldType: TYPE_LABEL[field.field_type],
-        required: field.is_required,
-      })),
-  );
+/**
+ * Client-entity slice of the same real `/custom-fields` API that backs the
+ * full admin page at /custom-fields — this page exists as a faster path from
+ * the Clients list specifically, not a separate feature or a separate store.
+ */
+export function ClientSettingsClient() {
+  const toast = useToast();
+  const fields = useApi<CustomField[]>("/custom-fields?entity=client");
+  const create = useAction();
 
   const [label, setLabel] = useState("");
-  const [fieldType, setFieldType] = useState<FieldTypeLabel>("Text");
+  const [fieldType, setFieldType] = useState<FieldType>("text");
   const [required, setRequired] = useState(false);
 
-  const addField = () => {
-    const trimmed = label.trim();
-    if (!trimmed) return;
+  const sorted = [...(fields.data ?? [])].sort((a, b) => a.position - b.position);
 
-    setFields((current) => [
-      ...current,
-      { id: nextDraftId(), label: trimmed, fieldType, required },
-    ]);
-    toast.success(`"${trimmed}" added`, "New client records will show this field.");
-    setLabel("");
-    setFieldType("Text");
-    setRequired(false);
-  };
+  const addField = () =>
+    create.run(async () => {
+      const trimmed = label.trim();
+      if (!trimmed) return;
+      const key = slugify(trimmed);
+      if (!key) {
+        toast.error("Couldn't add field", "Give it a label with at least one letter or number.");
+        return;
+      }
+      await post<CustomField>("/custom-fields", {
+        entity: "client",
+        key,
+        label: trimmed,
+        field_type: fieldType,
+        is_required: required,
+        position: sorted.length,
+      });
+      toast.success(`"${trimmed}" added`, "New client records will show this field.");
+      setLabel("");
+      setFieldType("text");
+      setRequired(false);
+      await fields.reload();
+    });
 
-  const removeField = (id: string) => {
-    setFields((current) => current.filter((field) => field.id !== id));
+  const removeField = async (field: CustomField) => {
+    try {
+      await del(`/custom-fields/${field.id}`);
+      toast.success("Field removed", field.label);
+      await fields.reload();
+    } catch (error) {
+      toast.error("Could not remove field", message(error, "Please try again."));
+    }
   };
 
   return (
@@ -115,6 +138,7 @@ export function ClientSettingsClient({ initialFields }: { initialFields: CustomF
             }}
             className="space-y-4 p-5"
           >
+            {create.error ? <p className="text-[12.5px] font-medium text-danger">{create.error}</p> : null}
             <Field label="Field label" required>
               <Input
                 value={label}
@@ -126,8 +150,8 @@ export function ClientSettingsClient({ initialFields }: { initialFields: CustomF
             <Field label="Field type">
               <Select
                 value={fieldType}
-                onValueChange={(next) => setFieldType(next as FieldTypeLabel)}
-                options={toOptions(FIELD_TYPES)}
+                onValueChange={(next) => setFieldType(next as FieldType)}
+                options={TYPE_OPTIONS}
               />
             </Field>
 
@@ -140,6 +164,7 @@ export function ClientSettingsClient({ initialFields }: { initialFields: CustomF
             <Button
               type="submit"
               className="w-full justify-center"
+              loading={create.pending}
               disabled={!label.trim()}
               icon={<Plus className="size-4" />}
             >
@@ -156,24 +181,25 @@ export function ClientSettingsClient({ initialFields }: { initialFields: CustomF
             <div>
               <h2 className="text-[15px] font-semibold text-ink">Custom client fields</h2>
               <p className="mt-0.5 text-[13px] text-muted">
-                {fields.length} field{fields.length === 1 ? "" : "s"} defined. Hidden fields stay
-                stored but are not shown on the form.
+                {sorted.length} field{sorted.length === 1 ? "" : "s"} defined.
               </p>
             </div>
           </div>
 
-          {fields.length === 0 ? (
+          {fields.isLoading ? (
+            <p className="px-5 py-10 text-center text-[13px] text-muted">Loading…</p>
+          ) : sorted.length === 0 ? (
             <p className="px-5 py-10 text-center text-[13px] text-muted">
               No custom fields defined yet. Add one on the left.
             </p>
           ) : (
             <ul className="divide-y divide-line">
-              {fields.map((field) => (
+              {sorted.map((field) => (
                 <li key={field.id} className="flex items-start justify-between gap-3 px-5 py-3.5">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="text-[14px] font-semibold text-ink">{field.label}</p>
-                      {field.required ? (
+                      {field.is_required ? (
                         <span
                           className={cn(
                             "rounded-full bg-danger-soft px-2 py-0.5 text-[10.5px] font-bold text-danger uppercase",
@@ -183,11 +209,11 @@ export function ClientSettingsClient({ initialFields }: { initialFields: CustomF
                         </span>
                       ) : null}
                     </div>
-                    <p className="mt-0.5 text-[12.5px] text-muted">{field.fieldType}</p>
+                    <p className="mt-0.5 text-[12.5px] text-muted">{TYPE_LABEL[field.field_type]}</p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => removeField(field.id)}
+                    onClick={() => removeField(field)}
                     className="grid size-8 shrink-0 place-items-center rounded-lg text-muted transition hover:bg-danger-soft hover:text-danger"
                     aria-label={`Remove ${field.label}`}
                   >

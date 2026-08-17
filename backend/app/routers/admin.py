@@ -5,12 +5,13 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from ..deps import SessionDep, SuperadminDep
-from ..models import Client, Deadline, EngagementLetter, Profile, Tenant
+from ..models import AuditLog, Client, Deadline, EngagementLetter, Profile, Tenant
+from ..schemas import PlatformAuditLogRead
 from ..utils import ensure_found
 from .reminders import sweep_tenant
 
@@ -92,6 +93,33 @@ async def sweep_all_reminders(
         for key, value in result.as_dict().items():
             totals[key] += value
     return totals
+
+
+@router.get("/audit", response_model=list[PlatformAuditLogRead])
+async def platform_audit(
+    session: SessionDep, user: SuperadminDep, limit: int = Query(default=100, ge=1, le=500)
+) -> list[dict[str, Any]]:
+    rows = (
+        await session.execute(
+            select(AuditLog, Tenant.name)
+            .outerjoin(Tenant, Tenant.id == AuditLog.tenant_id)
+            .order_by(AuditLog.created_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    return [
+        {
+            "id": entry.id,
+            "actor_email": entry.actor_email,
+            "action": entry.action,
+            "entity": entry.entity,
+            "entity_id": entry.entity_id,
+            "summary": entry.summary,
+            "created_at": entry.created_at,
+            "tenant_name": tenant_name,
+        }
+        for entry, tenant_name in rows
+    ]
 
 
 @router.get("/stats")
