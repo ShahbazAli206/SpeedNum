@@ -209,6 +209,35 @@ async def _next_position(session: SessionDep, tenant_id: uuid.UUID, status_value
     return (current or 0) + 1
 
 
+async def _validate_task_references(session: SessionDep, tenant_id: uuid.UUID, data: dict) -> None:
+    """`client_id` and `assignee_id` arrive as bare UUIDs from the request
+    body — nothing upstream confirms they belong to this tenant before this
+    point. Without this check, tenant A can point a task's assignee_id (or
+    client_id) at a real profile/client row in tenant B: the row saves
+    successfully (the FK only requires the id to exist *somewhere*, not in
+    this tenant), profile_names() then silently fails to resolve a display
+    name for it (cross-tenant lookup, correctly scoped) masking the problem
+    in the read-back — but the raw id is stored, and anything that resolves
+    it directly (Profile.get, an email send) does not re-check tenancy.
+    Found via a live cross-tenant test, not by inspection.
+    """
+    client_id = data.get("client_id")
+    if client_id:
+        exists = await session.scalar(
+            select(Client.id).where(Client.id == client_id, Client.tenant_id == tenant_id)
+        )
+        if exists is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "That client does not belong to this tenant.")
+
+    assignee_id = data.get("assignee_id")
+    if assignee_id:
+        exists = await session.scalar(
+            select(Profile.id).where(Profile.id == assignee_id, Profile.tenant_id == tenant_id)
+        )
+        if exists is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "That assignee does not belong to this tenant.")
+
+
 async def _notify_assignee(session: SessionDep, *, tenant_id: uuid.UUID, tenant_name: str, task: Task) -> None:
     """In-app notification always; email only if the assignee has a usable
     address and a transport is actually configured (deliver() itself reports
@@ -254,12 +283,19 @@ async def create_task(
     payload: TaskCreate, session: SessionDep, user: TenantUserDep, request: Request
 ) -> TaskRead:
     data = payload.model_dump()
-    if data.get("project_id") and not data.get("client_id"):
+    if data.get("project_id"):
+        # Checked unconditionally, not only when client_id is also absent —
+        # a payload supplying both would otherwise skip this entirely (the
+        # same class of cross-tenant-reference bug _validate_task_references
+        # closes for client_id/assignee_id below).
         project = await session.scalar(
             select(Project).where(Project.id == data["project_id"], Project.tenant_id == user.tenant_id)
         )
         ensure_found(project, "Project")
-        data["client_id"] = project.client_id
+        if not data.get("client_id"):
+            data["client_id"] = project.client_id
+
+    await _validate_task_references(session, user.tenant_id, data)
 
     if data.get("position") is None:
         data["position"] = await _next_position(session, user.tenant_id, data["status"])
@@ -303,6 +339,8 @@ async def update_task(
         select(Task).where(Task.id == task_id, Task.tenant_id == user.tenant_id)
     )
     ensure_found(task, "Task")
+
+    await _validate_task_references(session, user.tenant_id, payload.model_dump(exclude_unset=True))
 
     previous_status = task.status
     previous_assignee = task.assignee_id
