@@ -46,14 +46,17 @@ async def _audit(
         text(
             "insert into public.backup_audit_log "
             "(snapshot_id, snapshot_sequence, actor_profile_id, action, detail, ip_address, user_agent) "
-            "values (:snapshot_id, :sequence, :actor, :action, :detail, :ip, :ua)"
+            "values (:snapshot_id, :sequence, :actor, :action, cast(:detail as jsonb), :ip, :ua)"
         ),
         {
             "snapshot_id": snapshot_id,
             "sequence": snapshot_sequence,
             "actor": user.profile.id,
             "action": action,
-            "detail": detail or {},
+            # asyncpg's jsonb codec wants a JSON string it can encode, not a
+            # Python dict — a bare dict fails with "AttributeError: 'dict'
+            # object has no attribute 'encode'" (found via a live test).
+            "detail": json.dumps(detail or {}),
             "ip": client_ip(request),
             "ua": request.headers.get("user-agent", "")[:500],
         },
