@@ -17,6 +17,7 @@ from .config import settings
 from .db import engine
 from .routers import (
     admin,
+    admin_backups,
     auth,
     client_documents,
     client_expenses,
@@ -42,7 +43,7 @@ from .routers import (
     users,
     workflows,
 )
-from .services import scheduler
+from .services import backup_scheduler, scheduler
 from .services.email import email_status
 
 logging.basicConfig(
@@ -112,15 +113,19 @@ async def lifespan(app: FastAPI):
     # Generates reminders (and their emails) on a daily timer. Without this the
     # "10 days left" warnings only ever appear when someone presses Check now.
     sweep_task = scheduler.start(app.state)
+    # Builds disaster-recovery backup snapshots on a daily timer — see
+    # services/backup_scheduler.py and BACKUP_ARCHITECTURE.md.
+    backup_task = backup_scheduler.start(app.state)
 
     yield
 
-    if sweep_task is not None:
-        sweep_task.cancel()
-        # Let the task observe the cancellation so it can unwind its session
-        # instead of being torn down mid-transaction.
-        with suppress(asyncio.CancelledError):
-            await sweep_task
+    for task in (sweep_task, backup_task):
+        if task is not None:
+            task.cancel()
+            # Let the task observe the cancellation so it can unwind its
+            # session instead of being torn down mid-transaction.
+            with suppress(asyncio.CancelledError):
+                await task
     await engine.dispose()
 
 
@@ -176,6 +181,7 @@ for router in (
     imports.router,
     settings_router.router,
     admin.router,
+    admin_backups.router,
     portal.router,
     public.router,
     client_invoices.router,

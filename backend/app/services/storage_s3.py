@@ -86,16 +86,21 @@ def _presign_client():
     return _client(settings.s3_public_endpoint)
 
 
-async def create_upload_url(path: str) -> tuple[str, str]:
+async def create_upload_url(path: str, *, bucket: str | None = None) -> tuple[str, str]:
     """Sign a PUT for `path`. No token — S3 presigned URLs carry their own
     signature in the query string, so the frontend's plain `fetch(url, {method:
-    'PUT'})` needs nothing else (see frontend/src/lib/storage.ts)."""
+    'PUT'})` needs nothing else (see frontend/src/lib/storage.ts).
+
+    `bucket` defaults to the documents bucket; services/backup_snapshots.py
+    passes settings.backup_s3_bucket instead — same client, same signing,
+    a different (isolated) bucket.
+    """
     _require_configured()
     try:
         url = await asyncio.to_thread(
             _presign_client().generate_presigned_url,
             "put_object",
-            Params={"Bucket": settings.s3_bucket, "Key": path.lstrip("/")},
+            Params={"Bucket": bucket or settings.s3_bucket, "Key": path.lstrip("/")},
             ExpiresIn=UPLOAD_TTL_SECONDS,
         )
     except ClientError as exc:
@@ -104,7 +109,9 @@ async def create_upload_url(path: str) -> tuple[str, str]:
     return url, ""
 
 
-async def create_download_url(path: str, *, expires_in: int = DOWNLOAD_TTL_SECONDS) -> str:
+async def create_download_url(
+    path: str, *, expires_in: int = DOWNLOAD_TTL_SECONDS, bucket: str | None = None
+) -> str:
     """Sign a GET for an object that should already exist.
 
     Unlike Supabase's sign-URL endpoint, generating an S3 presigned URL is a
@@ -112,12 +119,15 @@ async def create_download_url(path: str, *, expires_in: int = DOWNLOAD_TTL_SECON
     cheap head_object first to keep the same "that file is no longer in
     storage" behaviour on a metadata row that outlived its object, rather than
     handing back a URL that 404s once the browser follows it.
+
+    `bucket` defaults to the documents bucket; see create_upload_url.
     """
     _require_configured()
     key = path.lstrip("/")
+    target_bucket = bucket or settings.s3_bucket
     admin = _admin_client()
     try:
-        await asyncio.to_thread(admin.head_object, Bucket=settings.s3_bucket, Key=key)
+        await asyncio.to_thread(admin.head_object, Bucket=target_bucket, Key=key)
     except ClientError as exc:
         code = exc.response.get("Error", {}).get("Code", "")
         if code in ("404", "NoSuchKey", "NotFound"):
@@ -129,7 +139,7 @@ async def create_download_url(path: str, *, expires_in: int = DOWNLOAD_TTL_SECON
         return await asyncio.to_thread(
             _presign_client().generate_presigned_url,
             "get_object",
-            Params={"Bucket": settings.s3_bucket, "Key": key},
+            Params={"Bucket": target_bucket, "Key": key},
             ExpiresIn=expires_in,
         )
     except ClientError as exc:
@@ -137,14 +147,67 @@ async def create_download_url(path: str, *, expires_in: int = DOWNLOAD_TTL_SECON
         raise StorageError("Could not prepare the download.") from exc
 
 
-async def delete_object(path: str) -> None:
+async def delete_object(path: str, *, bucket: str | None = None) -> None:
     """Best-effort, same as storage_supabase.py: a missing object is success,
     the row is already gone by the time this is called."""
     if not is_configured():
         return
     try:
         await asyncio.to_thread(
-            _admin_client().delete_object, Bucket=settings.s3_bucket, Key=path.lstrip("/")
+            _admin_client().delete_object,
+            Bucket=bucket or settings.s3_bucket,
+            Key=path.lstrip("/"),
         )
     except ClientError as exc:
         log.warning("S3 delete failed for %s: %s", path, exc)
+
+
+async def put_object_bytes(path: str, data: bytes, *, bucket: str) -> None:
+    """Upload bytes the server already has in memory/disk — used by
+    services/backup_snapshots.py to write manifest.json/config.json/
+    storage-index.json directly, without the presigned-PUT round trip the
+    browser upload path needs (there is no browser here to hand a URL to)."""
+    _require_configured()
+    try:
+        await asyncio.to_thread(
+            _admin_client().put_object, Bucket=bucket, Key=path.lstrip("/"), Body=data
+        )
+    except ClientError as exc:
+        log.warning("S3 put_object failed for %s: %s", path, exc)
+        raise StorageError("Could not write the object.") from exc
+
+
+async def list_objects(*, bucket: str, prefix: str = "") -> list[dict]:
+    """List every object under `prefix`, paginating transparently — used by
+    the backup snapshot builder to enumerate the documents bucket and by the
+    admin_backups router to enumerate existing snapshot folders."""
+    _require_configured()
+
+    def _list_sync() -> list[dict]:
+        client = _admin_client()
+        paginator = client.get_paginator("list_objects_v2")
+        results: list[dict] = []
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            results.extend(page.get("Contents", []))
+        return results
+
+    try:
+        return await asyncio.to_thread(_list_sync)
+    except ClientError as exc:
+        log.warning("S3 list_objects failed for prefix %s: %s", prefix, exc)
+        raise StorageError("Could not list objects.") from exc
+
+
+async def get_object_bytes(path: str, *, bucket: str) -> bytes:
+    """Read an object's full bytes — used to fetch a document from the
+    documents bucket while building a snapshot, and to re-read manifest.json
+    while verifying one."""
+    _require_configured()
+    try:
+        response = await asyncio.to_thread(
+            _admin_client().get_object, Bucket=bucket, Key=path.lstrip("/")
+        )
+        return await asyncio.to_thread(response["Body"].read)
+    except ClientError as exc:
+        log.warning("S3 get_object failed for %s: %s", path, exc)
+        raise StorageError("Could not read the object.") from exc

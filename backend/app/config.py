@@ -148,6 +148,36 @@ class Settings(BaseSettings):
         default=30, ge=0, alias="REMINDER_SWEEP_DELAY_SECONDS"
     )
 
+    # --- Disaster-recovery backup snapshots -------------------------------------
+    # A separate in-process scheduler (services/backup_scheduler.py), same
+    # advisory-lock-guarded pattern as the reminder sweep above so exactly one
+    # of the WEB_CONCURRENCY workers ever builds a snapshot at a time.
+    backup_scheduler_enabled: bool = Field(default=True, alias="BACKUP_SCHEDULER_ENABLED")
+    backup_scheduler_hour: int = Field(default=3, ge=0, le=23, alias="BACKUP_SCHEDULER_HOUR")
+    # Below this total storage size, every snapshot tars *every* object (cheap
+    # at this scale, and simplest to restore). Above it, only objects whose
+    # content hash changed since the parent snapshot are archived — see
+    # services/backup_snapshots.py for the full incremental design.
+    backup_incremental_threshold_bytes: int = Field(
+        default=500 * 1024 * 1024, alias="BACKUP_INCREMENTAL_THRESHOLD_BYTES"
+    )
+    # Force a full (non-incremental) storage archive every N snapshots even
+    # once incremental mode is active, bounding how long a restore's
+    # reference chain can get — losing one ancestor archive would otherwise
+    # break every snapshot after it.
+    backup_synthetic_full_every_n: int = Field(default=30, ge=1, alias="BACKUP_SYNTHETIC_FULL_EVERY_N")
+    # Presigned backup-archive downloads need a much longer window than a
+    # browser document download (storage.py's DOWNLOAD_TTL_SECONDS=300) —
+    # these can be far larger and are fetched by a desktop app, not a browser
+    # tab that's already open.
+    backup_download_ttl_seconds: int = Field(default=3600, alias="BACKUP_DOWNLOAD_TTL_SECONDS")
+    # Bucket for backup archives — deliberately separate from `s3_bucket`
+    # (documents) so a policy mistake on one can never expose the other.
+    backup_s3_bucket: str = Field(default="backups", alias="BACKUP_S3_BUCKET")
+    # Set at deploy time (e.g. the git short SHA) so a backup manifest records
+    # something meaningful. No clean source of truth existed before this.
+    app_version: str = Field(default="dev", alias="APP_VERSION")
+
     @field_validator("database_url")
     @classmethod
     def _normalise_database_url(cls, value: str) -> str:

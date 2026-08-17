@@ -11,6 +11,24 @@ ENV PYTHONUNBUFFERED=1 \
 RUN useradd -m -u 1000 user
 WORKDIR /app
 
+# pg_dump for services/backup_snapshots.py. Debian bookworm's own
+# `postgresql-client` package is v15, and pg_dump must be >= the server's
+# major version (16) or it can misdump newer catalogs — so this pulls the
+# matching v16 client from the official PGDG apt repo instead of the distro
+# default. gnupg/curl/ca-certificates are build-time only for adding that
+# repo's signing key; nothing here is needed at runtime beyond the client.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+       -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+       > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-16 \
+    && apt-get purge -y --auto-remove curl gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --chown=user:user requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
