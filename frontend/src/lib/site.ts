@@ -218,6 +218,12 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         icon: "shield-check",
         description: "Super-admin: tenants, plans and audit log",
       },
+      {
+        label: "Backup & Recovery",
+        href: "/admin/backups",
+        icon: "hard-drive",
+        description: "Superadmin: snapshots, devices, and disaster recovery",
+      },
     ],
   },
 ];
