@@ -50,9 +50,12 @@ class TestConfiguration:
 
 class TestDispatcher:
     """storage.py must route to whichever provider STORAGE_PROVIDER names,
-    defaulting to the original Supabase behaviour when unset."""
+    defaulting to S3 (self-hosted) — the same safe-by-default posture as
+    services/accounts.py's auth-provider dispatch: only an explicit
+    "supabase" ever selects the rollback provider, so an unset or mistyped
+    value fails toward the self-hosted path, not silently toward Supabase."""
 
-    def test_defaults_to_supabase(self, monkeypatch):
+    def test_explicit_supabase_selects_the_rollback_provider(self, monkeypatch):
         monkeypatch.setattr(storage.settings, "storage_provider", "supabase")
         assert storage._provider() is storage.storage_supabase
 
@@ -64,6 +67,10 @@ class TestDispatcher:
         monkeypatch.setattr(storage.settings, "storage_provider", "S3")
         assert storage._provider() is storage.storage_s3
 
-    def test_unknown_provider_falls_back_to_supabase(self, monkeypatch):
+    def test_unknown_provider_falls_back_to_s3_not_supabase(self, monkeypatch):
         monkeypatch.setattr(storage.settings, "storage_provider", "something-else")
-        assert storage._provider() is storage.storage_supabase
+        assert storage._provider() is storage.storage_s3
+
+    def test_unset_provider_falls_back_to_s3_not_supabase(self, monkeypatch):
+        monkeypatch.setattr(storage.settings, "storage_provider", "")
+        assert storage._provider() is storage.storage_s3

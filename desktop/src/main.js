@@ -35,8 +35,9 @@ function userDataPaths() {
 async function ensureFreshAccessToken() {
   if (!session) throw new Error("Not signed in.");
   try {
-    // A cheap authenticated call to check the current token is still good;
-    // /auth/me exists on every deployment and needs no special scope.
+    // Piggybacks on a call this session always needs next anyway (the
+    // backup list) rather than a separate probe request — a superadmin
+    // session has no cheaper authenticated endpoint to check against.
     await backupClient.listSnapshots({ baseUrl: session.baseUrl, accessToken: session.accessToken });
   } catch (err) {
     if (err.status !== 401) throw err;
@@ -48,7 +49,31 @@ async function ensureFreshAccessToken() {
 }
 
 async function persistSession() {
-  await secureStore.save({ baseUrl: session.baseUrl, refreshToken: session.refreshToken });
+  await secureStore.save({
+    baseUrl: session.baseUrl,
+    refreshToken: session.refreshToken,
+    deviceId: session.deviceId,
+  });
+}
+
+/**
+ * Registers this installation once and reuses the same device_id forever
+ * after (persisted alongside the refresh token) — a fresh registration on
+ * every login would make backup_devices grow without bound and defeat the
+ * point of a per-installation revocation target (admin_devices.py).
+ */
+async function ensureDeviceRegistered() {
+  if (session.deviceId) return;
+  const os = require("os");
+  const { device_id } = await backupClient.registerDevice({
+    baseUrl: session.baseUrl,
+    accessToken: session.accessToken,
+    name: `${os.hostname()} (${os.userInfo().username})`,
+    platform: process.platform,
+    appVersion: app.getVersion(),
+  });
+  session.deviceId = device_id;
+  await persistSession();
 }
 
 function createWindow() {
@@ -89,8 +114,13 @@ ipcMain.handle("speednum:restoreSession", async () => {
   if (!saved) return null;
   try {
     const refreshed = await backupClient.refresh({ baseUrl: saved.baseUrl, refreshToken: saved.refreshToken });
-    session = { baseUrl: saved.baseUrl, accessToken: refreshed.accessToken, refreshToken: refreshed.refreshToken };
-    await persistSession();
+    session = {
+      baseUrl: saved.baseUrl,
+      accessToken: refreshed.accessToken,
+      refreshToken: refreshed.refreshToken,
+      deviceId: saved.deviceId,
+    };
+    await ensureDeviceRegistered();
     return { baseUrl: saved.baseUrl, restored: true };
   } catch {
     await secureStore.clear();
@@ -108,8 +138,10 @@ ipcMain.handle("speednum:login", async (_event, { baseUrl, email, password }) =>
     baseUrl,
     accessToken: result.accessToken,
     refreshToken: result.refreshToken,
+    deviceId: null,
   };
   await persistSession();
+  await ensureDeviceRegistered();
   return { profile: result.profile };
 });
 
@@ -139,10 +171,12 @@ ipcMain.handle("speednum:getSyncState", async () => {
 
 ipcMain.handle("speednum:runSyncNow", async (_event, { backupPassword }) => {
   await ensureFreshAccessToken();
+  await ensureDeviceRegistered();
   const { statePath, backupsDir } = userDataPaths();
   return runSync({
     baseUrl: session.baseUrl,
     accessToken: session.accessToken,
+    deviceId: session.deviceId,
     backupPassword,
     backupsDir,
     statePath,
@@ -159,9 +193,11 @@ ipcMain.handle("speednum:setSyncInterval", async (_event, { minutes, backupPassw
   if (stopScheduler) stopScheduler();
   stopScheduler = scheduleSync(async () => {
     await ensureFreshAccessToken();
+    await ensureDeviceRegistered();
     return runSync({
       baseUrl: session.baseUrl,
       accessToken: session.accessToken,
+      deviceId: session.deviceId,
       backupPassword,
       backupsDir,
       statePath,
@@ -173,6 +209,7 @@ ipcMain.handle("speednum:setSyncInterval", async (_event, { minutes, backupPassw
 
 ipcMain.handle("speednum:runRestoreDrill", async (_event, { snapshotId, backupPassword, apiImage }) => {
   await ensureFreshAccessToken();
+  await ensureDeviceRegistered();
   const { backupsDir } = userDataPaths();
   const cryptoEnvelope = require("./crypto-envelope");
   const os = require("os");
@@ -192,6 +229,7 @@ ipcMain.handle("speednum:runRestoreDrill", async (_event, { snapshotId, backupPa
       baseUrl: session.baseUrl,
       accessToken: session.accessToken,
       snapshotId,
+      deviceId: session.deviceId,
       ok: result.ok,
       detail: result.detail,
     });

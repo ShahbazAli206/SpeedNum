@@ -135,10 +135,12 @@ class TestSignedUrlParsing:
 class TestConfiguration:
     """storage.is_configured()/StorageError are the dispatcher's public
     contract (provider-agnostic); the underlying settings and
-    _require_configured() checked here are the Supabase provider's own, since
-    STORAGE_PROVIDER defaults to "supabase" and nothing here changes it."""
+    _require_configured() checked here are the Supabase provider's own, so
+    each test explicitly selects it — STORAGE_PROVIDER defaults to "s3" (see
+    test_storage_s3.py's TestDispatcher), not this rollback provider."""
 
     def test_unconfigured_storage_is_reported_not_assumed(self, monkeypatch):
+        monkeypatch.setattr(storage.settings, "storage_provider", "supabase")
         monkeypatch.setattr(storage_supabase.settings, "supabase_url", "")
         monkeypatch.setattr(storage_supabase.settings, "supabase_service_role_key", "")
         assert storage.is_configured() is False
@@ -146,11 +148,13 @@ class TestConfiguration:
             storage_supabase._require_configured()
 
     def test_both_settings_are_required(self, monkeypatch):
+        monkeypatch.setattr(storage.settings, "storage_provider", "supabase")
         monkeypatch.setattr(storage_supabase.settings, "supabase_url", "https://ref.supabase.co")
         monkeypatch.setattr(storage_supabase.settings, "supabase_service_role_key", "")
         assert storage.is_configured() is False
 
     def test_configured_when_both_are_present(self, monkeypatch):
+        monkeypatch.setattr(storage.settings, "storage_provider", "supabase")
         monkeypatch.setattr(storage_supabase.settings, "supabase_url", "https://ref.supabase.co")
         monkeypatch.setattr(storage_supabase.settings, "supabase_service_role_key", "service-key")
         assert storage.is_configured() is True
@@ -162,6 +166,7 @@ def test_delete_is_a_no_op_when_storage_is_unconfigured(monkeypatch):
     an async plugin: the suite has no pytest-asyncio dependency."""
     import asyncio
 
+    monkeypatch.setattr(storage.settings, "storage_provider", "supabase")
     monkeypatch.setattr(storage_supabase.settings, "supabase_url", "")
     monkeypatch.setattr(storage_supabase.settings, "supabase_service_role_key", "")
     asyncio.run(storage.delete_object("tenant/client/file.pdf"))

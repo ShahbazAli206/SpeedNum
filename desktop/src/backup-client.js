@@ -39,13 +39,25 @@ function extractRefreshCookie(response) {
   return null;
 }
 
+function detailToMessage(detail) {
+  // FastAPI's own validation failures (422) shape `detail` as an array of
+  // {loc, msg, type} objects, not a string — String(detail) on that stringifies
+  // to unreadable "[object Object]" noise. Every other error path in this
+  // backend (HTTPException(status, "a plain string")) already gives a string.
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((entry) => entry?.msg || JSON.stringify(entry)).join("; ");
+  }
+  return JSON.stringify(detail);
+}
+
 async function parseJsonOrThrow(response) {
   const text = await response.text();
   const parsed = text ? JSON.parse(text) : null;
   if (!response.ok) {
     const message =
       parsed && typeof parsed === "object" && "detail" in parsed
-        ? String(parsed.detail)
+        ? detailToMessage(parsed.detail)
         : `Request failed (${response.status}).`;
     throw new ApiError(response.status, message);
   }
@@ -86,26 +98,45 @@ function authed(baseUrl, path, accessToken, init = {}) {
   }).then(parseJsonOrThrow);
 }
 
+/**
+ * A registered device identity, required (as `X-Device-Id`) on any endpoint
+ * that actually hands over backup bytes — see admin_devices.py's
+ * require_active_device. Registering once and persisting the returned id is
+ * this app's job (main.js); a revoked device is rejected here the same way
+ * an unregistered one is (403), which is the whole point of a device-level
+ * kill switch independent of the session/refresh-token machinery.
+ */
+const registerDevice = ({ baseUrl, accessToken, name, platform, appVersion }) =>
+  authed(baseUrl, "/admin/devices/register", accessToken, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, platform, app_version: appVersion }),
+  });
+
 const listSnapshots = ({ baseUrl, accessToken }) => authed(baseUrl, "/admin/backups", accessToken);
 
 const getManifest = ({ baseUrl, accessToken, snapshotId }) =>
   authed(baseUrl, `/admin/backups/${snapshotId}`, accessToken);
 
-const getDownloadUrl = ({ baseUrl, accessToken, snapshotId, component }) =>
+const getDownloadUrl = ({ baseUrl, accessToken, snapshotId, component, deviceId }) =>
   authed(baseUrl, `/admin/backups/${snapshotId}/download-url?component=${encodeURIComponent(component)}`, accessToken, {
     method: "POST",
+    headers: { "X-Device-Id": deviceId },
   });
 
 const triggerBackup = ({ baseUrl, accessToken }) =>
   authed(baseUrl, "/admin/backups/run", accessToken, { method: "POST" });
 
-const ackDownload = ({ baseUrl, accessToken, snapshotId }) =>
-  authed(baseUrl, `/admin/backups/${snapshotId}/ack-download`, accessToken, { method: "POST" });
+const ackDownload = ({ baseUrl, accessToken, snapshotId, deviceId }) =>
+  authed(baseUrl, `/admin/backups/${snapshotId}/ack-download`, accessToken, {
+    method: "POST",
+    headers: { "X-Device-Id": deviceId },
+  });
 
-const reportRestoreDrill = ({ baseUrl, accessToken, snapshotId, ok, detail }) =>
+const reportRestoreDrill = ({ baseUrl, accessToken, snapshotId, deviceId, ok, detail }) =>
   authed(baseUrl, `/admin/backups/${snapshotId}/restore-drill`, accessToken, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Device-Id": deviceId },
     body: JSON.stringify({ ok, detail: detail || {} }),
   });
 
@@ -141,6 +172,7 @@ module.exports = {
   ApiError,
   login,
   refresh,
+  registerDevice,
   listSnapshots,
   getManifest,
   getDownloadUrl,

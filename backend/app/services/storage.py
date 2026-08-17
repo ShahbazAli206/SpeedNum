@@ -36,10 +36,15 @@ UPLOAD_TTL_SECONDS = storage_supabase.UPLOAD_TTL_SECONDS
 
 
 def _provider():
-    choice = (settings.storage_provider or "supabase").strip().lower()
-    if choice == "s3":
-        return storage_s3
-    return storage_supabase
+    # Same safe-by-default posture as services/accounts.py's _using_local():
+    # anything other than an explicit "supabase" routes to the self-hosted
+    # path, so an unset/mistyped STORAGE_PROVIDER fails toward S3, not
+    # silently toward Supabase, which is otherwise out of the active
+    # request path entirely.
+    choice = (settings.storage_provider or "s3").strip().lower()
+    if choice == "supabase":
+        return storage_supabase
+    return storage_s3
 
 
 def is_configured() -> bool:

@@ -249,11 +249,12 @@ async def invite_to_portal(
 ) -> PortalInviteResult:
     """Send (or resend) the client's portal welcome email.
 
-    First call: creates a Supabase Auth user and a `profiles` row pinned to
-    this client. Later calls — the client record's "Resend welcome email"
-    button — reuse that same login and only rotate its password, since the
-    original is never retrievable once Supabase hashes it; a magic sign-in
-    link is regenerated too, as the previous one may have expired.
+    First call: creates a local-auth login (services/accounts.provision) and a
+    `profiles` row pinned to this client. Later calls — the client record's
+    "Resend welcome email" button — reuse that same login and only rotate its
+    password, since the original is never retrievable once it's Argon2id-hashed;
+    a magic sign-in link is regenerated too, as the previous one may have
+    expired.
     """
     client = await session.scalar(
         select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)

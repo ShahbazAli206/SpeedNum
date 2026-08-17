@@ -33,7 +33,7 @@ const syncState = require("./sync-state");
 
 const COMPONENTS = ["config", "storage_index", "postgres_dump", "storage_delta"];
 
-async function runSync({ baseUrl, accessToken, backupPassword, backupsDir, statePath, log = () => {} }) {
+async function runSync({ baseUrl, accessToken, deviceId, backupPassword, backupsDir, statePath, log = () => {} }) {
   const state = await syncState.load(statePath);
   state.lastSyncStartedAt = new Date().toISOString();
   await syncState.save(statePath, state);
@@ -72,7 +72,13 @@ async function runSync({ baseUrl, accessToken, backupPassword, backupsDir, state
     for (const component of COMPONENTS) {
       const manifestEntry = manifest.components?.[component];
       log(`  downloading ${component}...`);
-      const { url } = await backupClient.getDownloadUrl({ baseUrl, accessToken, snapshotId: latest.id, component });
+      const { url } = await backupClient.getDownloadUrl({
+        baseUrl,
+        accessToken,
+        snapshotId: latest.id,
+        component,
+        deviceId,
+      });
       const plainPath = path.join(stagingDir, `${component}.plain`);
       await backupClient.downloadToFile({
         url,
@@ -97,7 +103,7 @@ async function runSync({ baseUrl, accessToken, backupPassword, backupsDir, state
       ]),
     );
 
-    await backupClient.ackDownload({ baseUrl, accessToken, snapshotId: latest.id });
+    await backupClient.ackDownload({ baseUrl, accessToken, snapshotId: latest.id, deviceId });
 
     state.snapshots[latest.id] = {
       sequence: latest.sequence,

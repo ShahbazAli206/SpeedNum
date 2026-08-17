@@ -183,7 +183,7 @@ async def resend_credentials(
 ) -> CredentialResult:
     """Rotate a staff member's password to a fresh one-time value and re-send it.
 
-    The original is unrecoverable once Supabase has hashed it, so "resend" is
+    The original is unrecoverable once it's Argon2id-hashed, so "resend" is
     necessarily "reset and send" — the same shape as the client-portal resend in
     routers/clients.py.
     """
@@ -284,9 +284,10 @@ async def remove_member(
     The `profiles` row is deactivated, not deleted: the clients, tasks and
     deadlines they own reference this id, and a hard delete would null those
     assignments out and lose the audit trail. Deactivating is enough to lock
-    them out — get_current_user refuses an inactive profile's token — and the
-    Supabase Auth login is revoked as well so the credentials themselves stop
-    working rather than merely being rejected by us.
+    them out — get_current_user refuses an inactive profile's token — and every
+    refresh token for the account is revoked as well (services/local_auth.py's
+    admin_revoke_user), so the credentials themselves stop working rather than
+    merely being rejected by us.
     """
     member = await session.scalar(
         select(Profile).where(
@@ -423,8 +424,8 @@ async def accept_invitation(
     """Attach the signed-in account to the firm that invited it.
 
     Called by the signup form when it was reached from an invitation link. It has
-    to run *after* Supabase has created the auth user, because until then there
-    is no profile to attach — which is also why it takes CurrentUserDep rather
+    to run *after* /auth/register has created the profile, because until then
+    there is nothing to attach — which is also why it takes CurrentUserDep rather
     than TenantUserDep: the caller has no tenant yet, that is the point.
     """
     invitation = await session.scalar(

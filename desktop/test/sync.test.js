@@ -43,9 +43,12 @@ function manifestFor(sequence) {
   return { manifest_version: 1, snapshot_id: SNAPSHOT_ID, sequence, components, counts: {} };
 }
 
-function fakeBackend({ ackCalls, downloadUrlCalls }) {
-  return async (url) => {
+const TEST_DEVICE_ID = "22222222-2222-2222-2222-222222222222";
+
+function fakeBackend({ ackCalls, downloadUrlCalls, deviceIdHeaders = [] }) {
+  return async (url, init = {}) => {
     const u = new URL(url);
+    const headers = init.headers || {};
     if (u.pathname.endsWith("/admin/backups")) {
       return jsonResponse([
         {
@@ -64,11 +67,16 @@ function fakeBackend({ ackCalls, downloadUrlCalls }) {
       return jsonResponse(manifestFor(7));
     }
     if (u.pathname.endsWith("/download-url")) {
+      // require_active_device (admin_devices.py) gates this endpoint on a
+      // real deployment — the fixture asserts the header exists at all
+      // rather than silently accepting a call that would 403 for real.
+      deviceIdHeaders.push(headers["X-Device-Id"]);
       const component = u.searchParams.get("component");
       downloadUrlCalls.push(component);
       return jsonResponse({ url: `https://fake-minio.example/${component}`, expires_in: 3600 });
     }
     if (u.pathname.endsWith("/ack-download")) {
+      deviceIdHeaders.push(headers["X-Device-Id"]);
       ackCalls.push(true);
       return jsonResponse({ ok: true });
     }
@@ -89,9 +97,10 @@ test("a full sync downloads, verifies, and encrypts every component, then acks",
   const statePath = path.join(backupsDir, "state.json");
   const ackCalls = [];
   const downloadUrlCalls = [];
+  const deviceIdHeaders = [];
 
   const originalFetch = global.fetch;
-  global.fetch = fakeBackend({ ackCalls, downloadUrlCalls });
+  global.fetch = fakeBackend({ ackCalls, downloadUrlCalls, deviceIdHeaders });
   t.after(() => {
     global.fetch = originalFetch;
     fs.rmSync(backupsDir, { recursive: true, force: true });
@@ -100,6 +109,7 @@ test("a full sync downloads, verifies, and encrypts every component, then acks",
   const result = await runSync({
     baseUrl: "https://backend.invalid",
     accessToken: "test-token",
+    deviceId: TEST_DEVICE_ID,
     backupPassword: "correct horse battery staple",
     backupsDir,
     statePath,
@@ -109,6 +119,10 @@ test("a full sync downloads, verifies, and encrypts every component, then acks",
   assert.equal(result.sequence, 7);
   assert.equal(ackCalls.length, 1);
   assert.deepEqual(downloadUrlCalls.sort(), ["config", "postgres_dump", "storage_delta", "storage_index"].sort());
+  assert.ok(
+    deviceIdHeaders.every((id) => id === TEST_DEVICE_ID),
+    "every device-gated call must carry X-Device-Id, or admin_devices.py's require_active_device would 403 it for real",
+  );
 
   // Every component landed encrypted, decrypts back to exactly the
   // original bytes, and no plaintext .plain files were left behind.
@@ -144,6 +158,7 @@ test("re-syncing when the latest snapshot is already downloaded is a no-op (idem
   const opts = {
     baseUrl: "https://backend.invalid",
     accessToken: "test-token",
+    deviceId: TEST_DEVICE_ID,
     backupPassword: "pw",
     backupsDir,
     statePath,

@@ -1015,7 +1015,7 @@ class UserImportOutcome(BaseModel):
     full_name: str | None = None
     created: bool
     # Echoed once so the operator can hand it over when mail is unconfigured;
-    # never stored (see services/supabase_admin.generate_temp_password).
+    # never stored (see services/local_auth.generate_temp_password).
     temp_password: str | None = None
     email_sent: bool = False
     error: str | None = None

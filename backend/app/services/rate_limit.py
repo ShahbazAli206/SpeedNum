@@ -1,14 +1,14 @@
-"""Postgres-backed rate limiting for the few endpoints that create
-logins/credentials or accept unauthenticated input — see db/migrations/
+"""Postgres-backed rate limiting for endpoints that authenticate, create
+logins/credentials, or accept unauthenticated input — see db/migrations/
 0008_rate_limits.sql for why this is a table, not Redis or an in-process
 counter.
 
-What this does NOT cover: login, signup, password reset, and OTP/magic-link
-are Supabase Auth operations the browser calls directly — they never reach
-this API at all, so rate limiting them is Supabase's responsibility, not
-this module's. What this DOES cover is what this application actually
-controls: endpoints that create staff/portal logins, send invitations, or
-accept public unauthenticated input.
+Login, registration, password reset, email verification, and refresh all go
+through this API's own local auth (services/local_auth.py) and are rate-limited
+here too (routers/auth.py's `_login_rate_limit` etc., all `rate_limit_by_ip`
+instances from this module) — none of that is delegated to an external
+provider. This module is also used for endpoints that create staff/portal
+logins, send invitations, or accept public unauthenticated input.
 """
 
 from __future__ import annotations

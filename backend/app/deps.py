@@ -19,7 +19,7 @@ from .security import TokenClaims, verify_token
 
 log = logging.getLogger(__name__)
 
-bearer_scheme = HTTPBearer(auto_error=False, description="Supabase access token")
+bearer_scheme = HTTPBearer(auto_error=False, description="SpeedNum access token (self-hosted local auth by default; see security.py)")
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
