@@ -621,6 +621,48 @@ class TaskRead(ORMModel):
     created_at: datetime | None = None
 
 
+class TaskAttachmentCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=260)
+    kind: DocumentKind = "other"
+    storage_path: str = Field(min_length=1, max_length=500)
+    mime_type: str | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+
+
+class TaskAttachmentRead(BaseModel):
+    id: uuid.UUID
+    task_id: uuid.UUID
+    name: str
+    kind: DocumentKind
+    mime_type: str | None = None
+    size_bytes: int | None = None
+    uploaded_by_name: str | None = None
+    created_at: datetime | None = None
+
+
+class TaskCommentCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=10_000)
+    # Staff-only in practice — see the router's enforcement, not this schema:
+    # a client-portal caller's comment is always forced client-visible
+    # (there's nothing to hide from yourself), regardless of what's sent here.
+    is_client_visible: bool = False
+
+
+class TaskCommentUpdate(BaseModel):
+    body: str = Field(min_length=1, max_length=10_000)
+
+
+class TaskCommentRead(BaseModel):
+    id: uuid.UUID
+    task_id: uuid.UUID
+    author_id: uuid.UUID | None = None
+    author_name: str | None = None
+    body: str
+    is_client_visible: bool = False
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 # --- Deadlines ----------------------------------------------------------------
 class DeadlineCreate(BaseModel):
     client_id: uuid.UUID

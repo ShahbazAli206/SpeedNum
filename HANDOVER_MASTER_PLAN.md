@@ -1,0 +1,104 @@
+# SpeedNum — Master Execution Plan (Customer Handover)
+
+Tracking file for the "FINAL MASTER EXECUTION PROMPT" (given 2026-08-18). This is a
+working checklist, not a report — update statuses as work actually completes and
+is verified, not when it's merely started. Status values:
+
+- `DONE` — implemented AND verified (test/live command run, output checked)
+- `PARTIAL` — some of it real, gap noted
+- `TODO` — not started
+- `BLOCKED` — needs an external credential; noted exactly what
+
+Re-run `git fetch && git log --oneline <last-known>..origin/...` before resuming —
+another session may be working the same branch concurrently (confirmed happening
+throughout this project). Reuse/verify their work; don't duplicate or revert it.
+
+Last updated: 2026-08-18 (start of this pass). Baseline commit: `04fed8c`.
+
+---
+
+## Already verified working (do not re-litigate, spot-check only if touched)
+
+- Self-hosted auth: registration/login/logout/refresh/rotation/reuse-detection/
+  reset/forced-password-change/lockout/rate-limiting — DONE, live-tested repeatedly.
+- Tenant isolation across clients/contacts/projects/services/documents — DONE,
+  live-tested. Tasks specifically had a real cross-tenant bug, fixed by the
+  concurrent session (`e96280c`) — confirmed deployed.
+- MinIO private storage, presigned upload/download/delete, byte-identical
+  round-trip, Unicode content — DONE, live-tested.
+- Backup snapshot system, device registration/revocation, retention — DONE,
+  live-tested including a real restore drill into disposable Postgres.
+- Desktop app: sync, encryption, restore-drill, auto-update (check/detect/
+  download/integrity-verify against a real VPS-hosted feed) — DONE, live-tested.
+  NOT done: code signing (BLOCKED — no certificate), actual quit-and-relaunch
+  click-through (mechanism proven, final click not exercised).
+- Google OAuth: implemented, unit-tested (real crypto), BLOCKED on
+  `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` for live E2E. Correctly hidden
+  until configured.
+- Dashboard/reporting wired to real data, real invoice-derived revenue,
+  task-assignment notifications+emails, deadline auto-generation — DONE
+  (concurrent session), spot-verified via passing tests.
+- Branding settings — DONE this pass (was localStorage-only, fixed to persist
+  via real `PATCH /settings/tenant`).
+- SSH hardening (`PermitRootLogin no`, `PasswordAuthentication no`) — DONE,
+  live-verified, deploy access preserved.
+- `STORAGE_PROVIDER` unsafe-default bug — DONE, fixed and tested.
+
+## Section-by-section status
+
+| # | Area | Status | Notes |
+|---|---|---|---|
+| 4 | Admin — organization settings | PARTIAL | Branding (colors/logo/font) done. Timezone/currency/date-format/language settings: not modeled yet. |
+| 4 | Admin — staff management | DONE | Create/edit/disable/role/resend-credentials all real; verified earlier sessions. |
+| 5 | Client management | DONE | Full CRUD + portal invite verified live. |
+| 6 | Client portal invitation email | DONE | Real SMTP send confirmed live. |
+| 7 | Services | DONE | Full CRUD + assignment verified (concurrent + earlier session). |
+| 8 | Service assignment → deadlines/tasks | DONE | Concurrent session wired auto-deadline-generation on assignment; tests passing. |
+| 9 | Task management | PARTIAL | Core CRUD/status/kanban real. Missing: attachments, comments/activity — **explicit gap, Section 18, do now.** |
+| 10 | Staff portal | DONE | Verified earlier session. |
+| 11 | Client portal isolation | DONE | Verified live, cross-tenant/cross-client blocked. |
+| 12 | Deadlines/reminders | DONE | Real engine, real scheduler, idempotent (dedupe_key), tested. |
+| 13 | Top-center alert banner | TODO | "Needs attention" list exists on Overview; no persistent top-center banner component. Small, do this pass. |
+| 14 | Email notifications | PARTIAL | Account/invite/reset/task-assignment/deadline digest all real. Signature-request email: exists for engagement letters only. |
+| 15 | Admin dashboard (real data) | DONE | Concurrent session wired this; verified passing tests. |
+| 16 | Revenue/financial logic | DONE | Real invoice-derived revenue (paid/outstanding/overdue) + contract-value projection, both real. |
+| 17 | Document management | DONE | Live-tested this session (upload/download/delete/cross-tenant/Unicode). |
+| 18 | Task attachments + comments | TODO | **Explicit gap — implementing this pass.** |
+| 19 | Signature system (generic) | PARTIAL | Real, working, but hardcoded to engagement letters. Generalizing beyond that is a larger schema change — evaluate scope this pass. |
+| 20 | Signature request workflow | DONE (for letters) | Full flow real for engagement letters specifically. |
+| 21 | Letterhead/branding in documents | DONE | Tenant brand_color/logo/letter_footer already used in the real PDF + emails. |
+| 22 | Client letter/email workflow | DONE | Real, for engagement letters. |
+| 23 | Branding/appearance (web+desktop) | PARTIAL | Web done this pass. Desktop has no theming at all (plain HTML/CSS, no dark/light/system, no brand injection) — small, scoped desktop task. |
+| 24–27 | Desktop (backup/update/parity) | DONE / PARTIAL | Backup+update DONE. Full web-feature-parity explicitly out of scope (documented decision, DESKTOP.md) — not revisiting without direction. |
+| 28 | Responsive UI/UX audit | TODO | Not systematically audited this pass. |
+| 29–30 | Access control / security audit | PARTIAL | Extensively tested piecemeal across sessions. Doing one more consolidated negative-test pass (Section 56) before final report. |
+| 31 | Database/migrations audit | DONE | Fresh-DB migration test done multiple times; production healthy. |
+| 32 | Backups | DONE | Verified multiple times including real restore drill. |
+| 33 | Email system | DONE | Real SMTP confirmed multiple times this project. |
+| 34 | Notification scheduler | DONE | Advisory-lock-guarded, tested, real. |
+| 35 | Audit log | PARTIAL | Covers most listed events; signature/device/backup events confirmed; verify task-attachment/comment events once built. |
+| 36–38 | Error handling / empty states / search-filter-sort | TODO | Not systematically audited. |
+| 39 | Performance | TODO | Not systematically audited (no evidence of a real problem either). |
+| 40–44 | Testing (backend/frontend/E2E/desktop/regression) | ONGOING | Re-run after each change in this pass; full auto-update A→B regression already done once for real. |
+| 45 | Production deployment | ONGOING | Redeploy after each backend-affecting change in this pass. |
+| 46 | No-Supabase sweep | DONE | Full classification done, fixed several stale references, confirmed zero live Supabase traffic via real browser capture. |
+| 47 | Secrets | DONE | No secrets found in git this project; `.gitignore` correct. |
+| 48 | Google OAuth | BLOCKED | Credential, documented. |
+| 49 | Desktop code signing | BLOCKED | Credential, documented. |
+| 58 | Handover documentation | PARTIAL | ARCHITECTURE/SECURITY/DEPLOYMENT/BACKUP_ARCHITECTURE/DESKTOP.md all real and current. Missing a single consolidated "start here" handover doc — do this pass. |
+
+## This pass's work queue (in order)
+
+1. [x] Task attachments (backend model+API+storage integration) — DONE, backend only so far. Reuses `documents` table (new `task_id` column) + new `task_comments` table, migration `0013`. 6 new endpoints, OpenAPI-confirmed, 245/245 tests still pass. Frontend UI: not built yet — next sub-step.
+2. [x] Task comments/activity (backend model+API) — DONE, same commit as above. Frontend UI: not built yet.
+3. [x] Top-center urgent-deadline banner — DONE by the **concurrent session** (`urgent-deadline-banner.tsx`, wired into `shell.tsx`) while this item was queued here. Verified real (dismissible, deduped by `id:urgency`, reuses real `/dashboard` data, sticky top-center). Not touched/duplicated.
+4. [ ] Task attachments/comments **frontend UI** (was implicit in #1/#2, splitting out now that the backend is real)
+5. [ ] Desktop app theming (dark/light/system + tenant brand color)
+6. [ ] Responsive/empty-state/error-state audit pass on the areas touched above
+7. [ ] Consolidated negative security test pass (Section 56's exact list)
+8. [ ] Final production deployment + health verification
+9. [ ] Write `HANDOVER.md` (single consolidated onboarding doc)
+10. [ ] Final acceptance report per Section 61
+
+Work through in order; update this file's checkboxes/status column as each item
+is actually verified, not when merely started.
