@@ -473,6 +473,9 @@ export interface Dashboard {
   tasks_due_this_week: number;
   letters_awaiting_signature: number;
   revenue_under_contract: number;
+  /** Real invoice-derived figures (ClientInvoice.status) — distinct from the
+   * contract-value projection above; an unpaid invoice is never "paid". */
+  revenue: { invoiced: number; paid: number; outstanding: number; overdue: number };
   next_deadlines: Deadline[];
   recent_activity: AuditEntry[];
   workload: { id: string; name: string; open_tasks: number }[];

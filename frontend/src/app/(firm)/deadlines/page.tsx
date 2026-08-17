@@ -4,10 +4,10 @@ import Link from "next/link";
 
 import { KpiTile } from "@/components/charts";
 import { DashboardHeader, KpiRow } from "@/components/dashboard/page-shell";
+import { apiServer } from "@/lib/api-server";
 import { cn } from "@/lib/cn";
-import { getDeadlines, getFirmOverview } from "@/lib/firm-demo";
 import { dueLabel, formatDate } from "@/lib/format";
-import type { Urgency } from "@/lib/types";
+import type { Deadline, Urgency } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Deadlines" };
 
@@ -50,9 +50,17 @@ const GROUPS: {
   },
 ];
 
-export default function DeadlinesPage() {
-  const deadlines = getDeadlines();
-  const overview = getFirmOverview();
+function initials(name: string | null): string {
+  if (!name) return "?";
+  return name
+    .split(" ")
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+
+export default async function DeadlinesPage() {
+  const deadlines = (await apiServer<Deadline[]>("/deadlines")) ?? [];
 
   const open = deadlines.filter((deadline) => deadline.status === "open");
   const snoozed = deadlines.filter((deadline) => deadline.status === "snoozed");
@@ -60,38 +68,34 @@ export default function DeadlinesPage() {
     .filter((deadline) => deadline.status === "filed")
     .sort((a, b) => b.due_date.localeCompare(a.due_date));
 
+  const overdueCount = open.filter((d) => d.urgency === "overdue").length;
+  const dueSoonCount = open.filter((d) => d.urgency === "due_soon").length;
+  const upcomingCount = open.filter((d) => d.urgency === "upcoming").length;
+  const onTimeFiled = filed.filter((d) => !d.filed_at || d.filed_at <= d.due_date).length;
+  const onTimeRate = filed.length ? Math.round((onTimeFiled / filed.length) * 100) : 100;
+
   return (
     <>
       <DashboardHeader
         title="Deadlines"
-        subtitle="Generated from each client's fiscal year-end and service cadences — rolled past weekends and Canadian statutory holidays"
+        subtitle="Generated from each client's fiscal year-end and service cadences"
       />
 
       <KpiRow>
-        <KpiTile
-          tone="rose"
-          value={String(overview.deadlines.overdue)}
-          label="Overdue"
-          icon={<TriangleAlert className="size-5" />}
-        />
+        <KpiTile tone="rose" value={String(overdueCount)} label="Overdue" icon={<TriangleAlert className="size-5" />} />
         <KpiTile
           tone="amber"
-          value={String(overview.deadlines.due_soon)}
+          value={String(dueSoonCount)}
           label="Due soon"
           hint="Within 14 days"
           icon={<Clock className="size-5" />}
         />
-        <KpiTile
-          tone="green"
-          value={String(overview.deadlines.upcoming)}
-          label="On track"
-          icon={<CalendarCheck className="size-5" />}
-        />
+        <KpiTile tone="green" value={String(upcomingCount)} label="On track" icon={<CalendarCheck className="size-5" />} />
         <KpiTile
           tone="blue"
-          value={String(overview.deadlines.filed)}
+          value={String(filed.length)}
           label="Filed"
-          hint={`${overview.on_time_rate}% on time`}
+          hint={`${onTimeRate}% on time`}
           icon={<CircleCheck className="size-5" />}
         />
       </KpiRow>
@@ -141,9 +145,11 @@ export default function DeadlinesPage() {
                           <span className="text-[13.5px] font-semibold text-ink">
                             {deadline.title}
                           </span>
-                          <span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-muted">
-                            {deadline.service_code}
-                          </span>
+                          {deadline.service_code ? (
+                            <span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-muted">
+                              {deadline.service_code}
+                            </span>
+                          ) : null}
                         </span>
                         <span className="mt-0.5 block truncate text-[12.5px] text-muted">
                           <Link
@@ -152,19 +158,15 @@ export default function DeadlinesPage() {
                           >
                             {deadline.client_name}
                           </Link>
-                          {" · "}
-                          {deadline.period_label}
+                          {deadline.period_label ? ` · ${deadline.period_label}` : ""}
                         </span>
                       </span>
 
                       <span className="flex items-center gap-1.5 text-[12.5px] text-muted">
                         <span className="grid size-5 place-items-center rounded-full bg-brand-soft text-[9px] font-bold text-brand">
-                          {deadline.assignee_name
-                            .split(" ")
-                            .map((part) => part[0])
-                            .join("")}
+                          {initials(deadline.assignee_name)}
                         </span>
-                        {deadline.assignee_name}
+                        {deadline.assignee_name ?? "Unassigned"}
                       </span>
 
                       <span className="w-32 shrink-0 text-right">
@@ -199,7 +201,7 @@ export default function DeadlinesPage() {
                       {deadline.title}
                     </span>
                     <span className="block text-[12px] text-muted">
-                      {deadline.client_name} · {deadline.period_label}
+                      {deadline.client_name} · {deadline.period_label ?? "—"}
                     </span>
                   </span>
                   <span className="shrink-0 text-[12px] text-muted">
@@ -218,40 +220,44 @@ export default function DeadlinesPage() {
               On-time rate is measured from these, not estimated
             </p>
           </div>
-          <ul className="divide-y divide-line">
-            {filed.map((deadline) => {
-              const late =
-                deadline.filed_at !== undefined && deadline.filed_at > deadline.due_date;
-              return (
-                <li key={deadline.id} className="flex items-center gap-4 px-5 py-3">
-                  <CircleCheck
-                    className={cn("size-4 shrink-0", late ? "text-warn" : "text-success")}
-                    aria-hidden
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13.5px] text-ink">{deadline.title}</span>
-                    <span className="block text-[12px] text-muted">
-                      {deadline.client_name} · {deadline.period_label} · {deadline.assignee_name}
+          {filed.length === 0 ? (
+            <p className="px-5 py-8 text-center text-[13px] text-muted">Nothing filed yet.</p>
+          ) : (
+            <ul className="divide-y divide-line">
+              {filed.map((deadline) => {
+                const late = Boolean(deadline.filed_at && deadline.filed_at > deadline.due_date);
+                return (
+                  <li key={deadline.id} className="flex items-center gap-4 px-5 py-3">
+                    <CircleCheck
+                      className={cn("size-4 shrink-0", late ? "text-warn" : "text-success")}
+                      aria-hidden
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13.5px] text-ink">{deadline.title}</span>
+                      <span className="block text-[12px] text-muted">
+                        {deadline.client_name} · {deadline.period_label ?? "—"} ·{" "}
+                        {deadline.assignee_name ?? "Unassigned"}
+                      </span>
                     </span>
-                  </span>
-                  <span className="shrink-0 text-right">
-                    <span
-                      className={cn(
-                        "block text-[12px] font-medium",
-                        late ? "text-warn" : "text-success",
-                      )}
-                    >
-                      {late ? "Filed late" : "On time"}
+                    <span className="shrink-0 text-right">
+                      <span
+                        className={cn(
+                          "block text-[12px] font-medium",
+                          late ? "text-warn" : "text-success",
+                        )}
+                      >
+                        {late ? "Filed late" : "On time"}
+                      </span>
+                      <span className="block text-[11.5px] text-muted">
+                        Filed {deadline.filed_at ? formatDate(deadline.filed_at) : "—"} · due{" "}
+                        {formatDate(deadline.due_date)}
+                      </span>
                     </span>
-                    <span className="block text-[11.5px] text-muted">
-                      Filed {deadline.filed_at ? formatDate(deadline.filed_at) : "—"} · due{" "}
-                      {formatDate(deadline.due_date)}
-                    </span>
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </section>
       </div>
     </>

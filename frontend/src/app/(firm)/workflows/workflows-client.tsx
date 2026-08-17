@@ -181,13 +181,13 @@ export function WorkflowsClient({
         ) : (
           <span className="text-muted">—</span>
         ),
-      sortValue: (row) => row.client_name,
+      sortValue: (row) => row.client_name ?? "",
     },
     {
       key: "assignee",
       header: "Assignee",
-      cell: (row) => row.assignee_name,
-      sortValue: (row) => row.assignee_name,
+      cell: (row) => row.assignee_name ?? "Unassigned",
+      sortValue: (row) => row.assignee_name ?? "",
     },
     {
       key: "priority",
@@ -401,14 +401,14 @@ export function WorkflowsClient({
                         <div className="mt-2.5 flex items-center justify-between gap-2">
                           <span className="inline-flex items-center gap-1.5">
                             <span className="grid size-5 place-items-center rounded-full bg-brand-soft text-[9px] font-bold text-brand">
-                              {task.assignee_name
+                              {(task.assignee_name ?? "?")
                                 .split(" ")
                                 .map((part) => part[0])
                                 .join("")}
                             </span>
                             <span className="text-[11.5px] text-muted">{formatDate(task.due_date)}</span>
                           </span>
-                          <span className="text-[11.5px] tabular-nums text-muted">{task.estimate_hours}h</span>
+                          <span className="text-[11.5px] tabular-nums text-muted">{task.estimate_hours ?? 0}h</span>
                         </div>
 
                         {/* Inline status change — no need to open the card */}

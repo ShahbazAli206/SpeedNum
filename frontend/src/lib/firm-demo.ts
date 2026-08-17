@@ -303,7 +303,11 @@ export interface Task {
   id: string;
   project_id: string | null;
   client_id: string | null;
-  client_name: string;
+  // Nullable to match the real Task in lib/types.ts (a task can be
+  // client-less, or lose its assignee) — this file's demo rows always
+  // populate them, but the type must accept what the real API returns too,
+  // since WorkflowsClient renders whichever data source loaded it.
+  client_name: string | null;
   title: string;
   description: string | null;
   /** Independent of client_id — a "client" task doesn't require one specific
@@ -311,11 +315,11 @@ export interface Task {
   task_type: TaskType;
   status: TaskStatus;
   priority: TaskPriority;
-  assignee_id: string;
-  assignee_name: string;
+  assignee_id: string | null;
+  assignee_name: string | null;
   due_date: string | null;
-  estimate_hours: number;
-  created_at: string;
+  estimate_hours: number | null;
+  created_at: string | null;
 }
 
 export interface Project {
@@ -821,7 +825,7 @@ export function getTeam(): TeamRow[] {
           deadline.status === "open" &&
           deadline.days_remaining < 0,
       ).length,
-      estimated_hours: tasks.reduce((total, task) => total + task.estimate_hours, 0),
+      estimated_hours: tasks.reduce((total, task) => total + (task.estimate_hours ?? 0), 0),
     };
   });
 }

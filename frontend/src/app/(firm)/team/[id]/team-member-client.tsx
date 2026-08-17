@@ -660,7 +660,7 @@ export function TeamMemberClient({
           options={availableTasks.map((task) => ({
             value: task.id,
             label: task.title,
-            description: task.client_name,
+            description: task.client_name ?? undefined,
           }))}
         />
       </Modal>

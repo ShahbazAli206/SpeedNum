@@ -11,121 +11,123 @@ import Link from "next/link";
 
 import { KpiTile, StatTile } from "@/components/charts";
 import { DashboardHeader, KpiRow } from "@/components/dashboard/page-shell";
+import { apiServer } from "@/lib/api-server";
 import { cn } from "@/lib/cn";
-import {
-  FIRM,
-  getAudit,
-  getDeadlines,
-  getFirmOverview,
-  getLetters,
-  getRecurringRevenueTrend,
-  getTasks,
-  getTeam,
-} from "@/lib/firm-demo";
-import { formatDate, formatMoney, formatPercent } from "@/lib/format";
+import { getRecurringRevenueTrend } from "@/lib/firm-demo";
+import { formatDate, formatMoney } from "@/lib/format";
+import type { Dashboard, Letter, Task } from "@/lib/types";
 
 import { RevenueTrendChart } from "./revenue-chart";
 
 export const metadata: Metadata = { title: "Overview" };
 
-export default function FirmOverviewPage() {
-  const overview = getFirmOverview();
-  const deadlines = getDeadlines();
-  const team = getTeam().filter((member) => member.is_active);
-  const letters = getLetters();
-  const audit = getAudit();
+export default async function FirmOverviewPage() {
+  const [dashboard, blockedTasks, declinedLetters] = await Promise.all([
+    apiServer<Dashboard>("/dashboard"),
+    apiServer<Task[]>("/tasks?status=blocked"),
+    apiServer<Letter[]>("/engagements?status=declined"),
+  ]);
 
-  // "Needs attention" is the point of this page: what is going wrong right now,
-  // gathered from three sources into one ranked list.
+  if (!dashboard) {
+    return (
+      <p className="py-14 text-center text-[13.5px] text-muted">
+        Could not load the dashboard. Try refreshing.
+      </p>
+    );
+  }
+
+  // "Needs attention" merges three real, already-authorized queries into one
+  // ranked list — overdue deadlines (already in dashboard.next_deadlines'
+  // sibling bucket counts, re-fetched here as actual rows), blocked tasks,
+  // and declined letters. No client_id filter needed: every list endpoint
+  // here is already tenant-scoped server-side.
+  const overdueDeadlines = dashboard.next_deadlines.filter((d) => d.urgency === "overdue");
   const attention = [
-    ...deadlines
-      .filter((deadline) => deadline.status === "open" && deadline.days_remaining < 0)
-      .map((deadline) => ({
-        id: deadline.id,
-        kind: "Overdue deadline",
-        title: `${deadline.title} — ${deadline.period_label}`,
-        who: deadline.client_name,
-        owner: deadline.assignee_name,
-        detail: `${Math.abs(deadline.days_remaining)} days late`,
-        href: "/deadlines",
-        tone: "danger" as const,
-      })),
-    ...getTasks()
-      .filter((task) => task.status === "blocked")
-      .map((task) => ({
-        id: task.id,
-        kind: "Blocked task",
-        title: task.title,
-        who: task.client_name,
-        owner: task.assignee_name,
-        detail: `Due ${formatDate(task.due_date)}`,
-        href: "/workflows",
-        tone: "warn" as const,
-      })),
-    ...letters
-      .filter((letter) => letter.status === "declined")
-      .map((letter) => ({
-        id: letter.id,
-        kind: "Letter declined",
-        title: letter.title,
-        who: letter.client_name,
-        owner: "—",
-        detail: "Scope needs a conversation",
-        href: "/engagements",
-        tone: "danger" as const,
-      })),
+    ...overdueDeadlines.map((deadline) => ({
+      id: deadline.id,
+      kind: "Overdue deadline",
+      title: `${deadline.title}${deadline.period_label ? ` — ${deadline.period_label}` : ""}`,
+      who: deadline.client_name,
+      owner: deadline.assignee_name,
+      detail: `${Math.abs(deadline.days_remaining)} days late`,
+      href: "/deadlines",
+      tone: "danger" as const,
+    })),
+    ...(blockedTasks ?? []).map((task) => ({
+      id: task.id,
+      kind: "Blocked task",
+      title: task.title,
+      who: task.client_name,
+      owner: task.assignee_name,
+      detail: task.due_date ? `Due ${formatDate(task.due_date)}` : "No due date",
+      href: "/workflows",
+      tone: "warn" as const,
+    })),
+    ...(declinedLetters ?? []).map((letter) => ({
+      id: letter.id,
+      kind: "Letter declined",
+      title: letter.title,
+      who: letter.client_name,
+      owner: "—",
+      detail: "Scope needs a conversation",
+      href: "/engagements",
+      tone: "danger" as const,
+    })),
   ];
 
-  const nextUp = deadlines
+  const nextUp = dashboard.next_deadlines
     .filter((deadline) => deadline.status === "open" && deadline.days_remaining >= 0)
-    .sort((a, b) => a.days_remaining - b.days_remaining)
     .slice(0, 6);
 
+  // Revenue *trend over time* has no backing endpoint yet (reporting.py has
+  // point-in-time breakdowns, not a monthly series) — this one chart stays
+  // on illustrative data until that's built; everything else on this page
+  // is real. Flagged here rather than silently left demo.
   const revenueTrend = getRecurringRevenueTrend();
 
   return (
     <>
       <DashboardHeader
-        title={`${FIRM.name} — practice overview`}
-        subtitle={`${overview.clients_active} active clients · ${team.length} staff · ${formatMoney(overview.recurring_revenue)} recurring revenue under contract`}
+        title={`${dashboard.firm_name} — practice overview`}
+        subtitle={`${dashboard.clients_active} active clients · ${formatMoney(dashboard.revenue_under_contract)} recurring revenue under contract`}
       />
 
       <KpiRow>
         <KpiTile
           tone="rose"
-          value={String(overview.deadlines.overdue)}
+          value={String(dashboard.deadlines.overdue)}
           label="Overdue deadlines"
           hint="Needs action today"
           icon={<TriangleAlert className="size-5" />}
         />
         <KpiTile
           tone="amber"
-          value={String(overview.deadlines.due_soon)}
+          value={String(dashboard.deadlines.due_soon)}
           label="Due in 14 days"
-          hint={`${overview.deadlines.upcoming} further out`}
+          hint={`${dashboard.deadlines.upcoming} further out`}
           icon={<CircleAlert className="size-5" />}
         />
         <KpiTile
           tone="blue"
-          value={String(overview.letters_awaiting)}
+          value={String(dashboard.letters_awaiting_signature)}
           label="Letters awaiting signature"
           hint="Sent or viewed, not signed"
           icon={<Signature className="size-5" />}
         />
         <KpiTile
           tone="green"
-          value={formatMoney(overview.recurring_revenue)}
-          label="Recurring revenue"
-          hint={`Average fee ${formatMoney(overview.average_fee)}`}
+          value={formatMoney(dashboard.revenue.paid)}
+          label="Revenue collected"
+          hint={`${formatMoney(dashboard.revenue.outstanding)} outstanding`}
           icon={<Banknote className="size-5" />}
         />
       </KpiRow>
 
       <div className="mt-6 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile label="Clients" value={String(overview.clients_total)} icon={<Users className="size-4" />} />
-        <StatTile label="Open tasks" value={String(overview.tasks_open)} />
-        <StatTile label="On-time filing rate" value={formatPercent(overview.on_time_rate)} />
-        <StatTile label="Portal enabled" value={`${overview.portal_enabled} of ${overview.clients_total}`} />
+        <StatTile label="Clients" value={String(dashboard.clients_total)} icon={<Users className="size-4" />} />
+        <StatTile label="Open tasks" value={String(dashboard.tasks_open)} />
+        <StatTile label="Due this week" value={String(dashboard.tasks_due_this_week)} />
+        <StatTile label="Overdue invoices" value={formatMoney(dashboard.revenue.overdue)} />
       </div>
 
       <div className="mt-6 grid gap-5 lg:grid-cols-[1.5fr_1fr]">
@@ -163,7 +165,7 @@ export default function FirmOverviewPage() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[13.5px] font-medium text-ink">{item.title}</p>
                       <p className="truncate text-[12px] text-muted">
-                        {item.kind} · {item.who} · {item.owner}
+                        {item.kind} · {item.who ?? "—"} · {item.owner ?? "Unassigned"}
                       </p>
                     </div>
                     <span
@@ -184,41 +186,17 @@ export default function FirmOverviewPage() {
         <section className="rounded-xl border border-line bg-surface shadow-[var(--shadow-card)]">
           <div className="border-b border-line px-5 py-4">
             <h2 className="text-[15px] font-semibold text-ink">Workload</h2>
-            <p className="mt-0.5 text-[13px] text-muted">
-              Estimated hours against weekly capacity
-            </p>
+            <p className="mt-0.5 text-[13px] text-muted">Open tasks per team member</p>
           </div>
           <ul className="divide-y divide-line">
-            {team.map((member) => {
-              const load = Math.min(
-                100,
-                Math.round((member.estimated_hours / member.weekly_capacity) * 100),
-              );
-              const over = member.estimated_hours > member.weekly_capacity;
-              return (
-                <li key={member.id} className="px-5 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="truncate text-[13.5px] font-medium text-ink">
-                      {member.full_name}
-                    </span>
-                    <span
-                      className={cn(
-                        "shrink-0 text-[12px] tabular-nums",
-                        over ? "font-semibold text-danger" : "text-muted",
-                      )}
-                    >
-                      {member.estimated_hours}h / {member.weekly_capacity}h
-                    </span>
-                  </div>
-                  <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
-                    <div
-                      className={cn("h-full rounded-full", over ? "bg-danger" : "bg-brand")}
-                      style={{ width: `${Math.max(3, load)}%` }}
-                    />
-                  </div>
-                </li>
-              );
-            })}
+            {dashboard.workload.map((member) => (
+              <li key={member.id} className="flex items-center justify-between gap-3 px-5 py-3">
+                <span className="truncate text-[13.5px] font-medium text-ink">{member.name}</span>
+                <span className="shrink-0 text-[12px] tabular-nums text-muted">
+                  {member.open_tasks} open
+                </span>
+              </li>
+            ))}
           </ul>
         </section>
       </div>
@@ -256,7 +234,8 @@ export default function FirmOverviewPage() {
                     {deadline.title}
                   </span>
                   <span className="block truncate text-[12px] text-muted">
-                    {deadline.client_name} · {deadline.period_label} · {deadline.assignee_name}
+                    {deadline.client_name} · {deadline.period_label ?? "—"} ·{" "}
+                    {deadline.assignee_name ?? "Unassigned"}
                   </span>
                 </span>
                 <span className="shrink-0 text-right">
@@ -278,9 +257,9 @@ export default function FirmOverviewPage() {
             <p className="mt-0.5 text-[13px] text-muted">Append-only audit log</p>
           </div>
           <ol className="px-5 py-4">
-            {audit.map((entry, index) => (
+            {dashboard.recent_activity.map((entry, index) => (
               <li key={entry.id} className="relative flex gap-3 pb-5 last:pb-0">
-                {index < audit.length - 1 ? (
+                {index < dashboard.recent_activity.length - 1 ? (
                   <span className="absolute top-6 bottom-0 left-[9px] w-px bg-line" aria-hidden />
                 ) : null}
                 <span className="relative mt-1 grid size-4.5 shrink-0 place-items-center rounded-full bg-brand-soft">
@@ -288,10 +267,10 @@ export default function FirmOverviewPage() {
                 </span>
                 <div className="min-w-0">
                   <p className="text-[13px] leading-snug text-ink-soft">
-                    <strong className="font-semibold text-ink">{entry.actor}</strong> {entry.action}{" "}
-                    <span className="text-ink">{entry.summary}</span>
+                    <strong className="font-semibold text-ink">{entry.actor_email ?? "System"}</strong>{" "}
+                    {entry.action} <span className="text-ink">{entry.summary}</span>
                   </p>
-                  <p className="mt-0.5 text-[11.5px] text-muted">{entry.when}</p>
+                  <p className="mt-0.5 text-[11.5px] text-muted">{formatDate(entry.created_at)}</p>
                 </div>
               </li>
             ))}

@@ -73,7 +73,7 @@ export function TaskDetailClient({
   const [description, setDescription] = useState(task.description ?? "");
   const [taskType, setTaskType] = useState<TaskType>(task.task_type);
   const [clientId, setClientId] = useState(task.client_id ?? "");
-  const [assigneeId, setAssigneeId] = useState(task.assignee_id);
+  const [assigneeId, setAssigneeId] = useState(task.assignee_id ?? "");
   const [assigneeName, setAssigneeName] = useState(task.assignee_name);
   const [priority, setPriority] = useState<TaskPriority>(task.priority);
   const [dueDate, setDueDate] = useState(task.due_date ?? "");
@@ -86,8 +86,8 @@ export function TaskDetailClient({
     setDescription(task.description ?? "");
     setTaskType(task.task_type);
     setClientId(task.client_id ?? "");
-    setAssigneeId(task.assignee_id);
-    setAssigneeName(task.assignee_name);
+    setAssigneeId(task.assignee_id ?? "");
+    setAssigneeName(task.assignee_name ?? "");
     setPriority(task.priority);
     setDueDate(task.due_date ?? "");
   };
@@ -257,7 +257,7 @@ export function TaskDetailClient({
                 <dd className="mt-1 text-[13.5px] leading-relaxed text-ink">{description || "No description."}</dd>
               </div>
               <MetaItem icon={<Layers className="size-3.5" />} label="Type" value={titleCase(taskType)} />
-              <MetaItem icon={<User className="size-3.5" />} label="Assigned to" value={assigneeName} />
+              <MetaItem icon={<User className="size-3.5" />} label="Assigned to" value={assigneeName || "Unassigned"} />
               <div>
                 <dt className="flex items-center gap-1.5 text-[11.5px] tracking-wide text-muted uppercase">
                   <Building2 className="size-3.5" />

@@ -163,7 +163,7 @@ export function ClientDetailClient({
     ...tasks.map((task) => ({
       id: task.id,
       title: task.title,
-      assignee_name: task.assignee_name,
+      assignee_name: task.assignee_name ?? "Unassigned",
       due_date: task.due_date,
       status: task.status,
       priority: task.priority,
