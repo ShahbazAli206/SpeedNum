@@ -663,6 +663,28 @@ export interface ClientDocument {
   created_at: string | null;
 }
 
+export interface TaskAttachment {
+  id: string;
+  task_id: string;
+  name: string;
+  kind: PortalDocumentKind;
+  mime_type: string | null;
+  size_bytes: number | null;
+  uploaded_by_name: string | null;
+  created_at: string | null;
+}
+
+export interface TaskComment {
+  id: string;
+  task_id: string;
+  author_id: string | null;
+  author_name: string | null;
+  body: string;
+  is_client_visible: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 export interface DocumentTotals {
   count: number;
   bytes: number;

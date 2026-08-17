@@ -14,7 +14,7 @@
  */
 
 import { get, post } from "./api";
-import type { ClientDocument, PortalDocumentKind } from "./types";
+import type { ClientDocument, PortalDocumentKind, TaskAttachment } from "./types";
 
 export class UploadError extends Error {}
 
@@ -85,5 +85,43 @@ export async function documentUrl(documentId: string, clientId?: string): Promis
   const { url } = await get<DownloadUrl>(
     `/client-portal/documents/${documentId}/download-url${query}`,
   );
+  return url;
+}
+
+/** Same presigned-upload-then-register pattern as uploadDocument above, for
+ * task attachments (backend/app/routers/task_attachments.py) instead of the
+ * client-portal documents endpoint. */
+export async function uploadTaskAttachment(taskId: string, file: File): Promise<TaskAttachment> {
+  const slot = await post<UploadSlot>(`/tasks/${taskId}/attachments/upload-url`, { name: file.name });
+
+  let response: Response;
+  try {
+    response = await fetch(slot.url, {
+      method: "PUT",
+      headers: file.type ? { "Content-Type": file.type } : undefined,
+      body: file,
+    });
+  } catch {
+    throw new UploadError("Could not reach storage. Check your connection and try again.");
+  }
+  if (!response.ok) {
+    throw new UploadError(
+      response.status === 400
+        ? "Storage rejected the upload — the signed link may have expired. Try again."
+        : `Upload failed (${response.status}).`,
+    );
+  }
+
+  return post<TaskAttachment>(`/tasks/${taskId}/attachments`, {
+    name: file.name,
+    kind: "other",
+    storage_path: slot.storage_path,
+    mime_type: file.type || null,
+    size_bytes: file.size,
+  });
+}
+
+export async function taskAttachmentUrl(taskId: string, attachmentId: string): Promise<string> {
+  const { url } = await get<DownloadUrl>(`/tasks/${taskId}/attachments/${attachmentId}/download-url`);
   return url;
 }
