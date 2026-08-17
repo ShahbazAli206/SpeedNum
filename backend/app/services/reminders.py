@@ -403,6 +403,7 @@ async def admin_recipients(session: AsyncSession, tenant_id: uuid.UUID) -> list[
                     Profile.is_active.is_(True),
                     Profile.client_id.is_(None),
                     Profile.role.in_(("owner", "admin")),
+                    Profile.notify_deadline_digest.is_(True),
                 )
             )
         ).all()

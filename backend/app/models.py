@@ -118,6 +118,7 @@ class Profile(Base):
     # True right after a client-portal invite/resend issues a temporary
     # password; cleared by POST /auth/complete-password-change.
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
+    notify_deadline_digest: Mapped[bool] = mapped_column(Boolean, default=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

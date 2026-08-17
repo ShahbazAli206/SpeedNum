@@ -67,6 +67,10 @@ export interface Profile {
   is_active: boolean;
   is_superadmin: boolean;
   must_change_password: boolean;
+  /** Owners/admins only — whether this profile receives the daily
+   * deadline/task digest email (backend/app/services/reminders.py's
+   * admin_recipients). Self-service via PATCH /auth/me. */
+  notify_deadline_digest: boolean;
   created_at: string | null;
 }
 

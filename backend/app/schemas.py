@@ -101,6 +101,7 @@ class ProfileRead(ORMModel):
     is_active: bool = True
     is_superadmin: bool = False
     must_change_password: bool = False
+    notify_deadline_digest: bool = True
     created_at: datetime | None = None
 
 
@@ -112,6 +113,7 @@ class ProfileUpdate(BaseModel):
     role: UserRole | None = None
     weekly_capacity: int | None = None
     is_active: bool | None = None
+    notify_deadline_digest: bool | None = None
 
 
 class TeamMemberRead(ProfileRead):

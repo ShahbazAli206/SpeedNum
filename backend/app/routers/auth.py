@@ -328,7 +328,11 @@ async def me(session: SessionDep, user: CurrentUserDep) -> MeResponse:
 
 @router.patch("/me", response_model=ProfileRead)
 async def update_me(payload: ProfileUpdate, session: SessionDep, user: CurrentUserDep) -> ProfileRead:
-    apply_updates(user.profile, payload, allowed={"full_name", "title", "phone", "avatar_url", "weekly_capacity"})
+    apply_updates(
+        user.profile,
+        payload,
+        allowed={"full_name", "title", "phone", "avatar_url", "weekly_capacity", "notify_deadline_digest"},
+    )
     await session.flush()
     return ProfileRead.model_validate(user.profile)
 

@@ -4,9 +4,10 @@ import { ImagePlus, Mail, Palette, Save } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useToast } from "@/components/toast";
-import { Button, Checkbox, Field, Input, Select } from "@/components/ui";
+import { Button, Field, Input, Select, Switch } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { post } from "@/lib/api";
+import { patch, post } from "@/lib/api";
+import { useSession } from "@/lib/session";
 
 import {
   FALLBACK_BRANDING,
@@ -15,38 +16,16 @@ import {
   type FirmBranding,
 } from "@/components/firm/branding";
 
-const ALERTS_KEY = "speednum-email-alerts";
-
-interface AlertPrefs {
-  recipient: string;
-  tasks: boolean;
-  remindersAndServices: boolean;
-}
-
-const DEFAULT_ALERTS: AlertPrefs = {
-  recipient: "hello@harrisoncpa.ca",
-  tasks: true,
-  remindersAndServices: true,
-};
-
-function loadAlerts(): AlertPrefs {
-  try {
-    const raw = localStorage.getItem(ALERTS_KEY);
-    if (!raw) return DEFAULT_ALERTS;
-    return { ...DEFAULT_ALERTS, ...JSON.parse(raw) };
-  } catch {
-    return DEFAULT_ALERTS;
-  }
-}
-
 export function SettingsClient() {
   const toast = useToast();
   const { branding, saveBranding } = useBranding();
+  const { me, isLive, refresh } = useSession();
 
   const [form, setForm] = useState<FirmBranding>(branding);
   const [saving, setSaving] = useState(false);
   const [sendingTest, setSendingTest] = useState(false);
-  const [alerts, setAlerts] = useState<AlertPrefs>(DEFAULT_ALERTS);
+  const [digestOn, setDigestOn] = useState(true);
+  const [savingDigest, setSavingDigest] = useState(false);
 
   // Sync once the provider has hydrated from the tenant record (it starts
   // from FALLBACK_BRANDING on first render, then applies the real value once
@@ -57,10 +36,9 @@ export function SettingsClient() {
   }, [branding]);
 
   useEffect(() => {
-    // One-shot read of an external store the server cannot see.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAlerts(loadAlerts());
-  }, []);
+    setDigestOn(me?.profile.notify_deadline_digest ?? true);
+  }, [me]);
 
   const update = <K extends keyof FirmBranding>(key: K, value: FirmBranding[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -85,25 +63,28 @@ export function SettingsClient() {
     }
   };
 
-  const saveAlerts = () => {
+  const toggleDigest = async (next: boolean) => {
+    const previous = digestOn;
+    setDigestOn(next); // optimistic — rolled back below on failure
+    setSavingDigest(true);
     try {
-      localStorage.setItem(ALERTS_KEY, JSON.stringify(alerts));
-    } catch {
-      // Private-mode quota failure — the in-memory value still applies this session.
+      await patch("/auth/me", { notify_deadline_digest: next });
+      refresh();
+      toast.success(next ? "Daily digest turned on" : "Daily digest turned off");
+    } catch (error) {
+      setDigestOn(previous);
+      toast.error("Couldn't save that", error instanceof Error ? error.message : "Try again.");
+    } finally {
+      setSavingDigest(false);
     }
-    toast.success("Alert preferences saved");
   };
 
   const sendNow = async () => {
-    if (!alerts.recipient.trim()) {
-      toast.error("Enter an alert recipient email first");
-      return;
-    }
     setSendingTest(true);
     try {
       const result = await post<{ ok: boolean; message: string; error: string | null }>(
         "/settings/email/test",
-        { to: alerts.recipient },
+        {},
       );
       if (result.ok) {
         toast.success("Test email sent", result.message);
@@ -213,40 +194,26 @@ export function SettingsClient() {
         description="Get an email when tasks or reminders are due or overdue. Delivered via your Email integration and sent automatically each morning."
         className="mt-5"
       >
-        <Field label="Alert recipient email" hint="Where deadline alert emails are sent.">
-          <Input
-            type="email"
-            value={alerts.recipient}
-            onChange={(event) => setAlerts((current) => ({ ...current, recipient: event.target.value }))}
-          />
-        </Field>
+        <Switch
+          checked={digestOn}
+          onChange={toggleDigest}
+          disabled={savingDigest || !isLive}
+          label="Email me the daily deadline & task digest"
+          description={
+            me?.profile.email
+              ? `Sent each morning to ${me.profile.email} while there's anything due or overdue.`
+              : "Sent each morning to every owner/admin on the firm while there's anything due or overdue."
+          }
+        />
 
-        <div className="mt-3 space-y-1">
-          <Checkbox
-            label="Alert me about due/overdue tasks"
-            checked={alerts.tasks}
-            onChange={(event) => setAlerts((current) => ({ ...current, tasks: event.target.checked }))}
-          />
-          <Checkbox
-            label="Alert me about due/overdue reminders & services"
-            checked={alerts.remindersAndServices}
-            onChange={(event) =>
-              setAlerts((current) => ({ ...current, remindersAndServices: event.target.checked }))
-            }
-          />
-        </div>
-
-        <div className="mt-4 flex gap-2">
-          <Button icon={<Save className="size-4" />} onClick={saveAlerts}>
-            Save
-          </Button>
+        <div className="mt-4">
           <Button
             variant="secondary"
             icon={<Mail className="size-4" />}
             loading={sendingTest}
             onClick={sendNow}
           >
-            Send test email
+            Send test email to myself
           </Button>
         </div>
       </Section>
