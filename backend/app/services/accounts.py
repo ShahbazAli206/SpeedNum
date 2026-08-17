@@ -303,10 +303,10 @@ async def _client_engagement_summary(
     renders, so the email cannot describe a different engagement than the app.
     """
     services = [
-        {"name": name, "frequency": str(frequency).replace("_", " ")}
-        for name, frequency in (
+        {"name": name, "frequency": str(override or default).replace("_", " ")}
+        for name, default, override in (
             await session.execute(
-                select(Service.name, ClientService.frequency)
+                select(Service.name, Service.frequency, ClientService.frequency_override)
                 .join(Service, Service.id == ClientService.service_id)
                 .where(
                     ClientService.client_id == client_id,
