@@ -46,8 +46,22 @@ same session (see the session's final report for that run's actual output).
   machine runs this.
 - `src/secure-store.js` — wraps Electron's `safeStorage` (OS keychain/DPAPI)
   for the one secret worth protecting at rest: the refresh token.
+- `src/updater.js` — wraps `electron-updater`; checks/downloads/installs new
+  versions from a VPS-hosted feed (not GitHub Releases — see `../DESKTOP.md`'s
+  "Auto-update" section for why).
 - `src/main.js` / `src/preload.js` / `renderer/` — the Electron shell and
   its (deliberately small) IPC surface.
+
+## Building an installer
+
+```bash
+npm run dist       # builds dist/*.exe locally, does not publish anywhere
+npm run release    # same, then uploads to the update feed (see DESKTOP.md)
+```
+
+Not code-signed yet (no certificate available — see `../DESKTOP.md`'s "The
+one remaining gap"). The app still installs and auto-updates; Windows will
+show a SmartScreen warning until it's signed.
 
 ## What this app does *not* do
 

@@ -48,6 +48,7 @@ credential — see `backend/README.md`'s architecture diagram for how those stay
 | `sync-state.js` | Local JSON state, atomic writes | Local disk only |
 | `restore-drill.js` | Restores a decrypted snapshot into disposable Docker containers | Local `docker` CLI |
 | `secure-store.js` | Wraps Electron's `safeStorage` (OS keychain/DPAPI) for the refresh token | Local OS keychain |
+| `updater.js` | Wraps `electron-updater` — checks/downloads/installs new versions | HTTPS to the update feed |
 | `main.js` / `preload.js` / `renderer/` | The Electron shell and its IPC surface | — |
 
 ### Security model
@@ -71,22 +72,113 @@ credential — see `backend/README.md`'s architecture diagram for how those stay
   cannot read or write arbitrary application data (no CRUD endpoints beyond `/admin/backups/*`
   and the same `/auth/*` surface every client uses).
 
+## Auto-update
+
+`electron-updater`, checking on startup and every 4 hours while running (`main.js`'s
+`UPDATE_CHECK_INTERVAL_MS`). A failed/offline check never blocks the app — it just logs and the
+user keeps working on the current version.
+
+**Feed: the VPS, not GitHub Releases.** electron-updater supports a "generic" provider (any
+HTTPS host serving a `latest.yml` + the installer) as well as a "github" provider. GitHub was
+the first instinct — this repo already lives there, and `gh auth status` confirms a working
+token — but **the repository is private**, and GitHub's release-asset download requires an
+authenticated request for a private repo. The only way to make that work is embedding a GitHub
+token in every installed copy of the app, which turns every user's machine into a place that
+token can leak from — a real problem, not a hypothetical one, for a credential with `repo`
+scope. The VPS already serves public, non-sensitive content over HTTPS via Caddy (the same
+pattern `/documents/*` and `/backups/*` presigned URLs use, just without the presigning since
+nothing here is sensitive), so a new, deliberately public-read MinIO bucket
+(`desktop-releases`, `mc anonymous set download`) was the more correct fit — it needs no
+credential embedded anywhere, and it holds only installer binaries, never business data. Both
+`documents` and `backups` remain private; this is a new, separate, narrowly-scoped bucket.
+
+```
+Feed:      https://test.spidnums.com/desktop-releases/
+Contains:  <ProductName> Setup <version>.exe, .exe.blockmap, latest.yml
+Caddy:     handle /desktop-releases/* { reverse_proxy speednum-minio:9000 }  (deploy/Caddyfile.example)
+```
+
+**Publishing a new version** (once code signing exists — see the gap below):
+
+```bash
+cd desktop
+# bump "version" in package.json first
+npm run dist                                  # electron-builder, produces dist/*.exe + latest.yml
+# upload dist/*.exe, *.exe.blockmap, and latest.yml to the desktop-releases bucket,
+# e.g. via `mc cp` (see the release commands actually run this session, same shape)
+```
+
+Every installed copy still running the old version picks up the new `latest.yml` on its next
+periodic check (within 4 hours) or the next app launch, and shows the update modal — no rebuild
+or redistribution step needed beyond uploading those three files.
+
+**Live-verified this session** (against the real feed above, not a local mock):
+- A packaged 0.1.0 build correctly reported "up to date" against a real published 0.1.0 feed.
+- The same build correctly detected a real published 0.1.1 feed as "update available" and
+  showed the modal with the real version numbers.
+- Clicking "Update Now" downloaded the real ~95MB installer from the live VPS
+  (~1.2 MB/s observed) and reached electron-updater's internal "downloaded" state, which it
+  only reaches after the file's sha512 matches `latest.yml` — a deliberately corrupted or
+  truncated download would surface as an `error` event instead, never a false "downloaded".
+- The test's `latest.yml` was restored to the real 0.1.0 metadata immediately after; nothing
+  was left in a bumped/fake state on the live feed.
+
+**Not verified — the actual "Restart & Update" install-and-relaunch step.** Reaching
+"downloaded" and clicking through to `quitAndInstall()` are two different things to prove; the
+former was verified for real, the latter would quit the very process running the test. Nothing
+about the code path is untested logic, but the literal "watch the app restart into the new
+version" moment wasn't clicked through end-to-end this session.
+
+### The one remaining gap: code signing
+
+The built installer is **not code-signed** — confirmed directly
+(`Get-AuthenticodeSignature` reports `NotSigned`), not assumed. No certificate was available or
+fabricated. Practical effect: Windows SmartScreen will warn on first run of the installer, and
+on some Windows security postures an unsigned executable can be blocked outright rather than
+just warned about. This does not break the auto-update *mechanism* — checking, downloading, and
+integrity-verification via sha512 all work identically whether or not the binary is signed —
+but it does affect the end-user experience of running the installer at all.
+
+```text
+Credential:              Windows code-signing certificate (EV or OV, from a CA like
+                          DigiCert/Sectigo, or a cheaper OV cert if EV's identity-vetting
+                          process is more than this needs)
+Where to obtain:          Any public certificate authority selling Authenticode certs
+Where it belongs:         electron-builder's `win.certificateFile` / `win.certificatePassword`
+                          config (package.json's `build.win`), or CSC_LINK/CSC_KEY_PASSWORD
+                          env vars at build time — never committed to the repo
+Environment variable:     CSC_LINK, CSC_KEY_PASSWORD
+Why required:             Removes the Windows SmartScreen warning and (on stricter postures)
+                          the outright execution block for an unsigned .exe
+Whether it can be safely
+deferred:                 Yes — everything else in this document works without it. It only
+                          affects the polish of the install experience, not correctness.
+```
+
 ## What's real vs. what's scoped out of this pass
 
-**Real, live-tested (see the 2026-08-17 session report for full output):**
+**Real, live-tested (see the 2026-08-17/18 session reports for full output):**
 - Login, snapshot listing, triggering a server-side backup, downloading + checksum-verifying +
   encrypting all four snapshot components, and acking the download — all run for real against
   production through the actual Electron GUI (Playwright-driven, screenshotted).
 - A real restore drill: a real snapshot decrypted, restored into disposable Postgres, and a
   real login succeeded against the restored data. This surfaced and fixed a real gap (see
   BACKUP_ARCHITECTURE.md's "A real gap this found").
+- Device registration/revocation (added by a concurrent session mid-audit) — the desktop app
+  registers itself and sends `X-Device-Id` on every call that needs one; verified live that an
+  unregistered or revoked device is rejected and a freshly registered one succeeds.
+- Auto-update: a real installer built, published to a real (new) VPS-hosted feed, and a real
+  packaged build both correctly detecting "up to date" and "update available", downloading a
+  real ~95MB update from the live feed, and passing electron-updater's sha512 integrity check —
+  see the "Auto-update" section above for exactly what was and wasn't clicked through.
 - 12 automated tests (`desktop/test/`) covering the crypto envelope and the sync pipeline's
   atomicity/idempotency/checksum-failure behavior.
 
 **Scoped out of this pass, left as documented future work:**
 - Full feature parity with the web admin dashboard (clients, invoices, reports, imports,
   settings) — this app's scope is backup/sync/restore-drill plus a read-only snapshot list.
-- A signed, distributable installer (currently run via `npm start` from source).
+- Code signing (see "The one remaining gap" above) — a real, distributable, working installer
+  now exists; it just isn't signed.
 - Automating the restore-drill's Docker orchestration inside the Electron GUI end-to-end in an
   environment with a working Docker install — `restore-drill.js` mirrors an exact sequence
   already proven manually against the VPS's Docker (this development sandbox has no local

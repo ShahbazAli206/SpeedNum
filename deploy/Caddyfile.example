@@ -45,6 +45,18 @@ test.spidnums.com {
 		reverse_proxy speednum-minio:9000
 	}
 
+	# Desktop app installer/update artifacts — see desktop/package.json's
+	# `build.publish` (electron-updater's "generic" provider) and
+	# DESKTOP.md's "Auto-update" section. Deliberately public-read
+	# (`mc anonymous set download`), unlike /documents/* and /backups/*
+	# above: this bucket holds only installer binaries and latest.yml, never
+	# business data, and electron-updater's generic provider does a plain
+	# unauthenticated GET — no presigned URL, no signature to preserve, so
+	# no path-rewrite hazard either.
+	handle /desktop-releases/* {
+		reverse_proxy speednum-minio:9000
+	}
+
 	handle {
 		# 12MB: the same limit the previously-written (never deployed)
 		# nginx config carried — the API itself never receives a document
@@ -98,6 +110,10 @@ test.spidnums.com {
 # 	}
 #
 # 	handle /backups/* {
+# 		reverse_proxy speednum-minio:9000
+# 	}
+#
+# 	handle /desktop-releases/* {
 # 		reverse_proxy speednum-minio:9000
 # 	}
 #

@@ -110,7 +110,75 @@ function renderBackups(backups) {
   }
 }
 
+/* ------------------------------- Auto-update ------------------------------ */
+
+const updateModal = document.getElementById("updateModal");
+const updateAvailableView = document.getElementById("updateAvailableView");
+const updateDownloadingView = document.getElementById("updateDownloadingView");
+const updateReadyView = document.getElementById("updateReadyView");
+
+let currentAppVersion = "";
+let latestKnownVersion = "";
+
+function showUpdateView(view) {
+  updateModal.classList.remove("hidden");
+  for (const el of [updateAvailableView, updateDownloadingView, updateReadyView]) {
+    el.classList.toggle("hidden", el !== view);
+  }
+}
+
+function hideUpdateModal() {
+  updateModal.classList.add("hidden");
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return "0 MB";
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+window.speednum.onUpdateStatus((status) => {
+  if (status.state === "available") {
+    latestKnownVersion = status.info?.version || "unknown";
+    document.getElementById("updateCurrentVersion").textContent = currentAppVersion;
+    document.getElementById("updateNewVersion").textContent = latestKnownVersion;
+    const notesEl = document.getElementById("updateReleaseNotes");
+    if (status.info?.releaseNotes) {
+      notesEl.textContent = status.info.releaseNotes.replace(/<[^>]+>/g, "");
+      notesEl.classList.remove("hidden");
+    } else {
+      notesEl.classList.add("hidden");
+    }
+    showUpdateView(updateAvailableView);
+  } else if (status.state === "downloading") {
+    const pct = Math.round(status.progress?.percent || 0);
+    document.getElementById("updateProgressFill").style.width = `${pct}%`;
+    document.getElementById("updateProgressDetail").textContent =
+      `${pct}%  —  ${formatBytes(status.progress?.transferred)} / ${formatBytes(status.progress?.total)}`;
+    showUpdateView(updateDownloadingView);
+  } else if (status.state === "downloaded") {
+    showUpdateView(updateReadyView);
+  } else if (status.state === "error") {
+    // Never block the app over a failed/offline update check — log only.
+    appendLog(`[updater] ${status.message}`);
+    if (!updateReadyView.classList.contains("hidden") || !updateDownloadingView.classList.contains("hidden")) {
+      hideUpdateModal();
+    }
+  }
+});
+
+document.getElementById("updateNowBtn").addEventListener("click", () => {
+  window.speednum.downloadUpdate();
+});
+document.getElementById("updateLaterBtn").addEventListener("click", hideUpdateModal);
+document.getElementById("restartNowBtn").addEventListener("click", () => {
+  window.speednum.installUpdate();
+});
+document.getElementById("updateReadyLaterBtn").addEventListener("click", hideUpdateModal);
+
 (async function init() {
+  currentAppVersion = await window.speednum.getAppVersion();
+  document.getElementById("appVersion").textContent = `v${currentAppVersion}`;
+
   const restored = await window.speednum.restoreSession();
   if (restored) {
     document.getElementById("baseUrl").value = restored.baseUrl;

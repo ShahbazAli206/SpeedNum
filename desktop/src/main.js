@@ -8,6 +8,13 @@ const { runSync, scheduleSync } = require("./sync");
 const syncState = require("./sync-state");
 const { makeSecureStore } = require("./secure-store");
 const { runRestoreDrill } = require("./restore-drill");
+const { setupAutoUpdater } = require("./updater");
+
+// On startup, then every 4 hours while running — frequent enough that a
+// released update reaches people within a work day, infrequent enough that
+// it's not a meaningful load on the update server (a handful of static
+// file GETs per running instance per day).
+const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
 // A superadmin session here is the single biggest blast radius in the
 // whole application (same reasoning as admin_backups.py's own docstring)
@@ -22,6 +29,8 @@ let mainWindow;
 let secureStore;
 let stopScheduler = null;
 let session = null; // { baseUrl, accessToken, refreshToken, profile }
+let updater = null;
+let stopUpdateChecks = null;
 
 function userDataPaths() {
   const base = app.getPath("userData");
@@ -94,6 +103,19 @@ app.whenReady().then(() => {
   secureStore = makeSecureStore(app.getPath("userData"));
   createWindow();
 
+  updater = setupAutoUpdater({
+    onStatus: (status) => mainWindow?.webContents.send("speednum:updateStatus", status),
+  });
+
+  // A packaged app only — electron-updater has no installed-app metadata to
+  // compare against when run unpackaged (`npm start`), and errors on every
+  // check in that mode. Real update checks are exercised against a real
+  // packaged build in this session's own verification, not `npm start`.
+  if (app.isPackaged) {
+    updater.checkForUpdates();
+    stopUpdateChecks = setInterval(() => updater.checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
+  }
+
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -101,6 +123,7 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   if (stopScheduler) stopScheduler();
+  if (stopUpdateChecks) clearInterval(stopUpdateChecks);
   if (process.platform !== "darwin") app.quit();
 });
 
@@ -237,6 +260,26 @@ ipcMain.handle("speednum:runRestoreDrill", async (_event, { snapshotId, backupPa
   } finally {
     await fs.promises.rm(decPath, { force: true });
   }
+});
+
+ipcMain.handle("speednum:getAppVersion", () => app.getVersion());
+
+ipcMain.handle("speednum:checkForUpdates", async () => {
+  if (!app.isPackaged) {
+    return { state: "error", message: "Update checks are only meaningful in a packaged build." };
+  }
+  await updater.checkForUpdates();
+  return { ok: true };
+});
+
+ipcMain.handle("speednum:downloadUpdate", async () => {
+  await updater.downloadUpdate();
+  return { ok: true };
+});
+
+ipcMain.handle("speednum:installUpdate", () => {
+  // Quits and relaunches into the new version — nothing after this call runs.
+  updater.quitAndInstall();
 });
 
 module.exports = {}; // exercised via Electron's own process entry, not required elsewhere

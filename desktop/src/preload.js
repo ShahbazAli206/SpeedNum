@@ -26,4 +26,13 @@ contextBridge.exposeInMainWorld("speednum", {
     ipcRenderer.on("speednum:syncLog", listener);
     return () => ipcRenderer.removeListener("speednum:syncLog", listener);
   },
+  getAppVersion: () => ipcRenderer.invoke("speednum:getAppVersion"),
+  checkForUpdates: () => ipcRenderer.invoke("speednum:checkForUpdates"),
+  downloadUpdate: () => ipcRenderer.invoke("speednum:downloadUpdate"),
+  installUpdate: () => ipcRenderer.invoke("speednum:installUpdate"),
+  onUpdateStatus: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on("speednum:updateStatus", listener);
+    return () => ipcRenderer.removeListener("speednum:updateStatus", listener);
+  },
 });

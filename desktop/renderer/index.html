@@ -23,13 +23,55 @@
   .hidden { display: none; }
   #log { font-family: monospace; font-size: 12px; background: #0f172a; color: #86efac; padding: 12px; border-radius: 6px; height: 120px; overflow-y: auto; white-space: pre-wrap; }
   .error { color: #dc2626; font-size: 13px; margin-top: 8px; }
+  .version-tag { font-size: 12px; color: #94a3b8; margin-left: 10px; }
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,0.55); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .modal { background: white; border-radius: 12px; padding: 24px; width: 420px; max-width: 90vw; box-shadow: 0 20px 40px rgba(0,0,0,0.25); }
+  .modal h2 { margin: 0 0 4px; font-size: 17px; }
+  .modal .version-compare { font-size: 13px; color: #475569; margin-bottom: 14px; }
+  .modal .version-compare b { color: #0f172a; }
+  .release-notes { font-size: 13px; color: #334155; background: #f8fafc; border-radius: 8px; padding: 10px 12px; max-height: 140px; overflow-y: auto; white-space: pre-wrap; margin-bottom: 14px; }
+  .progress-track { width: 100%; height: 10px; background: #e2e8f0; border-radius: 999px; overflow: hidden; margin: 10px 0; }
+  .progress-fill { height: 100%; background: #1d4ed8; transition: width 0.2s ease; }
+  .progress-detail { font-size: 12px; color: #64748b; }
+  .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
+  .modal-actions button { margin-top: 0; }
 </style>
 </head>
 <body>
   <header>
-    <h1>SpeedNum Desktop — Disaster Recovery</h1>
+    <h1>SpeedNum Desktop — Disaster Recovery <span id="appVersion" class="version-tag"></span></h1>
     <button id="logoutBtn" class="secondary hidden">Sign out</button>
   </header>
+
+  <div id="updateModal" class="modal-backdrop hidden">
+    <div class="modal">
+      <div id="updateAvailableView">
+        <h2>New update available</h2>
+        <p class="version-compare">
+          Current version: <b id="updateCurrentVersion">—</b><br />
+          New version: <b id="updateNewVersion">—</b>
+        </p>
+        <div id="updateReleaseNotes" class="release-notes hidden"></div>
+        <div class="modal-actions">
+          <button id="updateNowBtn">Update Now</button>
+          <button class="secondary" id="updateLaterBtn">Later</button>
+        </div>
+      </div>
+      <div id="updateDownloadingView" class="hidden">
+        <h2>Downloading update...</h2>
+        <div class="progress-track"><div id="updateProgressFill" class="progress-fill" style="width:0%"></div></div>
+        <p class="progress-detail" id="updateProgressDetail">Starting…</p>
+      </div>
+      <div id="updateReadyView" class="hidden">
+        <h2>Update ready</h2>
+        <p class="version-compare">Restart SpeedNum Desktop to finish installing?</p>
+        <div class="modal-actions">
+          <button id="restartNowBtn">Restart &amp; Update</button>
+          <button class="secondary" id="updateReadyLaterBtn">Later</button>
+        </div>
+      </div>
+    </div>
+  </div>
   <main>
     <section id="loginView" class="card">
       <h2>Sign in</h2>
