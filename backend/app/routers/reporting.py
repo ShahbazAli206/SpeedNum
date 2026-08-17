@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from ..deps import SessionDep, TenantUserDep
 from ..models import Client, ClientService, Deadline, EngagementLetter, Profile, Service, Task
 from ..schemas import ReportingResponse
+from ..services.deadlines import urgency_for
 from ..utils import as_float, now_utc, today_utc
 
 router = APIRouter(tags=["reporting"])
@@ -162,6 +163,25 @@ async def reporting(
     ).all()
     letters = {key: count for key, count in letter_rows}
 
+    # Same read-time urgency bucketing as the dashboard (services/deadlines.py's
+    # urgency_for) so the two pages never disagree about what counts as overdue.
+    open_deadline_rows = (
+        await session.execute(
+            select(Deadline.due_date, Deadline.status, Deadline.snoozed_until).where(
+                Deadline.tenant_id == tenant_id, Deadline.status.in_(("open", "snoozed"))
+            )
+        )
+    ).all()
+    deadlines_open = {"overdue": 0, "due_soon": 0, "upcoming": 0}
+    for due, status_value, snoozed in open_deadline_rows:
+        bucket, _ = urgency_for(due, status_value, today, snoozed)
+        if bucket in deadlines_open:
+            deadlines_open[bucket] += 1
+
+    portal_enabled_clients = await session.scalar(
+        select(func.count(Client.id)).where(Client.tenant_id == tenant_id, Client.portal_enabled.is_(True))
+    ) or 0
+
     return ReportingResponse(
         generated_at=now_utc(),
         clients_by_status=clients_by_status,
@@ -174,4 +194,6 @@ async def reporting(
         total_annual_fees=as_float(total_fees),
         average_fee=round(as_float(total_fees) / active_clients, 2) if active_clients else 0.0,
         letters=letters,
+        deadlines_open=deadlines_open,
+        portal_enabled_clients=portal_enabled_clients,
     )

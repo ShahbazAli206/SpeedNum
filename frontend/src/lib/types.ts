@@ -498,6 +498,8 @@ export interface Reporting {
   total_annual_fees: number;
   average_fee: number;
   letters: Record<string, number>;
+  deadlines_open: { overdue: number; due_soon: number; upcoming: number };
+  portal_enabled_clients: number;
 }
 
 export interface ImportPreview {

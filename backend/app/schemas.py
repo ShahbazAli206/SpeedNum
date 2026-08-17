@@ -1023,6 +1023,8 @@ class ReportingResponse(BaseModel):
     total_annual_fees: float
     average_fee: float
     letters: dict[str, int]
+    deadlines_open: dict[str, int]
+    portal_enabled_clients: int
 
 
 # --- CSV import ---------------------------------------------------------------
