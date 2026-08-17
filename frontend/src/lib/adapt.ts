@@ -14,7 +14,10 @@
 
 import type {
   ClientRow,
+  Contact as DemoContact,
+  CustomField as DemoCustomField,
   Deadline as DemoDeadline,
+  Letter as DemoLetter,
   Service as DemoService,
   Task as DemoTask,
   TeamRow,
@@ -22,7 +25,10 @@ import type {
 } from "./firm-demo";
 import type {
   Client,
+  Contact,
+  CustomField,
   Deadline,
+  Letter,
   Service,
   Task,
   TeamMember,
@@ -90,6 +96,60 @@ export function toDemoTask(task: Task): DemoTask {
     due_date: task.due_date,
     estimate_hours: task.estimate_hours ?? 0,
     created_at: task.created_at ?? "",
+  };
+}
+
+/** A client's contact — the demo type narrows a few nullable columns to
+ * non-null empty strings, same reasoning as toClientRow above. */
+export function toDemoContact(contact: Contact): DemoContact {
+  return {
+    id: contact.id,
+    client_id: contact.client_id,
+    full_name: contact.full_name,
+    email: contact.email ?? "",
+    phone: contact.phone ?? "",
+    role: contact.role ?? "",
+    is_primary: contact.is_primary,
+  };
+}
+
+/** Client custom-field definitions — identical shape to the live record
+ * except `help_text`, which the demo narrows to "" instead of null. */
+export function toDemoCustomField(field: CustomField): DemoCustomField {
+  return {
+    id: field.id,
+    entity: field.entity,
+    key: field.key,
+    label: field.label,
+    field_type: field.field_type,
+    options: field.options,
+    help_text: field.help_text ?? "",
+    is_required: field.is_required,
+    position: field.position,
+  };
+}
+
+/** Engagement letters, trimmed to the handful of fields the client detail
+ * page's "Engagement letters" card actually renders — the live `Letter`
+ * carries a lot more (body, terms, signature blobs) that has no demo
+ * equivalent and nothing here needs. */
+export function toDemoLetter(letter: Letter): DemoLetter {
+  return {
+    id: letter.id,
+    client_id: letter.client_id,
+    client_name: letter.client_name ?? "—",
+    title: letter.title,
+    status: letter.status,
+    currency: letter.currency,
+    subtotal: letter.subtotal,
+    tax_rate: letter.tax_rate,
+    recipient_name: letter.recipient_name ?? "—",
+    recipient_email: letter.recipient_email ?? "—",
+    sent_at: letter.sent_at,
+    viewed_at: letter.viewed_at,
+    signed_at: letter.signed_at,
+    signer_name: letter.signer_name,
+    items: letter.items.map((item) => ({ description: item.description, amount: item.amount })),
   };
 }
 

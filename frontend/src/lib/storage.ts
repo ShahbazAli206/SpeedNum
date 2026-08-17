@@ -125,3 +125,50 @@ export async function taskAttachmentUrl(taskId: string, attachmentId: string): P
   const { url } = await get<DownloadUrl>(`/tasks/${taskId}/attachments/${attachmentId}/download-url`);
   return url;
 }
+
+/**
+ * Same presigned-upload-then-register pattern again, this time for a staff
+ * caller managing a client's own document book
+ * (backend/app/routers/client_documents_staff.py) rather than the client's
+ * own client-portal session — which is what `uploadDocument` above talks to,
+ * and which a firm user has no session for.
+ */
+export async function uploadClientDocument(
+  clientId: string,
+  file: File,
+  options: { kind?: PortalDocumentKind; isClientVisible?: boolean } = {},
+): Promise<ClientDocument> {
+  const slot = await post<UploadSlot>(`/clients/${clientId}/documents/upload-url`, { name: file.name });
+
+  let response: Response;
+  try {
+    response = await fetch(slot.url, {
+      method: "PUT",
+      headers: file.type ? { "Content-Type": file.type } : undefined,
+      body: file,
+    });
+  } catch {
+    throw new UploadError("Could not reach storage. Check your connection and try again.");
+  }
+  if (!response.ok) {
+    throw new UploadError(
+      response.status === 400
+        ? "Storage rejected the upload — the signed link may have expired. Try again."
+        : `Upload failed (${response.status}).`,
+    );
+  }
+
+  return post<ClientDocument>(`/clients/${clientId}/documents`, {
+    name: file.name,
+    kind: options.kind ?? "other",
+    storage_path: slot.storage_path,
+    mime_type: file.type || null,
+    size_bytes: file.size,
+    is_client_visible: options.isClientVisible ?? true,
+  });
+}
+
+export async function clientDocumentUrl(clientId: string, documentId: string): Promise<string> {
+  const { url } = await get<DownloadUrl>(`/clients/${clientId}/documents/${documentId}/download-url`);
+  return url;
+}

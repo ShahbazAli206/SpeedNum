@@ -11,6 +11,7 @@ import {
   Send,
   Signature,
   Tag,
+  Trash2,
   Upload,
   Users,
 } from "lucide-react";
@@ -18,9 +19,8 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 
 import { useToast } from "@/components/toast";
-import { Button, Card, CardHeader, Field, Input, Modal, Select, Tab, Tabs } from "@/components/ui";
-import { ApiError, post } from "@/lib/api";
-import { AUTH_CONFIGURED } from "@/lib/auth";
+import { Button, Card, CardHeader, Field, Input, LoadingBlock, Modal, Select, Tab, Tabs } from "@/components/ui";
+import { ApiError, del, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { assignClientService } from "@/lib/client-services";
 import type {
@@ -34,8 +34,16 @@ import type {
   TeamRow,
 } from "@/lib/firm-demo";
 import { formatBytes, formatDate, formatMoney, titleCase } from "@/lib/format";
-import { UploadError, uploadDocument } from "@/lib/storage";
-import type { ClientDocument, Frequency, PortalInviteResult, TaskPriority, TaskStatus } from "@/lib/types";
+import { useApi } from "@/lib/hooks";
+import { clientDocumentUrl, UploadError, uploadClientDocument } from "@/lib/storage";
+import type {
+  ClientDocument,
+  Frequency,
+  PortalInviteResult,
+  Task as ApiTask,
+  TaskPriority,
+  TaskStatus,
+} from "@/lib/types";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -88,10 +96,29 @@ const STATUS_TONE: Record<string, string> = {
   todo: "bg-surface-2 text-ink-soft",
 };
 
-let taskSeq = 0;
-function nextTaskId() {
-  taskSeq += 1;
-  return `local-task-${taskSeq}`;
+/** Pull a human-readable reason out of an ApiError without leaking `[object]`. */
+function message(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+/** `TaskRow` only needs a handful of fields, shared by the demo/live `Task`
+ * prop and the record `POST /tasks` hands back on a successful create. */
+function toTaskRow(task: {
+  id: string;
+  title: string;
+  assignee_name: string | null;
+  due_date: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+}): TaskRow {
+  return {
+    id: task.id,
+    title: task.title,
+    assignee_name: task.assignee_name ?? "Unassigned",
+    due_date: task.due_date,
+    status: task.status,
+    priority: task.priority,
+  };
 }
 
 export function ClientDetailClient({
@@ -105,6 +132,7 @@ export function ClientDetailClient({
   customFields,
   team,
   initialTab,
+  isLive,
 }: {
   client: ClientRow;
   contacts: Contact[];
@@ -118,6 +146,11 @@ export function ClientDetailClient({
   /** Lets other pages deep-link straight to a tab, e.g. a task's "Client"
    * link landing on this client's own Tasks tab. */
   initialTab?: TabId;
+  /** False for the handful of demo fixture ids that still exist for design
+   * reference — every real client (a UUID from the API) is live. Adding a
+   * service, task or file only makes sense against a live client; a demo
+   * client has nothing real behind its id for those endpoints to find. */
+  isLive: boolean;
 }) {
   const toast = useToast();
   const [tab, setTab] = useState<TabId>(initialTab ?? "overview");
@@ -127,29 +160,31 @@ export function ClientDetailClient({
   const [portalInvitedAt, setPortalInvitedAt] = useState(client.portal_invited_at);
   const [inviting, setInviting] = useState(false);
 
-  // Add service — local-only until /client-services is wired here, same
-  // philosophy as the Task Master board: it still has to feel real, so
-  // additions land in component state.
+  // Add service — a real POST to /clients/{id}/services. The optimistic row
+  // only joins local state once that call actually succeeds, so a failed
+  // request never leaves behind a service that isn't really assigned.
   const [serviceModalOpen, setServiceModalOpen] = useState(false);
-  const [addedServices, setAddedServices] = useState<Service[]>([]);
+  const [assignedServices, setAssignedServices] = useState<Service[]>(services);
   const [selectedServiceId, setSelectedServiceId] = useState("");
   const [cadence, setCadence] = useState<Frequency>("annual");
   const [price, setPrice] = useState("0");
   const [nextDue, setNextDue] = useState("");
+  const [addingService, setAddingService] = useState(false);
 
-  // Add task — local-only, same reasoning as services above.
+  // Add task — a real POST /tasks with this client's id set.
   const [taskModalOpen, setTaskModalOpen] = useState(false);
-  const [addedTasks, setAddedTasks] = useState<TaskRow[]>([]);
+  const [allTasks, setAllTasks] = useState<TaskRow[]>(() => tasks.map(toTaskRow));
   const [taskTitle, setTaskTitle] = useState("");
   const [taskAssigneeId, setTaskAssigneeId] = useState("");
   const [taskPriority, setTaskPriority] = useState<TaskPriority>("medium");
   const [taskStatus, setTaskStatus] = useState<TaskStatus>("todo");
   const [taskDueDate, setTaskDueDate] = useState("");
+  const [addingTask, setAddingTask] = useState(false);
 
-  // Upload file — genuinely real when a storage backend is configured (same
-  // helper the client portal's own Documents page uses), demo-only otherwise.
+  // Files — a real, per-client document list
+  // (backend/app/routers/client_documents_staff.py), only fetched when live.
+  const filesQuery = useApi<ClientDocument[]>(isLive ? `/clients/${client.id}/documents` : null);
   const [fileModalOpen, setFileModalOpen] = useState(false);
-  const [addedFiles, setAddedFiles] = useState<ClientDocument[]>([]);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -158,19 +193,8 @@ export function ClientDetailClient({
   const clientEmail = primaryContact?.email ?? null;
   const primaryPhone = primaryContact?.phone ?? null;
 
-  const allServices = [...services, ...addedServices];
-  const allTasks: TaskRow[] = [
-    ...tasks.map((task) => ({
-      id: task.id,
-      title: task.title,
-      assignee_name: task.assignee_name ?? "Unassigned",
-      due_date: task.due_date,
-      status: task.status,
-      priority: task.priority,
-    })),
-    ...addedTasks,
-  ];
-  const allFiles = addedFiles;
+  const allServices = assignedServices;
+  const allFiles = filesQuery.data ?? [];
 
   const availableCatalogue = catalogue.filter(
     (service) => !allServices.some((assigned) => assigned.id === service.id),
@@ -185,53 +209,61 @@ export function ClientDetailClient({
     }
   };
 
-  const submitService = () => {
+  const submitService = async () => {
     const picked = catalogue.find((service) => service.id === selectedServiceId);
     if (!picked) return;
     const priceValue = Number(price) || 0;
-    setAddedServices((current) => [
-      ...current,
-      { ...picked, frequency: cadence, default_price: priceValue },
-    ]);
-    toast.success(`${picked.name} assigned`, "Added to this client's services.");
-    setServiceModalOpen(false);
-    setSelectedServiceId("");
-    setCadence("annual");
-    setPrice("0");
-    setNextDue("");
-
-    // Real backend configured: persist the assignment for real.
-    // Any failure (most commonly: no backend reachable yet) is silent here —
-    // the optimistic row above already gives the admin working feedback,
-    // same fallback philosophy as the rest of this page's "Add" actions.
-    void assignClientService(client.id, {
-      service_id: picked.id,
-      price: priceValue,
-      frequency_override: cadence,
-    }).catch(() => {});
+    setAddingService(true);
+    try {
+      await assignClientService(client.id, {
+        service_id: picked.id,
+        price: priceValue,
+        frequency_override: cadence,
+      });
+      setAssignedServices((current) => [
+        ...current,
+        { ...picked, frequency: cadence, default_price: priceValue },
+      ]);
+      toast.success(`${picked.name} assigned`, "Added to this client's services.");
+      setServiceModalOpen(false);
+      setSelectedServiceId("");
+      setCadence("annual");
+      setPrice("0");
+      setNextDue("");
+    } catch (error) {
+      toast.error(`Couldn't add ${picked.name}`, message(error, "Please try again."));
+    } finally {
+      setAddingService(false);
+    }
   };
 
-  const submitTask = () => {
-    if (!taskTitle.trim()) return;
-    const assignee = team.find((member) => member.id === taskAssigneeId);
-    setAddedTasks((current) => [
-      ...current,
-      {
-        id: nextTaskId(),
-        title: taskTitle.trim(),
-        assignee_name: assignee?.full_name ?? "Unassigned",
-        due_date: taskDueDate || null,
-        status: taskStatus,
+  const submitTask = async () => {
+    const trimmed = taskTitle.trim();
+    if (!trimmed) return;
+    setAddingTask(true);
+    try {
+      const created = await post<ApiTask>("/tasks", {
+        title: trimmed,
+        client_id: client.id,
+        task_type: "client",
+        assignee_id: taskAssigneeId || null,
         priority: taskPriority,
-      },
-    ]);
-    toast.success(`"${taskTitle.trim()}" added`, "Added to this client's tasks.");
-    setTaskModalOpen(false);
-    setTaskTitle("");
-    setTaskAssigneeId("");
-    setTaskPriority("medium");
-    setTaskStatus("todo");
-    setTaskDueDate("");
+        status: taskStatus,
+        due_date: taskDueDate || null,
+      });
+      setAllTasks((current) => [toTaskRow(created), ...current]);
+      toast.success(`"${trimmed}" added`, "Added to this client's tasks.");
+      setTaskModalOpen(false);
+      setTaskTitle("");
+      setTaskAssigneeId("");
+      setTaskPriority("medium");
+      setTaskStatus("todo");
+      setTaskDueDate("");
+    } catch (error) {
+      toast.error(`Couldn't add "${trimmed}"`, message(error, "Please try again."));
+    } finally {
+      setAddingTask(false);
+    }
   };
 
   const closeFileModal = () => {
@@ -241,25 +273,34 @@ export function ClientDetailClient({
 
   const submitFile = async () => {
     if (!pendingFile) return;
-
-    if (!AUTH_CONFIGURED) {
-      toast.info(`${pendingFile.name} selected`, "This is demo data; connect a backend to upload for real.");
-      closeFileModal();
-      return;
-    }
-
     setUploading(true);
     try {
-      const uploaded = await uploadDocument(pendingFile, { clientId: client.id, isClientVisible: true });
-      setAddedFiles((current) => [uploaded, ...current]);
-      toast.success(`${uploaded.name} uploaded`, "Added to this client's secure storage.");
+      await uploadClientDocument(client.id, pendingFile);
+      toast.success(`${pendingFile.name} uploaded`, "Added to this client's secure storage.");
       closeFileModal();
+      await filesQuery.reload();
     } catch (error) {
       const detail =
         error instanceof UploadError || error instanceof ApiError ? error.message : "Please try again.";
       toast.error(`Couldn't upload ${pendingFile.name}`, detail);
     } finally {
       setUploading(false);
+    }
+  };
+
+  const openFile = async (file: ClientDocument) => {
+    const url = await clientDocumentUrl(client.id, file.id);
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const removeFile = async (file: ClientDocument) => {
+    if (typeof window !== "undefined" && !window.confirm(`Delete "${file.name}"? This can't be undone.`)) return;
+    try {
+      await del(`/clients/${client.id}/documents/${file.id}`);
+      toast.success("File removed", file.name);
+      await filesQuery.reload();
+    } catch (error) {
+      toast.error("Could not delete file", message(error, "Please try again."));
     }
   };
 
@@ -578,9 +619,11 @@ export function ClientDetailClient({
             title="Services"
             description={`${allServices.length} service${allServices.length === 1 ? "" : "s"} assigned — cadence drives the deadline board`}
             action={
-              <Button size="sm" icon={<Plus className="size-3.5" />} onClick={() => setServiceModalOpen(true)}>
-                Add service
-              </Button>
+              isLive ? (
+                <Button size="sm" icon={<Plus className="size-3.5" />} onClick={() => setServiceModalOpen(true)}>
+                  Add service
+                </Button>
+              ) : undefined
             }
           />
           {allServices.length === 0 ? (
@@ -616,9 +659,11 @@ export function ClientDetailClient({
             title="Tasks"
             description={`${allTasks.length} task${allTasks.length === 1 ? "" : "s"} for this client`}
             action={
-              <Button size="sm" icon={<Plus className="size-3.5" />} onClick={() => setTaskModalOpen(true)}>
-                Add task
-              </Button>
+              isLive ? (
+                <Button size="sm" icon={<Plus className="size-3.5" />} onClick={() => setTaskModalOpen(true)}>
+                  Add task
+                </Button>
+              ) : undefined
             }
           />
           {allTasks.length === 0 ? (
@@ -650,14 +695,28 @@ export function ClientDetailClient({
         <Card>
           <CardHeader
             title="Files"
-            description={allFiles.length === 0 ? "No files yet" : `${allFiles.length} file${allFiles.length === 1 ? "" : "s"}`}
+            description={
+              !isLive
+                ? "Files are available once this client is connected to a live backend."
+                : allFiles.length === 0
+                  ? "No files yet"
+                  : `${allFiles.length} file${allFiles.length === 1 ? "" : "s"}`
+            }
             action={
-              <Button size="sm" icon={<Upload className="size-3.5" />} onClick={() => setFileModalOpen(true)}>
-                Upload file
-              </Button>
+              isLive ? (
+                <Button size="sm" icon={<Upload className="size-3.5" />} onClick={() => setFileModalOpen(true)}>
+                  Upload file
+                </Button>
+              ) : undefined
             }
           />
-          {allFiles.length === 0 ? (
+          {!isLive ? (
+            <p className="px-5 py-8 text-center text-[13px] text-muted">
+              No files. Connect a live backend to upload documents for this client.
+            </p>
+          ) : filesQuery.isLoading ? (
+            <LoadingBlock label="Loading files…" />
+          ) : allFiles.length === 0 ? (
             <p className="px-5 py-8 text-center text-[13px] text-muted">
               No files yet. Upload statements, engagement letters or working papers.
             </p>
@@ -666,13 +725,27 @@ export function ClientDetailClient({
               {allFiles.map((file) => (
                 <li key={file.id} className="flex items-center gap-3 px-5 py-3">
                   <FileText className="size-4 shrink-0 text-muted" aria-hidden />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13.5px] font-medium text-ink">{file.name}</span>
-                    <span className="block text-[12px] text-muted">
+                  <div className="min-w-0 flex-1">
+                    <button
+                      type="button"
+                      onClick={() => openFile(file)}
+                      className="block truncate text-left text-[13.5px] font-medium text-brand hover:underline"
+                    >
+                      {file.name}
+                    </button>
+                    <p className="text-[12px] text-muted">
                       {formatDate(file.created_at)}
                       {file.size_bytes ? ` · ${formatBytes(file.size_bytes)}` : ""}
-                    </span>
-                  </span>
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeFile(file)}
+                    aria-label={`Remove ${file.name}`}
+                    className="shrink-0 rounded-md p-1.5 text-muted transition hover:bg-danger-soft hover:text-danger"
+                  >
+                    <Trash2 className="size-4" />
+                  </button>
                 </li>
               ))}
             </ul>
@@ -680,155 +753,183 @@ export function ClientDetailClient({
         </Card>
       ) : null}
 
-      {/* Add a service */}
-      <Modal
-        open={serviceModalOpen}
-        onClose={() => setServiceModalOpen(false)}
-        title="Add a service"
-        description="Assign a service to this client with its cadence and price."
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setServiceModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button icon={<Plus className="size-4" />} disabled={!selectedServiceId} onClick={submitService}>
-              Add service
-            </Button>
-          </>
-        }
-      >
-        <Field label="Service">
-          <Select
-            value={selectedServiceId}
-            onValueChange={handleServiceSelect}
-            placeholder="Select a service…"
-            searchPlaceholder="Search the catalogue…"
-            options={availableCatalogue.map((service) => ({
-              value: service.id,
-              label: service.name,
-              description: `${titleCase(service.frequency)} · ${formatMoney(service.default_price)}`,
-            }))}
-          />
-        </Field>
-        <div className="mt-4 grid grid-cols-3 gap-3">
-          <Field label="Cadence">
-            <Select
-              value={cadence}
-              onValueChange={(next) => setCadence(next as Frequency)}
-              options={FREQUENCY_OPTIONS}
-            />
-          </Field>
-          <Field label="Price ($)">
-            <Input type="number" min={0} step={10} value={price} onChange={(event) => setPrice(event.target.value)} />
-          </Field>
-          <Field label="Next due">
-            <Input type="date" value={nextDue} onChange={(event) => setNextDue(event.target.value)} />
-          </Field>
-        </div>
-      </Modal>
+      {/* Add service / task / upload file — only meaningful against a live
+          client; a demo fixture id has nothing behind it for these to write
+          to (same reasoning as task-detail-client.tsx's Attachments tab). */}
+      {isLive ? (
+        <>
+          {/* Add a service */}
+          <Modal
+            open={serviceModalOpen}
+            onClose={() => setServiceModalOpen(false)}
+            title="Add a service"
+            description="Assign a service to this client with its cadence and price."
+            footer={
+              <>
+                <Button variant="secondary" onClick={() => setServiceModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  icon={<Plus className="size-4" />}
+                  disabled={!selectedServiceId || addingService}
+                  loading={addingService}
+                  onClick={submitService}
+                >
+                  Add service
+                </Button>
+              </>
+            }
+          >
+            <Field label="Service">
+              <Select
+                value={selectedServiceId}
+                onValueChange={handleServiceSelect}
+                placeholder="Select a service…"
+                searchPlaceholder="Search the catalogue…"
+                options={availableCatalogue.map((service) => ({
+                  value: service.id,
+                  label: service.name,
+                  description: `${titleCase(service.frequency)} · ${formatMoney(service.default_price)}`,
+                }))}
+              />
+            </Field>
+            <div className="mt-4 grid grid-cols-3 gap-3">
+              <Field label="Cadence">
+                <Select
+                  value={cadence}
+                  onValueChange={(next) => setCadence(next as Frequency)}
+                  options={FREQUENCY_OPTIONS}
+                />
+              </Field>
+              <Field label="Price ($)">
+                <Input
+                  type="number"
+                  min={0}
+                  step={10}
+                  value={price}
+                  onChange={(event) => setPrice(event.target.value)}
+                />
+              </Field>
+              <Field label="Next due">
+                <Input type="date" value={nextDue} onChange={(event) => setNextDue(event.target.value)} />
+              </Field>
+            </div>
+          </Modal>
 
-      {/* Add task */}
-      <Modal
-        open={taskModalOpen}
-        onClose={() => setTaskModalOpen(false)}
-        title="Add task"
-        description="Create a task for this client."
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setTaskModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button icon={<Plus className="size-4" />} disabled={!taskTitle.trim()} onClick={submitTask}>
-              Add task
-            </Button>
-          </>
-        }
-      >
-        <Field label="Title">
-          <Input
-            value={taskTitle}
-            onChange={(event) => setTaskTitle(event.target.value)}
-            placeholder="e.g. Prepare year-end working papers"
-            autoFocus
-          />
-        </Field>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <Field label="Assign to">
-            <Select
-              value={taskAssigneeId}
-              onValueChange={setTaskAssigneeId}
-              placeholder="Unassigned"
-              options={[
-                { value: "", label: "Unassigned" },
-                ...team.map((member) => ({
-                  value: member.id,
-                  label: member.full_name,
-                  description: member.email,
-                })),
-              ]}
-            />
-          </Field>
-          <Field label="Priority">
-            <Select
-              value={taskPriority}
-              onValueChange={(next) => setTaskPriority(next as TaskPriority)}
-              options={PRIORITY_OPTIONS}
-            />
-          </Field>
-          <Field label="Status">
-            <Select
-              value={taskStatus}
-              onValueChange={(next) => setTaskStatus(next as TaskStatus)}
-              options={STATUS_OPTIONS}
-            />
-          </Field>
-          <Field label="Due date">
-            <Input type="date" value={taskDueDate} onChange={(event) => setTaskDueDate(event.target.value)} />
-          </Field>
-        </div>
-      </Modal>
+          {/* Add task */}
+          <Modal
+            open={taskModalOpen}
+            onClose={() => setTaskModalOpen(false)}
+            title="Add task"
+            description="Create a task for this client."
+            footer={
+              <>
+                <Button variant="secondary" onClick={() => setTaskModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  icon={<Plus className="size-4" />}
+                  disabled={!taskTitle.trim() || addingTask}
+                  loading={addingTask}
+                  onClick={submitTask}
+                >
+                  Add task
+                </Button>
+              </>
+            }
+          >
+            <Field label="Title">
+              <Input
+                value={taskTitle}
+                onChange={(event) => setTaskTitle(event.target.value)}
+                placeholder="e.g. Prepare year-end working papers"
+                autoFocus
+              />
+            </Field>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <Field label="Assign to">
+                <Select
+                  value={taskAssigneeId}
+                  onValueChange={setTaskAssigneeId}
+                  placeholder="Unassigned"
+                  options={[
+                    { value: "", label: "Unassigned" },
+                    ...team.map((member) => ({
+                      value: member.id,
+                      label: member.full_name,
+                      description: member.email,
+                    })),
+                  ]}
+                />
+              </Field>
+              <Field label="Priority">
+                <Select
+                  value={taskPriority}
+                  onValueChange={(next) => setTaskPriority(next as TaskPriority)}
+                  options={PRIORITY_OPTIONS}
+                />
+              </Field>
+              <Field label="Status">
+                <Select
+                  value={taskStatus}
+                  onValueChange={(next) => setTaskStatus(next as TaskStatus)}
+                  options={STATUS_OPTIONS}
+                />
+              </Field>
+              <Field label="Due date">
+                <Input type="date" value={taskDueDate} onChange={(event) => setTaskDueDate(event.target.value)} />
+              </Field>
+            </div>
+          </Modal>
 
-      {/* Upload a file */}
-      <Modal
-        open={fileModalOpen}
-        onClose={closeFileModal}
-        title="Upload a file"
-        description="Add a document to this client's secure storage."
-        footer={
-          <>
-            <Button variant="secondary" onClick={closeFileModal}>
-              Cancel
-            </Button>
-            <Button icon={<Upload className="size-4" />} disabled={!pendingFile} loading={uploading} onClick={submitFile}>
-              Upload file
-            </Button>
-          </>
-        }
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          className="hidden"
-          onChange={(event) => setPendingFile(event.target.files?.[0] ?? null)}
-        />
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-line bg-surface-2/40 p-8 text-center transition hover:border-brand hover:bg-brand-soft/20"
-        >
-          <span className="grid size-11 place-items-center rounded-full bg-surface-2 text-muted">
-            <Upload className="size-5" />
-          </span>
-          {pendingFile ? (
-            <span className="text-[14px] font-medium text-ink">{pendingFile.name}</span>
-          ) : (
-            <>
-              <span className="text-[14px] font-medium text-ink">Click to choose a file</span>
-              <span className="text-[13px] text-muted">Statements, engagement letters, working papers…</span>
-            </>
-          )}
-        </button>
-      </Modal>
+          {/* Upload a file */}
+          <Modal
+            open={fileModalOpen}
+            onClose={closeFileModal}
+            title="Upload a file"
+            description="Add a document to this client's secure storage."
+            footer={
+              <>
+                <Button variant="secondary" onClick={closeFileModal}>
+                  Cancel
+                </Button>
+                <Button
+                  icon={<Upload className="size-4" />}
+                  disabled={!pendingFile}
+                  loading={uploading}
+                  onClick={submitFile}
+                >
+                  Upload file
+                </Button>
+              </>
+            }
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={(event) => setPendingFile(event.target.files?.[0] ?? null)}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-line bg-surface-2/40 p-8 text-center transition hover:border-brand hover:bg-brand-soft/20"
+            >
+              <span className="grid size-11 place-items-center rounded-full bg-surface-2 text-muted">
+                <Upload className="size-5" />
+              </span>
+              {pendingFile ? (
+                <span className="text-[14px] font-medium text-ink">{pendingFile.name}</span>
+              ) : (
+                <>
+                  <span className="text-[14px] font-medium text-ink">Click to choose a file</span>
+                  <span className="text-[13px] text-muted">Statements, engagement letters, working papers…</span>
+                </>
+              )}
+            </button>
+          </Modal>
+        </>
+      ) : null}
     </>
   );
 }
