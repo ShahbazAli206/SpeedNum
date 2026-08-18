@@ -64,8 +64,8 @@ Last updated: 2026-08-18 (start of this pass). Baseline commit: `04fed8c`.
 | 16 | Revenue/financial logic | DONE | Real invoice-derived revenue (paid/outstanding/overdue) + contract-value projection, both real. |
 | 17 | Document management | DONE | Live-tested this session (upload/download/delete/cross-tenant/Unicode). |
 | 18 | Task attachments + comments | TODO | **Explicit gap — implementing this pass.** |
-| 19 | Signature system (generic) | PARTIAL | Real, working, but hardcoded to engagement letters. Generalizing beyond that is a larger schema change — evaluate scope this pass. |
-| 20 | Signature request workflow | DONE (for letters) | Full flow real for engagement letters specifically. |
+| 19 | Signature system (generic) | PARTIAL | Real, working (as of the final consolidation pass — was actually 100% broken before that, see below), hardcoded to engagement letters. Generalizing beyond that is a larger schema change — out of scope. |
+| 20 | Signature request workflow | DONE (for letters), corrected 2026-08-18 | This row previously claimed "Full flow real," which was **false** — `POST /engagements` failed on every single attempt, in every tenant, since the table existed (two real bugs: a NULL `token` default mismatch, then a `MissingGreenlet` crash — see "Final consolidation pass" section below). Both fixed and the full lifecycle (create/get/list/update/duplicate/send/sign/void/delete) live-verified end to end today. Earlier "DONE" was never actually exercised against a real create call. |
 | 21 | Letterhead/branding in documents | DONE | Tenant brand_color/logo/letter_footer already used in the real PDF + emails. |
 | 22 | Client letter/email workflow | DONE | Real, for engagement letters. |
 | 23 | Branding/appearance (web+desktop) | PARTIAL | Web done this pass. Desktop has no theming at all (plain HTML/CSS, no dark/light/system, no brand injection) — small, scoped desktop task. |
