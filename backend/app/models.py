@@ -19,6 +19,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -349,7 +350,14 @@ class EngagementLetter(Base):
     body: Mapped[str | None] = mapped_column(Text)
     terms_html: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(pg_enum("letter_status", *LETTER_STATUSES), default="draft")
-    token: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    # server_default matches db/migrations/0001_schema.sql's DDL exactly. Without
+    # it, SQLAlchemy has no way to know Postgres will fill this column in and
+    # sends an explicit NULL on INSERT instead of omitting the column — which
+    # this table's `not null` constraint then rejects. Every engagement-letter
+    # creation (create_letter, duplicate_letter) was broken by this until fixed.
+    token: Mapped[str] = mapped_column(
+        Text, nullable=False, unique=True, server_default=text("encode(gen_random_bytes(24), 'hex')")
+    )
     currency: Mapped[str] = mapped_column(Text, default="CAD")
     subtotal: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
     tax_rate: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=0)
