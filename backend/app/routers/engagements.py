@@ -24,7 +24,7 @@ from ..schemas import (
 )
 from ..services import audit
 from ..services.email import letter_invite_html, send_email, sender_name
-from ..utils import apply_updates, ensure_found, is_valid_signature_data_url, now_utc, read
+from ..utils import apply_updates, ensure_found, is_valid_signature_data_url, now_utc, read, sanitize_rich_text
 
 router = APIRouter(prefix="/engagements", tags=["engagements"])
 
@@ -135,7 +135,7 @@ async def create_letter(
         client_id=client.id,
         title=payload.title,
         body=payload.body or DEFAULT_BODY,
-        terms_html=payload.terms_html,
+        terms_html=sanitize_rich_text(payload.terms_html),
         currency=payload.currency,
         tax_rate=payload.tax_rate,
         period_start=payload.period_start,
@@ -197,6 +197,12 @@ async def update_letter(
         raise HTTPException(status.HTTP_409_CONFLICT, f"A {letter.status} letter cannot be edited.")
 
     items = payload.items
+    if "terms_html" in payload.model_fields_set:
+        # Only touch it when the caller actually sent it — assigning
+        # unconditionally would mark it "set" even when absent from the
+        # request, and apply_updates (exclude_unset=True) would then wipe an
+        # existing value with None on every unrelated PATCH.
+        payload.terms_html = sanitize_rich_text(payload.terms_html)
     apply_updates(letter, payload, allowed={
         "title", "body", "terms_html", "currency", "tax_rate", "period_start", "period_end",
         "recipient_name", "recipient_email",

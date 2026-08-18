@@ -8,7 +8,14 @@ import pytest
 from fastapi import HTTPException
 from pydantic import BaseModel
 
-from app.utils import apply_updates, as_float, ensure_found, group_count, is_valid_signature_data_url
+from app.utils import (
+    apply_updates,
+    as_float,
+    ensure_found,
+    group_count,
+    is_valid_signature_data_url,
+    sanitize_rich_text,
+)
 
 
 class _Update(BaseModel):
@@ -93,3 +100,38 @@ def test_group_count_sorts_by_count_descending():
 )
 def test_is_valid_signature_data_url(value, expected):
     assert is_valid_signature_data_url(value) is expected
+
+
+class TestSanitizeRichText:
+    """A stored-XSS bug let any tenant staff member set an engagement
+    letter's `terms_html` directly via the API (bypassing the rich-text
+    editor entirely) and have it rendered unescaped, via
+    dangerouslySetInnerHTML, on the *public, unauthenticated* client-signing
+    page. sanitize_rich_text is the fix — it must strip anything outside the
+    editor's own vocabulary while leaving legitimate formatting intact."""
+
+    def test_none_passes_through(self):
+        assert sanitize_rich_text(None) is None
+
+    def test_legitimate_formatting_is_preserved(self):
+        html = '<p>Normal <strong>bold</strong> and <a href="https://example.com">a link</a></p>'
+        assert sanitize_rich_text(html) == html
+
+    def test_script_tag_is_stripped(self):
+        result = sanitize_rich_text("<script>alert(document.cookie)</script>hello")
+        assert "<script" not in result
+        assert "hello" in result
+
+    def test_event_handler_attribute_is_stripped(self):
+        result = sanitize_rich_text('<img src=x onerror="alert(1)">')
+        assert "onerror" not in result
+        assert "<img" not in result  # img isn't in the rich-text editor's own tag set at all
+
+    def test_javascript_url_is_stripped_but_tag_survives(self):
+        result = sanitize_rich_text('<a href="javascript:alert(1)">click</a>')
+        assert "javascript:" not in result
+        assert "click" in result
+
+    def test_iframe_is_stripped(self):
+        result = sanitize_rich_text('<iframe src="https://evil.example"></iframe>')
+        assert "<iframe" not in result

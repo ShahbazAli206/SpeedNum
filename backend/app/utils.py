@@ -6,6 +6,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Any, Iterable, Sequence, TypeVar
 
+import bleach
 from fastapi import HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -14,6 +15,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .models import Client, Profile
 
 T = TypeVar("T", bound=BaseModel)
+
+# Matches the Tiptap/StarterKit rich-text editor's actual output (bold,
+# italic, underline, lists, links, headings — see
+# frontend/src/components/editor/rich-text-editor.tsx) and nothing else.
+# `terms_html` was previously stored and rendered completely unsanitized —
+# a real, live-confirmed stored-XSS hole: any tenant staff member could set
+# it directly via the API (bypassing the rich-text editor entirely) and it
+# was rendered with `dangerouslySetInnerHTML` on the *public, unauthenticated*
+# client-signing page (frontend/src/app/engagement/[token]) with no escaping.
+_RICH_TEXT_TAGS = [
+    "p", "br", "strong", "b", "em", "i", "u", "s",
+    "ul", "ol", "li", "a", "blockquote", "code", "pre",
+    "h1", "h2", "h3",
+]
+_RICH_TEXT_ATTRS = {"a": ["href"]}
+
+
+def sanitize_rich_text(html: str | None) -> str | None:
+    """Strip anything outside the rich-text editor's own vocabulary —
+    scripts, event handlers, iframes, `javascript:` URLs — before it is
+    ever stored. Sanitizing on write (not on every render path) means every
+    consumer (staff preview, PDF export, the public signing page) is
+    protected, not just whichever one remembered to escape it."""
+    if html is None:
+        return None
+    return bleach.clean(
+        html, tags=_RICH_TEXT_TAGS, attributes=_RICH_TEXT_ATTRS, protocols=["http", "https", "mailto"], strip=True
+    )
 
 
 def today_utc() -> date:
