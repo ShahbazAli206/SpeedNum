@@ -28,23 +28,28 @@ rotation, opaque rotating refresh tokens with reuse detection) — see
 `AUTH_PROVIDER=supabase` / `STORAGE_PROVIDER=supabase` settings exist only as documented,
 inactive-by-default rollback paths and default safely to the self-hosted providers.
 
-## ⚠ Read this before anything else: the live frontend is not running this branch
+## `main` is now the complete project — merged and pushed
 
-`https://speed-num.vercel.app` builds from `main`, not
-`migration/portable-production-architecture`. `main` is **80 commits behind** this branch (verify any time
-with `git rev-list --count origin/main..origin/migration/portable-production-architecture`)
-and was last touched 2026-08-16 — before task attachments/comments, the reporting/admin-
-console/custom-fields/client-detail live-data fixes, PDF export, the Task Master live-data
-wiring, the engagement-letter creation fix (that feature is **currently 100% broken for
-real users** — every create attempt 500s), the stored-XSS fix, and the current-password
-fix all landed. None of this project's work has reached real production traffic. The
-backend at `test.spidnums.com` *is* current — every backend fix deploys there directly
-over SSH, independent of Vercel — it is specifically the Vercel-served frontend that is
-frozen. Merging `migration/portable-production-architecture` into `main` (or repointing
-Vercel's production branch) is a real, externally-visible, hard-to-reverse cutover of
-~80 unreviewed-as-one-diff commits including the entire self-hosted-auth migration —
-deliberately left for the user to authorize explicitly, not executed silently. See the
-final acceptance report for the exact commands.
+As of this pass, `origin/main` and `origin/migration/portable-production-architecture`
+are identical (verify any time with
+`git rev-parse origin/main origin/migration/portable-production-architecture` — both
+print the same hash). Everything that was previously described here as "stuck on the
+migration branch" — task attachments/comments, the reporting/admin-console/custom-
+fields/client-detail live-data fixes, PDF export, the Task Master live-data wiring, the
+engagement-letter creation fix, the stored-XSS fix, the current-password fix, and this
+pass's own fixes — is now on `main`. This was a strict fast-forward (no divergent
+history to reconcile), pushed directly (`git push
+origin migration/portable-production-architecture:main`) rather than via a local
+checkout, since this shared working tree has other concurrent processes that a branch
+switch could disrupt.
+
+Vercel's standard GitHub integration auto-deploys on a push to its connected production
+branch. **This environment has no Vercel dashboard/CLI credentials**, so the exact
+deployed commit SHA on `https://speed-num.vercel.app` could not be independently
+confirmed — the live bundle's asset hashes did change after the push (consistent with a
+new build having run), which is corroborating evidence, not proof. Confirm in the
+Vercel dashboard that Production shows a deployment from this commit before treating
+the frontend as caught up.
 
 ## What's live right now
 
@@ -53,7 +58,7 @@ final acceptance report for the exact commands.
 | Backend API | `srv1904640.hstgr.cloud` (`2.25.108.16`) via Caddy, `https://test.spidnums.com` | Up, healthy, migrations current |
 | Postgres 16 | Docker on the same VPS | Up, healthy |
 | MinIO (documents, backups) | Docker on the same VPS | Up, healthy |
-| Frontend | Vercel, `https://speed-num.vercel.app` | Deployed, but **from `main`, ~80 commits stale** — see the warning above |
+| Frontend | Vercel, `https://speed-num.vercel.app` | Deployed from `main`; `main` now matches the complete project — see above. Exact deployed commit not independently confirmable (no Vercel credentials in this environment) |
 | Desktop app | Not distributed yet — build with `npm run dist` in `desktop/` | Functional, unsigned (see Known gaps) |
 
 VPS access: `ssh deploy@srv1904640.hstgr.cloud`, passwordless `sudo`. Root login and
@@ -148,7 +153,22 @@ Full detail on both: [SECURITY.md](SECURITY.md) (OAuth) and [DESKTOP.md](DESKTOP
   (`deploy/Caddyfile.example`).
 - Promoting an account to platform superadmin is deliberately a manual,
   undocumented-in-any-script step (`UPDATE profiles SET is_superadmin = true ...` —
-  see DEPLOYMENT.md §5). Nothing automates it, on purpose.
+  see DEPLOYMENT.md §5). Nothing automates it, on purpose. The real production
+  superadmin (`axelytix3@gmail.com`) was created and verified this pass — registered
+  through the app's own flow (real Argon2id hash), promoted via that one manual step,
+  full login/forced-change cycle live-tested. Its password is not known to this
+  session going forward: rather than transmit a temp password through the agent doing
+  this work, a real password-reset email was triggered via the existing self-service
+  flow so only the real account owner ever knows the final password. If that email
+  didn't arrive, use "Forgot password" on the login page with that address — a real
+  reset token is already on file (confirmed server-side) and SMTP delivery has been
+  proven working repeatedly this project.
+- A number of disposable test tenants created during this project's various audit
+  passes remain in production as empty, harmless shells — no `DELETE /tenants`
+  endpoint exists anywhere in the API (confirmed by grep across every router), so
+  there is currently no way to remove a tenant short of direct database access. Not a
+  security issue (each is fully isolated, same as any real tenant), just leftover
+  clutter an operator with DB access may want to clean up eventually.
 
 ## Where to go next
 
