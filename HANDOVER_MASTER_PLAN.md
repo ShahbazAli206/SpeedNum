@@ -321,3 +321,69 @@ disposable tenants).
 Separately, used this same isolated tenant to independently live-verify the
 `/users` mutation paths the admin-UI audit had only code-reviewed (see the `/users`
 row above) without touching the shared QA tenant's concurrently-running tests.
+
+### Security adversarial sweep — DONE. One HIGH finding fixed and deployed; one HIGH finding documented, deliberately not auto-fixed; several lower-severity findings documented.
+
+**Fixed, deployed, live-verified: stored XSS in engagement-letter `terms_html`.**
+The audit found `terms_html` had zero sanitization anywhere and was rendered via
+`dangerouslySetInnerHTML` with no escaping on the **public, unauthenticated**
+client-signing page (`frontend/src/app/engagement/[token]`) as well as the staff
+preview — live-confirmed with a real `<img onerror>` payload surviving storage and
+both read paths byte-for-byte. Investigated and fixed directly (not left to the
+audit agent, given the shared-branch dependency-collision risk it correctly flagged):
+added `sanitize_rich_text()` (`backend/app/utils.py`, using `bleach`, new backend
+dependency) with an allowlist matching exactly what the Tiptap/StarterKit editor can
+actually produce, applied on write in both `create_letter` and `update_letter` — not
+patched per-render-site, so every consumer (staff preview, PDF export, the public
+portal) is protected from a single fix point. Guarded `update_letter`'s
+`exclude_unset` semantics so an untouched request can't accidentally wipe an existing
+value. 6 new unit tests added (`test_utils.py`); full suite 267/267 passing.
+**Deployed to production and re-tested with the exact payload the audit used**:
+`POST /engagements` with `<img src=x onerror="alert(document.domain)"><p>Real
+<strong>bold</strong> terms</p>` → the `<img>` is now completely stripped, the
+legitimate `<p>`/`<strong>` formatting survives untouched, confirmed via the live API
+response. Test letter deleted afterward.
+
+**Found, documented, deliberately NOT auto-fixed: OAuth pre-account-hijacking gap.**
+Code-review finding (can't be live-tested — no Google OAuth credentials exist in this
+environment): `local_auth.login()` never checks `auth_credentials.email_verified`,
+so a self-registered account is fully usable immediately, with no verification
+enforced. Chained with `complete_oauth()`'s email-match linking, this is the classic
+pre-account-hijacking pattern: an attacker registers first with a victim's real
+email, the real victim later signs in via Google (a different code path) and silently
+gets linked onto the attacker's pre-planted profile, whose password the attacker
+still knows. **Real, HIGH-severity, not fixed this pass** — deliberately, not by
+oversight: `login()` is inside the exact auth flow this same pass's independent audit
+already exhaustively re-tested and signed off as PASS; changing shared, just-verified
+login behavior without re-running that entire audit risks silently invalidating that
+sign-off, and — more concretely — could lock out any already-existing self-registered
+account on this shared environment that never went through email verification (unknown
+how many, and checking would mean a production DB query this pass's safety classifier
+has already refused for similar privilege-sensitive reads). **This needs a deliberate,
+reviewed fix in its own pass**, not a rushed one bolted onto an already-large
+consolidation effort — recommended fix: gate `/auth/login` on `email_verified = true`
+(admin-provisioned staff/portal accounts already set this `true` explicitly, so they
+would be unaffected; only self-registered, never-verified accounts would newly be
+blocked, which is the entire point).
+
+**Other findings, documented for the final report, not fixed this pass** (each is a
+real, verified defect, individually lower-severity or lower-risk than the two above,
+and each was deliberately left for triage rather than rushed):
+- No file-size limit anywhere in the upload path (presigned S3 PUT has no
+  `Content-Length-Range`, and Caddy's `request_body max_size` only guards the
+  FastAPI-proxying block, not the MinIO-proxying `/documents/*`/`/backups/*` blocks) —
+  live-confirmed a 25MB upload succeeds with zero rejection. Real shared-VPS
+  disk-exhaustion risk across every tenant.
+- No file-extension/MIME allowlist on uploads (a `.exe` upload succeeded) — not RCE
+  (objects are never executed server-side) but the app can host/distribute arbitrary
+  executables under a trusted domain.
+- `storage_path` ownership check uses `str.startswith()`, not path normalization — a
+  literal `../../..` suffix on an otherwise-valid prefix was accepted (201). Not
+  currently exploitable (MinIO's flat key namespace doesn't resolve `..`), but a
+  fragile, backend-dependent mitigation rather than a real one.
+- `POST /auth/refresh` and `POST /auth/logout` have no CSRF token — low impact (forced
+  logout/rotation only; `HttpOnly` + no-CORS-readable-response already block cookie
+  theft and response reading), but worth closing for completeness.
+
+SQLi, the 10-resource-type IDOR sweep, and secret exposure were all clean PASS with
+no findings — see the agent's full report for exact reproductions.
