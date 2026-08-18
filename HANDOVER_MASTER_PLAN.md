@@ -489,3 +489,23 @@ afterward via `docker ps -a`.
   direct DB access runs that one `UPDATE` — worth flagging in the final report as a
   genuine, if not urgent, operational gap: the DR tooling this pass so thoroughly
   verified has no one who can currently drive it in production.
+
+### Two more dead buttons fixed: client-portal "Record payment" and "Add expense" — DONE, deployed (frontend-only, will ship whenever the Vercel/main sync above happens), live-verified
+Both flagged by the client-portal audit as real but deliberately-not-fixed (needing
+more than a one-line change). Implemented properly rather than left as findings: both
+real backend endpoints already existed and work (`PATCH /client-portal/invoices/{id}`,
+`POST /client-portal/expenses`) — confirmed `BookScope`'s design genuinely intends
+client-portal accounts to self-mark their own invoices paid (an office-workflow
+pattern, not a payment-gateway integration), so this isn't inventing a capability, just
+wiring an existing one. "Add expense" got a real modal (vendor/category/date/amount/
+GST/method) matching the established `Modal`/`Field` pattern used elsewhere in this
+codebase; new expenses land in the real `pending` status for the accountant to review,
+same as if entered by staff. "New invoice" was deliberately left unfixed — a client
+self-issuing their own invoice isn't an existing product capability and needs an
+actual product decision, not a mechanical wiring job — but now says so honestly via a
+toast instead of doing nothing. Also removed a "This is sample data" line that showed
+unconditionally, even against real invoices. Live-verified end to end in a fresh
+isolated tenant: created an invoice as staff → portal login → recorded payment → `GET`
+confirmed `status: paid`; portal login → submitted an expense → `GET` confirmed it
+landed as `pending` with the exact fields entered. All test data cleaned up.
+`tsc`/`eslint` clean.
