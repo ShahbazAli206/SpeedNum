@@ -264,8 +264,17 @@ none committed by the sub-agents themselves — reviewed and committed centrally
   needed): `/overview` (with one **documented, in-code-commented, not-hidden** gap —
   the revenue trend chart has no backing monthly-series endpoint yet, correctly using
   demo data with an explicit comment rather than fabricating one), `/clients` list,
-  `/team` list + detail + accountant modal, `/services`, `/users` (GET verified live;
-  mutations verified by code review only, matching the audit's own instructions),
+  `/team` list + detail + accountant modal, `/services`, `/users` (GET verified live
+  by the sub-agent; mutations — create staff/PATCH role+title/resend-credentials/
+  delete — independently live-verified afterward in a separate, isolated disposable
+  tenant so as not to disturb the shared QA tenant's concurrently-running audits:
+  `POST /users` → 201 real temp password → `PATCH` role+title → 200 persisted →
+  `POST /resend-credentials` → 200 `email_sent:true` real send → `DELETE` → 200 →
+  confirmed the deleted account's login is genuinely rejected (`403 "This account
+  has been deactivated"` on the temp password). One cosmetic-only wording issue
+  independently reproduced, matching what the auth audit already flagged: the
+  "email delivery isn't configured" message shows even when the caller explicitly
+  passed `send_email:false` — not a bug, just a misleading message in that one case),
   `/reminders`, `/deadlines`, `/settings` (branding, digest toggle, test-email — all
   already real from earlier passes), `/import` (client CSV preview+commit round-tripped
   live; user-import commit verified by code+preview only, since committing sends a real
