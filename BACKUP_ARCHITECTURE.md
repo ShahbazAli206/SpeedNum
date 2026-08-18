@@ -149,6 +149,38 @@ must do the same.
 
 ## Disaster Recovery: Restoring to a Fresh VPS
 
+**If the old VPS is still reachable and its `backups` bucket is intact**, the four snapshot
+components (`postgres.sql.gz`, `storage-delta.tar.gz`, `storage-index.json`, `config.json`)
+are already plaintext there — download them directly (the same presigned-URL path the desktop
+app uses, or `mc cp` against the `backups` bucket) and skip straight to step 3 below.
+
+**If the old VPS is gone and the administrator's desktop copy is the only surviving one** —
+the actual reason this app exists, see "VPS → Desktop Sync" above — every component on disk is
+an encrypted `.snbk` envelope, not the plaintext `pg_dump`/tarball the steps below expect.
+Decrypt each one first, on whatever machine has the backup password, with `crypto-envelope.js`
+directly: it has no Electron dependency (only `crypto`/`fs`/`stream/promises`), so it runs
+under plain Node without launching the desktop app at all:
+
+```bash
+node -e '
+  const { decryptFile } = require("./desktop/src/crypto-envelope.js");
+  const pw = process.argv[1];
+  Promise.all([
+    decryptFile("postgres_dump.snbk", "postgres.sql.gz", pw),
+    decryptFile("storage_delta.snbk", "storage-delta.tar.gz", pw),
+    decryptFile("storage_index.snbk", "storage-index.json", pw),
+    decryptFile("config.snbk", "config.json", pw),
+  ]).then(() => console.log("decrypted"));
+' "<the administrator's backup password>"
+```
+
+A wrong password or any corruption throws before any output file is written — see
+`decryptFile`'s own tamper/truncation-throws-before-any-plaintext-is-trusted guarantee above,
+so a decrypt that finishes without throwing is itself a strong signal the files are intact.
+**If the backup password has been forgotten, this data is permanently unrecoverable** — see
+"Encryption" above; there is deliberately no backdoor. The four plaintext files this produces
+are exactly what steps 3-6 below expect.
+
 1. Provision a new VPS, install Docker + Docker Compose, clone this repo.
 2. Bring up disposable `postgres:16` and `minio` containers (or the real `deploy/`
    Compose stack with the `api` service not yet started).
@@ -167,6 +199,12 @@ must do the same.
 8. Start the `api` service pointed at the restored database, run `docker compose run --rm
    migrate status` to confirm the schema matches what this repo expects.
 9. Verify: log in as a real account, confirm tenant/client data is present.
+10. Cut over: point DNS (`api.spidnums.com`/`test.spidnums.com` A record) at the new VPS's IP,
+    then update `NEXT_PUBLIC_API_URL` on Vercel and redeploy (env vars only take effect on a
+    new build — see DEPLOYMENT.md's Vercel section). Keep the old VPS reachable until the new
+    one has run healthy for a real observation window, so rollback is a plain DNS revert, not
+    a second data-recovery operation — see `MIGRATION.md`'s "Moving to a different VPS/provider"
+    for the full cutover/rollback procedure this reuses.
 
 This exact sequence (minus provisioning an actual second VPS — a disposable Docker stack on
 the existing VPS was used instead, per this pass's scope) was run for real against a real

@@ -6,6 +6,8 @@ import { useState } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useToast } from "@/components/toast";
 import { Button, Field, Input, Switch } from "@/components/ui";
+import { post } from "@/lib/api";
+import { AUTH_CONFIGURED, validatePassword } from "@/lib/auth";
 import { DEMO_ACCOUNT } from "@/lib/demo";
 
 export function SettingsClient() {
@@ -28,6 +30,7 @@ export function SettingsClient() {
 
   const [passwords, setPasswords] = useState({ current: "", next: "" });
   const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [changingPassword, setChangingPassword] = useState(false);
 
   const set = (key: keyof typeof profile) => (event: React.ChangeEvent<HTMLInputElement>) =>
     setProfile((current) => ({ ...current, [key]: event.target.value }));
@@ -37,19 +40,30 @@ export function SettingsClient() {
     toast.success("Profile saved", "Changes apply to invoices and CRA filings.");
   };
 
-  const updatePassword = (event: React.FormEvent) => {
+  const updatePassword = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!passwords.current) {
       setPasswordError("Enter your current password.");
       return;
     }
-    if (passwords.next.length < 8) {
-      setPasswordError("New password must be at least 8 characters.");
+    const nextError = validatePassword(passwords.next, 8);
+    if (nextError) {
+      setPasswordError(nextError);
       return;
     }
     setPasswordError(null);
-    setPasswords({ current: "", next: "" });
-    toast.success("Password updated", "You'll stay signed in on this device.");
+    setChangingPassword(true);
+    try {
+      if (AUTH_CONFIGURED) {
+        await post("/auth/change-password", { new_password: passwords.next });
+      }
+      setPasswords({ current: "", next: "" });
+      toast.success("Password updated", "You'll stay signed in on this device.");
+    } catch (caught) {
+      setPasswordError(caught instanceof Error ? caught.message : "Could not update your password.");
+    } finally {
+      setChangingPassword(false);
+    }
   };
 
   return (
@@ -162,7 +176,7 @@ export function SettingsClient() {
               />
             </Field>
           </div>
-          <Button type="submit" className="mt-5">
+          <Button type="submit" className="mt-5" loading={changingPassword}>
             Update password
           </Button>
         </form>
