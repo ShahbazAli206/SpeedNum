@@ -144,6 +144,13 @@ async def create_letter(
         recipient_email=recipient_email,
         created_by=user.profile.id,
         expires_at=now_utc() + timedelta(days=60),
+        # `items` is lazy="selectin", which piggybacks on the query that loaded
+        # the parent row — a brand-new, never-queried object has no such query
+        # to piggyback on, so touching `.items` anywhere below (here, in
+        # _replace_items, or in _to_read) would try an implicit lazy load and
+        # crash with MissingGreenlet under the async engine. Seeding it as an
+        # already-loaded empty list up front sidesteps that entirely.
+        items=[],
     )
     session.add(letter)
     await session.flush()
@@ -392,6 +399,9 @@ async def duplicate_letter(
         recipient_email=source.recipient_email,
         created_by=user.profile.id,
         expires_at=now_utc() + timedelta(days=60),
+        # See the identical comment in create_letter — a brand-new object has
+        # no originating query for `items`'s lazy="selectin" to piggyback on.
+        items=[],
     )
     session.add(copy)
     await session.flush()
