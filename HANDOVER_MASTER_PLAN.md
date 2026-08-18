@@ -387,3 +387,57 @@ and each was deliberately left for triage rather than rushed):
 
 SQLi, the 10-resource-type IDOR sweep, and secret exposure were all clean PASS with
 no findings — see the agent's full report for exact reproductions.
+
+**Fixed, deployed, live-verified: voluntary password change didn't verify the current
+password.** Discovered while reviewing the client-portal audit's own password-change
+fix (committed separately by a concurrent process as `2c9eec8`, reviewed here): that
+fix correctly wired the settings page to the real `/auth/change-password` endpoint,
+but the form collects/validates "current password" and then never sends it — and the
+backend never checked it either, by design (`ChangePasswordRequest`'s own docstring
+predicted exactly this: "not needed for the flow that exists today" — a general
+settings feature now exists). Net effect: a hijacked or left-open portal session could
+silently take over the account, no proof of the old password required. Fixed by adding
+an optional `current_password` field verified against the stored Argon2id hash when
+present (new `AuthError` path), leaving the forced-temp-password flow — which never
+sends it — unaffected. Deployed and live-verified all three paths: wrong current
+password → `401 "Current password is incorrect."`; correct current password → `200`;
+no `current_password` at all (`ForcePasswordModal`'s exact call shape) → still `200`,
+unaffected. Full suite 267/267.
+
+## CRITICAL, HEADLINE FINDING — production frontend is not running this branch's code at all
+
+The import/export audit tested directly against the real production URL,
+`https://speed-num.vercel.app` (not a staging environment), and found CSV/XLSX
+exports there **still vulnerable to formula injection** even though that exact fix
+(commit `bc940eb`, "Neutralize spreadsheet formula injection in CSV/XLSX exports")
+has been on this branch for a while. Investigated and independently confirmed via
+git, not taken on the agent's word:
+
+```
+git log --oneline -1 main                                  → 11dfffb (unrelated to this branch's work)
+git rev-list --count main..migration/portable-production-architecture → 78
+git branch --contains bc940eb                               → migration/portable-production-architecture only
+```
+
+**`main` — the branch Vercel's production deployment actually builds from — is 78
+commits behind this branch.** Every fix from this pass and the many passes before it
+(self-hosted auth migration off Supabase, tenant isolation, task attachments/comments,
+the reporting/admin-console/custom-fields/client-detail-page live-data fixes, the
+engagement-letter creation fix, the stored-XSS fix, the current-password fix above —
+literally everything) exists only on `migration/portable-production-architecture` and
+has **never reached the actual production frontend real users would see**. The
+backend at `test.spidnums.com` *is* current (every fix this pass was deployed there
+directly via SSH/Docker, independent of Vercel) — it is specifically and only the
+**Vercel-served frontend** that is frozen at a pre-migration commit. Concretely,
+production right now also still lacks: PDF export (commit `9e13938`, unmerged) and
+the Task Master live-data wiring (commit `1ae09e5`, unmerged — production's Task
+Master page still silently serves demo data).
+
+**I did not merge `migration/portable-production-architecture` into `main` or push to
+it.** Doing so would immediately cut real production traffic over to ~78 commits of
+accumulated changes — including the entire self-hosted-auth migration — that no one
+has reviewed as a single consolidated diff. That is a genuinely consequential,
+hard-to-reverse, externally-visible production decision, not a routine engineering
+one, and it belongs to the user to authorize explicitly, not something to execute
+silently mid-audit. This is called out as the single most important item in the
+final report's MANUAL ACTIONS REQUIRED section.
