@@ -734,3 +734,14 @@ export interface AdminTenant {
   users: number;
   signed_letters: number;
 }
+
+/** GET /desktop/latest — public, unauthenticated. Mirrors
+ * backend/app/schemas.py's DesktopReleasePublic. */
+export interface DesktopRelease {
+  version: string;
+  platform: string;
+  installer: string;
+  sha256: string;
+  released_at: string;
+  release_notes: string | null;
+}

@@ -32,6 +32,52 @@ let session = null; // { baseUrl, accessToken, refreshToken, profile }
 let updater = null;
 let stopUpdateChecks = null;
 
+const DEEP_LINK_PROTOCOL = "speednum";
+
+/**
+ * The web dashboard's "Download App" button opens speednum://check-update
+ * (or speednum://version) to detect whether the app is installed and, if
+ * so, ask it to check for updates — see PHASE 10-13 of the desktop
+ * distribution work: the website is only a launcher, never the authority on
+ * installed/latest version, and must never be able to make this process run
+ * an arbitrary command.
+ *
+ * Security: the only thing a deep link can ever do is trigger one of the two
+ * named, hardcoded actions below. The raw URL is parsed with the standard
+ * URL parser and only ever compared against a fixed allow-list — nothing
+ * from it is ever concatenated into a shell command, passed to
+ * child_process, or used to build a filesystem path. An unrecognised
+ * command, protocol, or malformed URL is silently ignored (no error surfaced
+ * to a page that has no business knowing whether its link handling made
+ * sense to us).
+ */
+function handleDeepLink(rawUrl) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return;
+  }
+  if (parsed.protocol !== `${DEEP_LINK_PROTOCOL}:`) return;
+
+  // Electron/Windows URL parsing puts the part after `speednum://` into
+  // either `hostname` (speednum://check-update) or `pathname`
+  // (speednum:check-update) depending on platform quirks — check both,
+  // still only ever as an exact match against the allow-list below.
+  const command = (parsed.hostname || parsed.pathname.replace(/^\/+/, "")).toLowerCase();
+
+  if (command !== "check-update" && command !== "version") return;
+
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+
+  if (!app.isPackaged || !updater) return; // same unpackaged-build caveat as the startup check below
+  updater.checkForUpdates({ manual: true });
+}
+
 function userDataPaths() {
   const base = app.getPath("userData");
   return {
@@ -99,26 +145,69 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
 }
 
-app.whenReady().then(() => {
-  secureStore = makeSecureStore(app.getPath("userData"));
-  createWindow();
-
-  updater = setupAutoUpdater({
-    onStatus: (status) => mainWindow?.webContents.send("speednum:updateStatus", status),
+// Windows delivers a speednum:// deep link by launching a *second* process
+// with the URL as a command-line argument. Without a single-instance lock
+// that would silently open a second, session-less window instead of routing
+// the link to the one already running — this lock plus the "second-instance"
+// handler below is what makes the deep link reach the real app.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", (_event, argv) => {
+    const link = argv.find((arg) => arg.startsWith(`${DEEP_LINK_PROTOCOL}://`));
+    if (link) handleDeepLink(link);
+    else if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
   });
 
-  // A packaged app only — electron-updater has no installed-app metadata to
-  // compare against when run unpackaged (`npm start`), and errors on every
-  // check in that mode. Real update checks are exercised against a real
-  // packaged build in this session's own verification, not `npm start`.
-  if (app.isPackaged) {
-    updater.checkForUpdates();
-    stopUpdateChecks = setInterval(() => updater.checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
-  }
+  app.whenReady().then(() => {
+    // Also needed on Windows even with electron-builder's package.json
+    // `protocols` config (which registers the handler at install time) —
+    // this call keeps registration correct for an unpackaged dev run too.
+    if (process.defaultApp && process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient(DEEP_LINK_PROTOCOL, process.execPath, [path.resolve(process.argv[1])]);
+    } else {
+      app.setAsDefaultProtocolClient(DEEP_LINK_PROTOCOL);
+    }
 
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    secureStore = makeSecureStore(app.getPath("userData"));
+    createWindow();
+
+    updater = setupAutoUpdater({
+      onStatus: (status) => mainWindow?.webContents.send("speednum:updateStatus", status),
+    });
+
+    // A packaged app only — electron-updater has no installed-app metadata to
+    // compare against when run unpackaged (`npm start`), and errors on every
+    // check in that mode. Real update checks are exercised against a real
+    // packaged build in this session's own verification, not `npm start`.
+    if (app.isPackaged) {
+      updater.checkForUpdates();
+      stopUpdateChecks = setInterval(() => updater.checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
+    }
+
+    // Cold start via the deep link itself (app wasn't already running) —
+    // the URL arrives as a plain command-line argument, same as argv[1]
+    // above, just checked here for the app's *own* launch rather than a
+    // second instance's.
+    const coldStartLink = process.argv.find((arg) => arg.startsWith(`${DEEP_LINK_PROTOCOL}://`));
+    if (coldStartLink) handleDeepLink(coldStartLink);
+
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
   });
+}
+
+// macOS delivers deep links through this event instead of argv — harmless to
+// register even though the current build only packages for Windows (PHASE 4),
+// and correct if a macOS target is ever added without revisiting this file.
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  handleDeepLink(url);
 });
 
 app.on("window-all-closed", () => {

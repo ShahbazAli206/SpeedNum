@@ -30,6 +30,12 @@
       "output": "dist",
       "buildResources": "build"
     },
+    "protocols": [
+      {
+        "name": "SpeedNum Desktop deep link",
+        "schemes": ["speednum"]
+      }
+    ],
     "publish": [
       {
         "provider": "generic",

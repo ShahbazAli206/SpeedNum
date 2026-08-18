@@ -137,6 +137,14 @@ function formatBytes(bytes) {
 }
 
 window.speednum.onUpdateStatus((status) => {
+  // "up to date" / "checking" only ever need to say something when the user
+  // actually asked (clicked the dashboard's deep link, or the in-app "Check
+  // for updates" affordance) — the silent 4-hour background poll must stay
+  // silent when there's nothing to report, or it would nag on every check.
+  if (status.state === "up-to-date" && status.manual) {
+    appendLog(`You're on the latest version (v${currentAppVersion}).`);
+    return;
+  }
   if (status.state === "available") {
     latestKnownVersion = status.info?.version || "unknown";
     document.getElementById("updateCurrentVersion").textContent = currentAppVersion;

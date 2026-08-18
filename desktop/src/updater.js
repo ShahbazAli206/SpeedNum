@@ -43,9 +43,22 @@ function setupAutoUpdater({ onStatus }) {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
 
-  autoUpdater.on("checking-for-update", () => onStatus({ state: "checking" }));
-  autoUpdater.on("update-available", (info) => onStatus({ state: "available", info: toInfo(info) }));
-  autoUpdater.on("update-not-available", (info) => onStatus({ state: "up-to-date", info: toInfo(info) }));
+  // Threaded through from checkForUpdates(opts) below so the "up-to-date"
+  // and "available" events can tell the renderer whether to show anything
+  // for a check nobody asked to see (the periodic 4-hour background check
+  // should stay silent when there's nothing new) versus a check the user
+  // just triggered from the deep link (main.js's handleDeepLink), which
+  // should always show *something* — "up to date" or "update available" —
+  // since the whole point of clicking was to get an answer.
+  let lastCheckWasManual = false;
+
+  autoUpdater.on("checking-for-update", () => onStatus({ state: "checking", manual: lastCheckWasManual }));
+  autoUpdater.on("update-available", (info) =>
+    onStatus({ state: "available", info: toInfo(info), manual: lastCheckWasManual }),
+  );
+  autoUpdater.on("update-not-available", (info) =>
+    onStatus({ state: "up-to-date", info: toInfo(info), manual: lastCheckWasManual }),
+  );
   autoUpdater.on("download-progress", (progress) =>
     onStatus({
       state: "downloading",
@@ -66,8 +79,12 @@ function setupAutoUpdater({ onStatus }) {
   });
 
   return {
-    checkForUpdates: () =>
-      autoUpdater.checkForUpdates().catch((err) => onStatus({ state: "error", message: err.message })),
+    checkForUpdates: ({ manual = false } = {}) => {
+      lastCheckWasManual = manual;
+      return autoUpdater
+        .checkForUpdates()
+        .catch((err) => onStatus({ state: "error", message: err.message, manual }));
+    },
     downloadUpdate: () =>
       autoUpdater.downloadUpdate().catch((err) => onStatus({ state: "error", message: err.message })),
     quitAndInstall: () => autoUpdater.quitAndInstall(),

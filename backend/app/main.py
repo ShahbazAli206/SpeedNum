@@ -32,6 +32,7 @@ from .routers import (
     custom_fields,
     dashboard,
     deadlines,
+    desktop_releases,
     engagements,
     imports,
     notifications,
@@ -197,6 +198,7 @@ for router in (
     client_documents.router,
     client_overview.router,
     client_services.router,
+    desktop_releases.router,
 ):
     app.include_router(router, prefix=API_PREFIX)
 

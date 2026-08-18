@@ -1455,3 +1455,34 @@ class LeadCreate(BaseModel):
 class Ok(BaseModel):
     ok: bool = True
     message: str | None = None
+
+
+# --- Desktop releases -----------------------------------------------------
+
+
+class DesktopReleasePublic(BaseModel):
+    """GET /desktop/latest's response shape -- public, no auth, no secrets.
+    Consumed by the web dashboard's download button and (indirectly, via the
+    website) by anyone deciding whether to fetch the installer."""
+
+    version: str
+    platform: str
+    installer: str
+    sha256: str
+    released_at: datetime
+    release_notes: str | None = None
+
+
+class DesktopReleaseRead(DesktopReleasePublic):
+    """Same public fields plus the bookkeeping an admin list view wants."""
+
+    id: uuid.UUID
+    created_at: datetime
+
+
+class DesktopReleaseCreate(BaseModel):
+    version: str = Field(min_length=1, max_length=32)
+    platform: str = Field(default="windows-x64", max_length=32)
+    installer_url: str = Field(min_length=1, max_length=500)
+    sha256: str = Field(min_length=64, max_length=64)
+    release_notes: str | None = Field(default=None, max_length=4000)

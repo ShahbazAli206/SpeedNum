@@ -708,3 +708,19 @@ class Lead(Base):
     message: Mapped[str | None] = mapped_column(Text)
     source: Mapped[str] = mapped_column(String, default="website")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DesktopRelease(Base):
+    __tablename__ = "desktop_releases"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    version: Mapped[str] = mapped_column(Text, nullable=False)
+    platform: Mapped[str] = mapped_column(Text, default="windows-x64")
+    installer_url: Mapped[str] = mapped_column(Text, nullable=False)
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    release_notes: Mapped[str | None] = mapped_column(Text)
+    released_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

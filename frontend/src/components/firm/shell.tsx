@@ -18,6 +18,7 @@ import { Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { AlertBell, UnreadDot } from "@/components/dashboard/alert-bell";
 import { CommandPalette } from "@/components/dashboard/command-palette";
+import { DesktopAppButton } from "@/components/dashboard/desktop-app-button";
 import { ForcePasswordModal } from "@/components/dashboard/force-password-modal";
 import { SignOutButton, useSignOut } from "@/components/dashboard/sign-out-button";
 import { UrgentDeadlineBanner } from "@/components/dashboard/urgent-deadline-banner";
@@ -223,6 +224,10 @@ function FirmShellInner({ children }: { children: ReactNode }) {
       </nav>
 
       <div className="border-t border-line p-3">
+        <div className={cn("mb-2", collapsed && "flex justify-center")}>
+          <DesktopAppButton collapsed={collapsed} />
+        </div>
+
         {collapsed ? (
           <SignOutButton className="mx-auto grid size-9 place-items-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-danger" />
         ) : (

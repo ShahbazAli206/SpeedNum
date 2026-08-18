@@ -116,6 +116,16 @@ class Settings(BaseSettings):
     # --- Web ------------------------------------------------------------------
     public_app_url: str = Field(default="http://localhost:3000", alias="PUBLIC_APP_URL")
     cors_origins: str = Field(default="*", alias="CORS_ORIGINS")
+    # Where the actual installer bytes live -- the same public-read MinIO
+    # bucket electron-builder's own "generic" publish provider uploads to
+    # (desktop/package.json's build.publish, deploy/Caddyfile.example's
+    # /desktop-releases/* block). routers/desktop_releases.py rejects any
+    # published installer_url that doesn't start with this exact prefix, so a
+    # compromised/careless publish call can never point the website's
+    # download button at an arbitrary host.
+    desktop_release_base_url: str = Field(
+        default="https://test.spidnums.com/desktop-releases/", alias="DESKTOP_RELEASE_BASE_URL"
+    )
     # Optional extra allowance for origins that cannot be listed literally —
     # in practice Vercel preview deployments, whose hostname carries a build
     # hash. Empty by default: this used to be a hardcoded `https://.*\.vercel\.app`,
