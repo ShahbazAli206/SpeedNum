@@ -61,6 +61,11 @@ const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
 
 const TYPE_LABEL: Record<TaskType, string> = { internal: "Internal", client: "Client", other: "Other" };
 
+/** Pull a human-readable reason out of an ApiError without leaking `[object]`. */
+function message(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 const TYPE_TABS: { value: "all" | TaskType; label: string }[] = [
   { value: "all", label: "All" },
   { value: "internal", label: "Internal" },
@@ -90,9 +95,6 @@ export function WorkflowsClient({
   const [assignee, setAssignee] = useState("all");
   const [query, setQuery] = useState("");
 
-  // Status changes and deletes try the real API, but always apply to
-  // component state too — this still has to feel real on demo data, and on
-  // most setups today there is no live backend to hit at all.
   const [moved, setMoved] = useState<Record<string, TaskStatus>>({});
   const [removed, setRemoved] = useState<Set<string>>(new Set());
 
@@ -137,21 +139,29 @@ export function WorkflowsClient({
     });
   }, [assigneeFiltered, query]);
 
-  const move = (task: Task, status: TaskStatus) => {
+  const move = async (task: Task, status: TaskStatus) => {
+    const previous = statusOf(task);
     setMoved((current) => ({ ...current, [task.id]: status }));
-    toast.success(`Moved to ${titleCase(status)}`, `${task.title} · ${task.client_name}`);
-    patch(`/tasks/${task.id}`, { status }).catch(() => {
-      // No live backend reachable — the change already applied locally above.
-    });
+    try {
+      await patch(`/tasks/${task.id}`, { status });
+      toast.success(`Moved to ${titleCase(status)}`, `${task.title} · ${task.client_name}`);
+    } catch (error) {
+      setMoved((current) => ({ ...current, [task.id]: previous }));
+      toast.error("Could not update status", message(error, "Please try again."));
+    }
   };
 
-  const remove = (task: Task) => {
+  const remove = async (task: Task) => {
     if (typeof window !== "undefined" && !window.confirm(`Delete "${task.title}"? This can't be undone.`)) {
       return;
     }
-    setRemoved((current) => new Set(current).add(task.id));
-    toast.success("Task deleted", task.title);
-    del(`/tasks/${task.id}`).catch(() => {});
+    try {
+      await del(`/tasks/${task.id}`);
+      setRemoved((current) => new Set(current).add(task.id));
+      toast.success("Task deleted", task.title);
+    } catch (error) {
+      toast.error("Could not delete task", message(error, "Please try again."));
+    }
   };
 
   const columns: Column<Task>[] = [

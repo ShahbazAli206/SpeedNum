@@ -38,6 +38,11 @@ function metaFor(type: string) {
 
 const FILTERS = ["All", "Unread", "Deadline", "Letter", "Task", "Client", "System"] as const;
 
+/** Pull a human-readable reason out of an ApiError without leaking `[object]`. */
+function message(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 export function NotificationsClient({
   notifications,
   isLive,
@@ -59,14 +64,30 @@ export function NotificationsClient({
   });
 
   const markRead = (id: string) => {
+    const previous = read;
     setRead((current) => ({ ...current, [id]: true }));
-    if (isLive) void post(`/notifications/${id}/read`).catch(() => {});
+    if (!isLive) return;
+    post(`/notifications/${id}/read`).catch((error) => {
+      setRead(previous);
+      toast.error("Could not update that notification", message(error, "Please try again."));
+    });
   };
 
   const markAll = () => {
+    const previous = read;
     setRead(Object.fromEntries(notifications.map((item) => [item.id, true])));
-    if (isLive) void post("/notifications/read-all").catch(() => {});
-    toast.success("All caught up", `${unread} notification${unread === 1 ? "" : "s"} marked read.`);
+    if (!isLive) {
+      toast.success("All caught up", `${unread} notification${unread === 1 ? "" : "s"} marked read.`);
+      return;
+    }
+    post("/notifications/read-all")
+      .then(() => {
+        toast.success("All caught up", `${unread} notification${unread === 1 ? "" : "s"} marked read.`);
+      })
+      .catch((error) => {
+        setRead(previous);
+        toast.error("Could not mark them all read", message(error, "Please try again."));
+      });
   };
 
   return (

@@ -11,6 +11,11 @@ import { post } from "@/lib/api";
 import type { ClientRow, TeamRow } from "@/lib/firm-demo";
 import type { Task, TaskPriority, TaskStatus, TaskType } from "@/lib/types";
 
+/** Pull a human-readable reason out of an ApiError without leaking `[object]`. */
+function message(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 const TYPE_OPTIONS: { value: TaskType; label: string }[] = [
   { value: "internal", label: "Internal" },
   { value: "client", label: "Client" },
@@ -60,9 +65,6 @@ export function NewTaskClient({ clients, team }: { clients: ClientRow[]; team: T
     setSubmitting(true);
 
     try {
-      // Real backend configured: create the task for real. Any
-      // failure (most commonly: no backend reachable yet) falls back to the
-      // same acknowledgement the rest of the firm-side app gives on demo data.
       await post<Task>("/tasks", {
         title: trimmedTitle,
         description: description.trim() || undefined,
@@ -75,9 +77,8 @@ export function NewTaskClient({ clients, team }: { clients: ClientRow[]; team: T
       });
       toast.success(`"${trimmedTitle}" created`, "Added to Task Master.");
       router.push("/workflows");
-    } catch {
-      toast.success(`"${trimmedTitle}" created`, "Added to Task Master.");
-      router.push("/workflows");
+    } catch (err) {
+      toast.error("Could not create task", message(err, "Please try again."));
     } finally {
       setSubmitting(false);
     }
