@@ -295,5 +295,29 @@ until they actually report back**.
 ### Repo hygiene note
 Several audit agents wrote scratch files (`*.json`, `.qa_token`, `token.txt`,
 `scratch_audit/`, `.audit_tmp/`) directly into the repo root instead of a temp
-directory — harmless (untracked, never staged), but needs a cleanup pass before final
-sign-off so `git status` is clean.
+directory — cleaned up once (harmless, untracked, never staged) but may recur as more
+agents finish; sweep again before final sign-off so `git status` is clean.
+
+### Connective end-to-end smoke test (Section 23) — DONE, this contributor
+Rather than duplicate the piecewise coverage already produced by the other agents
+(auth, admin-UI, and the in-flight client-portal/import-export/desktop-DR audits),
+ran the specific *connective* chain across those pieces that nothing else exercised
+continuously in one pass — in a brand-new, fully isolated tenant (register → bootstrap
+→ ...) so it wouldn't disturb the other agents' concurrently-running work in the
+shared QA tenant: register real account → bootstrap firm → create real client →
+create a client-portal login for it (`POST /users` with `client_id`, since
+`POST /clients/{id}/portal-invite` deliberately never echoes the temp password —
+correctly more secure than the staff-creation endpoint, but means that specific path
+needs real mailbox access to test end-to-end, same limitation the auth audit already
+hit for password-reset) → portal login with temp password (`must_change_password:
+true`, correct `client_id`) → confirmed `428` on the **client-portal's own dashboard
+endpoint** (not just a firm-side route) before the password change → changed password
+→ confirmed dashboard now returns real (empty, correctly-shaped) data → confirmed
+firm-only `GET /clients` still `403`s for this portal session → confirmed the old
+temp password now `401`s. Deleted the test client and portal login and logged out
+the portal session afterward; the empty parent test tenant itself has no self-service
+deletion API (same accepted limitation the auth audit already documented for its own
+disposable tenants).
+Separately, used this same isolated tenant to independently live-verify the
+`/users` mutation paths the admin-UI audit had only code-reviewed (see the `/users`
+row above) without touching the shared QA tenant's concurrently-running tests.
