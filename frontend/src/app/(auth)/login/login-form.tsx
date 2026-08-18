@@ -29,6 +29,13 @@ const PORTAL_HOME = "/dashboard";
 async function resolveHome(): Promise<string> {
   try {
     const me = await get<Me>("/auth/me");
+    // A platform superadmin with no tenant (created directly, not through
+    // firm signup — see DEPLOYMENT.md's "first superadmin" step) has nothing
+    // for the firm dashboard to show: GET /dashboard 409s with "No firm is
+    // linked to this account." /admin is the one firm-route-list page that
+    // doesn't need a tenant. A superadmin who *also* owns a firm still lands
+    // on it as normal — this only fires when there's no firm to land on.
+    if (me.profile.is_superadmin && !me.profile.tenant_id) return "/admin";
     return me.profile.client_id ? PORTAL_HOME : FIRM_HOME;
   } catch {
     return FIRM_HOME;
