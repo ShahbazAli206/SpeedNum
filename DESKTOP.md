@@ -129,6 +129,71 @@ former was verified for real, the latter would quit the very process running the
 about the code path is untested logic, but the literal "watch the app restart into the new
 version" moment wasn't clicked through end-to-end this session.
 
+## Web distribution: the dashboard's "Download App" button
+
+Separate from electron-updater's own feed above (which the *installed app* uses for its
+authoritative update check), the web dashboard has its own small distribution layer for
+someone who doesn't have the app yet:
+
+- **`GET /desktop/latest`** (`backend/app/routers/desktop_releases.py`, public, no auth) —
+  returns `{version, platform, installer, sha256, released_at, release_notes}` from a new
+  `desktop_releases` table (migration `0015`). Deliberately a separate source of truth from
+  `latest.yml`, not a parser of it — the website's release awareness shouldn't depend on
+  electron-builder's YAML format.
+- **`POST /admin/desktop-releases`** (superadmin-only) registers a release that has already
+  been built and uploaded (this endpoint never touches MinIO or builds anything). Validates
+  server-side, not just in whatever admin UI calls it: the version must be a real `X.Y.Z`
+  semver (`services/semver.py`, integer-tuple comparison — `1.10.0 > 1.9.0`, not a string
+  sort), strictly newer than the current latest (no downgrade, no re-publishing the same
+  version), the `installer_url` must start with the exact configured `desktop-releases`
+  bucket URL (rejects an attacker-controlled or typo'd host), and `sha256` must be a
+  well-formed 64-hex-char digest.
+- **Sidebar button** (`frontend/src/components/dashboard/desktop-app-button.tsx`, bottom of
+  the firm sidebar) opens `speednum://check-update`. A browser has no reliable way to ask
+  "is this custom protocol registered" — the button uses the same best-effort heuristic every
+  "open in app" web feature does: if the page hasn't lost focus within ~1.5s, nothing
+  answered the link, so it assumes the app isn't installed and offers the real installer
+  download instead, with copy that's explicit Windows will ask the user to run it (never
+  claims to have installed anything itself).
+- **Desktop-side deep link** (`desktop/src/main.js`'s `handleDeepLink`) is registered via
+  `package.json`'s `build.protocols` (NSIS registers `speednum://` at install time) plus a
+  runtime `app.setAsDefaultProtocolClient` call, with `requestSingleInstanceLock` +
+  `second-instance`/`open-url` routing a link to the already-running app instead of opening a
+  second session-less window. The handler recognizes exactly two hardcoded commands
+  (`check-update`, `version`) via an allow-list match on the parsed URL — nothing from the
+  link is ever concatenated into a shell command or filesystem path — and triggers an
+  immediate `updater.checkForUpdates({manual: true})`, which now also surfaces "you're on the
+  latest version" for a manual check (previously that electron-updater event was unsurfaced,
+  since the silent 4-hour background check should never nag when there's nothing new).
+
+**Publishing a new version end to end** (extends the steps above):
+
+```bash
+cd desktop
+# bump "version" in package.json first
+npm run dist                                  # produces dist/*.exe, *.exe.blockmap, latest.yml
+sha256sum "dist/SpeedNum Desktop Setup <version>.exe"
+# upload the three dist/ files to the desktop-releases bucket (same bucket, same shape
+# as the electron-updater feed above), then register the release for the website:
+curl -X POST https://test.spidnums.com/api/v1/admin/desktop-releases \
+  -H "Authorization: Bearer <superadmin token>" -H "Content-Type: application/json" \
+  -d '{"version":"<version>","installer_url":"https://test.spidnums.com/desktop-releases/<file>.exe","sha256":"<sha256>"}'
+```
+
+**Live-verified this session**: registered a real disposable tenant, opened the real
+production dashboard, confirmed the button renders correctly bottom-left in light mode, dark
+mode, collapsed rail, and the mobile drawer, confirmed `.animate-ring`'s pulse correctly
+disables under `prefers-reduced-motion`, clicked it with no `speednum://` handler present
+(this sandbox can't register a real OS protocol handler) and got the honest "isn't installed"
+dialog showing the real published version and a working download link. A full v1.0.0
+installer was actually built, checksummed, uploaded, and published through the real
+`POST /admin/desktop-releases` flow — `GET /desktop/latest` and the HTTPS download URL were
+both re-verified against production afterward. **Not verified**: the actual
+`speednum://` → running-app handoff end to end, since that requires a real Windows machine
+with the app installed running a real browser against it — this sandbox cannot host that.
+The code path (single-instance lock, `second-instance` argv parsing, the allow-listed
+command switch) was reviewed and syntax/logic-checked, not click-tested on a live install.
+
 ### The one remaining gap: code signing
 
 The built installer is **not code-signed** — confirmed directly
