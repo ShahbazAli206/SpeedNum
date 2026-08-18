@@ -142,3 +142,149 @@ not a duplication of it:
     widths plus empty-state/error-state/logged-out checks that item 6 above explicitly left
     undone. Result pending at the time of writing; update this entry with the punch list (or
     confirmation of zero defects) once it reports back.
+
+## Final consolidation pass (26-section audit, given 2026-08-18, same day as above)
+
+Full-system re-verification: git/VPS reconciliation, then a large parallel fleet of
+background agents (each independently live-testing against production with disposable
+data, none committing/pushing directly — findings reviewed and committed centrally) plus
+direct work on infra/security/DB items. This section is the live tracker for that pass;
+final consolidated report goes to the user directly at the end, not a separate file.
+
+### Git/VPS reconciliation — DONE
+Single authoritative branch (`migration/portable-production-architecture`), 68 commits
+ahead of `main`, `main`/`deployment-readiness` fully contained within it (zero unique
+commits on either) — no divergent/lost work. No stashes, no reflog anomalies, linear
+history, in sync with origin. VPS was 1 commit behind (docs-only) — fast-forwarded.
+
+### Production architecture verification — DONE
+All live-checked directly (not assumed): HTTPS valid cert (auto-renewed, Aug 15–Nov 13
+2026 window observed), HTTP→HTTPS 308 redirect, HSTS/X-Content-Type-Options/X-Frame-
+Options/Referrer-Policy present on every response, CORS correctly rejects an untrusted
+origin with no leaked `Access-Control-Allow-Origin` while allowing the real
+`speed-num.vercel.app` origin exactly, 12MB request-body cap, Postgres/MinIO have no
+host port bindings (confirmed via `docker ps`), MinIO console explicitly disabled
+(`MINIO_BROWSER: off`, no `ports:` entry, buckets `anonymous set none`), all 4 containers
+healthy, UFW still exactly 22/80/443 v4+v6, `migrate status` reports schema up to date.
+
+### Real bug found and fixed: engagement letters were 100% broken — DONE, deployed, live-verified
+A background audit agent tried to create a real engagement letter and got a `409`
+regardless of client/title/payload on every attempt. Investigated directly (not
+delegated, given DB/data-integrity sensitivity): the API's generic IntegrityError
+handler was misreporting the real error as a generic conflict — the actual error, found
+via API container logs, was `asyncpg.exceptions.NotNullViolationError` on `token`.
+`backend/app/models.py`'s `EngagementLetter.token` had no default while
+`db/migrations/0001_schema.sql`'s real DDL has always had a server-side one
+(`encode(gen_random_bytes(24), 'hex')`) — the ORM model was simply out of sync with the
+database truth, so SQLAlchemy sent an explicit NULL instead of letting Postgres fill it
+in. Fixed by declaring the matching `server_default` (commit `0a6c4f3`). Deploying that
+surfaced a **second**, previously-masked bug: `MissingGreenlet` on the immediately-next
+attempt. Root cause: `items` is `lazy="selectin"`, which piggybacks on the query that
+loaded the parent row — a brand-new, never-queried `EngagementLetter` has no such query,
+so the first touch of `.items` anywhere downstream tried an implicit lazy load outside
+the async-safe context and crashed. Reproduced with and without `payload.items` to
+confirm it wasn't specific to either branch, then fixed by seeding `items=[]` at
+construction time in both `create_letter` and `duplicate_letter` (commit `34be40f`).
+**Both fixes deployed to production and the full lifecycle live-verified end to end**:
+create (with real line items, real computed subtotal/total) → GET detail → GET list →
+PATCH (title change persisted) → duplicate (independent copy, items copied correctly) →
+send (real `LetterSendRequest` body, status→`sent`) → firm-sign (real signature data
+URL, 200) → void (`sent`→`void`) → delete both test letters → confirmed empty list.
+This means **every engagement-letter creation, on any tenant, since this table
+existed, was completely non-functional** until today — a significant finding that
+contradicts this project's own earlier "Signature system... real, working" and
+"Client letter/email workflow DONE, Real, for engagement letters" claims from prior
+passes. Those earlier claims were evidently never actually exercised end-to-end
+against a real create call; this pass's rule to "not trust previous reports blindly"
+caught a real, previously-invisible, fully-broken core feature.
+
+### Auth/authorization/role-routing E2E audit — DONE, PASS
+Independently re-verified end-to-end with real curl calls against production, including
+SQL cross-checks for what a live HTTP response can't show directly (Argon2id hash
+format, exact lockout counters/timestamps). Every claim in `SECURITY.md` was
+re-confirmed live, not assumed: registration validation/duplicate-rejection, generic
+non-enumerating login errors, disabled-account rejection enforced server-side (checked
+on every request, not just at login), exact lockout threshold (10 failed attempts → 15
+minute lock, matching `local_auth.py`'s constants exactly), refresh rotation +
+reuse-detection with **cascading revocation independently proven** (replaying an old
+token invalidates the *entire* chain, including a token that had never been used),
+logout invalidation, anti-enumerating password-reset requests, forced-password-change
+enforced server-side via real `428` (not just a frontend gate — tested by hitting a
+protected route with a temp-password session before the change), exactly one login
+form with server-side (not just frontend) role routing, client-portal accounts
+independently confirmed blocked from firm-only routes via real `403`. Google OAuth
+correctly reports `BLOCKED BY CREDENTIALS` (`/auth/oauth/providers` → `{"google":
+false}` in production; button correctly absent). One **defense-in-depth recommendation**
+(not a live bug — confirmed not currently exploitable given Caddy's current config):
+`deps.client_ip()` trusts the client-supplied `X-Forwarded-For` header with no
+proxy-trust boundary check; harden it to only trust XFF from a known proxy hop if the
+reverse-proxy layer ever changes. No code changes were needed — everything tested
+matched the implementation.
+
+### Admin/firm portal complete UI+CRUD sweep — DONE, mostly PASS, several real bugs found and fixed
+A large fan-out of sub-audits across every firm-side page not already fixed this
+project. Real, genuine defects found and fixed (all following the established
+`toast.error`+rollback-on-failure convention, all independently `tsc`/`eslint`-checked,
+none committed by the sub-agents themselves — reviewed and committed centrally):
+- **`workflows-client.tsx`** (task board move/delete): real API calls, but unconditional
+  success toasts + empty catches meant a failed status-change or delete still told the
+  user it worked and left the UI in the wrong state. Fixed to await and roll back.
+- **`workflows/new/page.tsx`**: client/team dropdowns were **always** demo-fixture data
+  (non-UUID ids) regardless of live state — confirmed live that submitting one of these
+  produced a real `422 uuid_parsing` from the backend, meaning task creation via this
+  form was silently impossible whenever a real id was needed. Fixed to fetch real
+  `/clients`/`/team` with fallback only on API failure.
+- **`workflows/new/new-task-client.tsx`**: on a failed `POST /tasks` (e.g. exactly the
+  422 above), the code showed a success toast and navigated away as if the task had
+  been created — confirmed live via `GET /tasks` count staying at 0 after the failure.
+  Fixed to surface the real error instead.
+- **`notifications-client.tsx`**: `markRead`/`markAll` used `.catch(() => {})` with an
+  unconditional success toast on `markAll` — fixed to await, roll back, and
+  `toast.error` on failure.
+- **`clients/new/page.tsx`**: the "Assigned accountant" dropdown and custom-fields
+  section were **always** demo-fixture data even in live mode — confirmed live that the
+  real tenant's actual team/fields were completely different from what was shown, and
+  that picking a fixture name silently produced `owner_id: undefined` on the created
+  client (the frontend's own UUID validation stripped the non-UUID fixture id before
+  posting). Fixed to fetch real `/team`/`/custom-fields`.
+- **`team-member-client.tsx`**: the Notes tab is local-state-only with no backing table
+  or endpoint — **flagged, not fixed** (needs a new `profile_notes` table/endpoint,
+  out of scope for a UI-only fix). The UI gives no indication a note won't survive a
+  refresh; worth a small "not saved" affordance even before the real feature exists.
+- **`integrations-client.tsx`/`page.tsx`**: **100% fake** — every control was
+  `localStorage`-backed or a no-op `toast.info()`, including a hardcoded "Connected"
+  badge and a transport dropdown hardcoded to `"resend"` on a tenant actually running
+  `smtp`, plus a fixture "Recent emails" list. Rewired to the same real
+  `/settings/email`/`/settings/email/test` endpoints Settings already uses for the one
+  real per-tenant field (`email_from_name`); removed the fake fields/buttons rather
+  than inventing a fake replacement. "Recent emails" was removed, not replaced — a real
+  version needs a new backend email-log endpoint that doesn't exist yet (**flagged for
+  triage**, not fabricated).
+- Confirmed already-correct (real data, real CRUD, real error handling, no fixes
+  needed): `/overview` (with one **documented, in-code-commented, not-hidden** gap —
+  the revenue trend chart has no backing monthly-series endpoint yet, correctly using
+  demo data with an explicit comment rather than fabricating one), `/clients` list,
+  `/team` list + detail + accountant modal, `/services`, `/users` (GET verified live;
+  mutations verified by code review only, matching the audit's own instructions),
+  `/reminders`, `/deadlines`, `/settings` (branding, digest toggle, test-email — all
+  already real from earlier passes), `/import` (client CSV preview+commit round-tripped
+  live; user-import commit verified by code+preview only, since committing sends a real
+  credential email that isn't cleanly reversible), all four `/engagements/*` pages
+  (already correctly wired — the bug they surfaced was the backend creation defect
+  documented above, not a frontend issue).
+
+### Import/export, security adversarial sweep, desktop/DR audit, client-portal audit — INTERRUPTED
+All four were mid-flight, live-testing against production with disposable data, when
+they hit a session-level API quota limit (reset time observed: ~4:30pm Asia/Karachi).
+None left partial/uncommitted risky state per their own last-reported action (artifact
+cleanup was in progress or already done in three of the four). To be resumed/rerun once
+the quota window passes — **not yet reported, do not assume any result for these four
+until they actually report back**.
+
+### Responsive UI audit — reported "still running a background sweep," result not yet in.
+
+### Repo hygiene note
+Several audit agents wrote scratch files (`*.json`, `.qa_token`, `token.txt`,
+`scratch_audit/`, `.audit_tmp/`) directly into the repo root instead of a temp
+directory — harmless (untracked, never staged), but needs a cleanup pass before final
+sign-off so `git status` is clean.
