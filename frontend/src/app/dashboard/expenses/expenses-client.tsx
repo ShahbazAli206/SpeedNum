@@ -1,13 +1,17 @@
 "use client";
 
 import { ChartColumn, CircleCheck, Clock, Plus, Receipt } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { ChartCard, KpiTile, StackedShare, type Slice } from "@/components/charts";
 import { ExpenseStatusBadge } from "@/components/dashboard/badges";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { DashboardHeader, KpiRow } from "@/components/dashboard/page-shell";
-import { Button, Drawer } from "@/components/ui";
+import { useToast } from "@/components/toast";
+import { Button, Drawer, Field, Input, Modal } from "@/components/ui";
+import { ApiError, post } from "@/lib/api";
+import { AUTH_CONFIGURED } from "@/lib/auth";
 import type { Expense } from "@/lib/demo";
 import { formatDate, formatMoney } from "@/lib/format";
 
@@ -27,7 +31,58 @@ export function ExpensesClient({
   };
   categories: { label: string; value: number }[];
 }) {
+  const toast = useToast();
+  const router = useRouter();
   const [selected, setSelected] = useState<Expense | null>(null);
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [vendor, setVendor] = useState("");
+  const [category, setCategory] = useState("");
+  const [spentOn, setSpentOn] = useState("");
+  const [amount, setAmount] = useState("");
+  const [gst, setGst] = useState("0");
+  const [method, setMethod] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const resetAddForm = () => {
+    setVendor("");
+    setCategory("");
+    setSpentOn("");
+    setAmount("");
+    setGst("0");
+    setMethod("");
+  };
+
+  const openAdd = () => {
+    if (!AUTH_CONFIGURED) {
+      toast.info("Demo mode", "Connect a backend to submit real expenses.");
+      return;
+    }
+    setAddOpen(true);
+  };
+
+  const submitExpense = async () => {
+    if (!vendor.trim() || !spentOn) return;
+    setSubmitting(true);
+    try {
+      await post("/client-portal/expenses", {
+        vendor: vendor.trim(),
+        category: category.trim() || "General",
+        spent_on: spentOn,
+        amount: Number(amount) || 0,
+        gst: Number(gst) || 0,
+        method: method.trim() || null,
+      });
+      toast.success("Expense submitted", `${vendor.trim()} is now pending review.`);
+      setAddOpen(false);
+      resetAddForm();
+      router.refresh();
+    } catch (error) {
+      toast.error("Couldn't submit that expense", error instanceof ApiError ? error.message : "Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   // Top five categories keep their own colour slot; the tail folds into
   // "Other" rather than generating a sixth hue.
@@ -85,7 +140,11 @@ export function ExpensesClient({
       <DashboardHeader
         title="Expenses"
         subtitle="Your spending"
-        actions={<Button icon={<Plus className="size-4" />}>Add expense</Button>}
+        actions={
+          <Button icon={<Plus className="size-4" />} onClick={openAdd}>
+            Add expense
+          </Button>
+        }
       />
 
       <KpiRow>
@@ -227,6 +286,64 @@ export function ExpensesClient({
           </div>
         ) : null}
       </Drawer>
+
+      <Modal
+        open={addOpen}
+        onClose={() => {
+          setAddOpen(false);
+          resetAddForm();
+        }}
+        title="Add expense"
+        description="Submitted expenses start out pending your accountant's review."
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setAddOpen(false);
+                resetAddForm();
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              icon={<Plus className="size-4" />}
+              loading={submitting}
+              disabled={!vendor.trim() || !spentOn}
+              onClick={submitExpense}
+            >
+              Submit
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <Field label="Vendor" required>
+            <Input value={vendor} onChange={(event) => setVendor(event.target.value)} placeholder="e.g. Staples" />
+          </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Category">
+              <Input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="General" />
+            </Field>
+            <Field label="Date" required>
+              <Input type="date" value={spentOn} onChange={(event) => setSpentOn(event.target.value)} />
+            </Field>
+            <Field label="Amount ($)">
+              <Input type="number" min={0} step={0.01} value={amount} onChange={(event) => setAmount(event.target.value)} />
+            </Field>
+            <Field label="GST/HST paid ($)">
+              <Input type="number" min={0} step={0.01} value={gst} onChange={(event) => setGst(event.target.value)} />
+            </Field>
+            <Field label="Payment method" className="sm:col-span-2">
+              <Input
+                value={method}
+                onChange={(event) => setMethod(event.target.value)}
+                placeholder="e.g. Visa ••4821"
+              />
+            </Field>
+          </div>
+        </div>
+      </Modal>
     </>
   );
 }

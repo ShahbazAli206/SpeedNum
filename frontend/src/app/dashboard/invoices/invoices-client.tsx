@@ -1,13 +1,17 @@
 "use client";
 
 import { Banknote, CircleCheck, Clock, FileText, TriangleAlert } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { ChartCard, ColumnChart, KpiTile } from "@/components/charts";
 import { InvoiceStatusBadge } from "@/components/dashboard/badges";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { DashboardHeader, KpiRow } from "@/components/dashboard/page-shell";
+import { useToast } from "@/components/toast";
 import { Button, Drawer } from "@/components/ui";
+import { ApiError, patch } from "@/lib/api";
+import { AUTH_CONFIGURED } from "@/lib/auth";
 import type { Invoice } from "@/lib/demo";
 import { compactMoney, formatDate, formatMoney } from "@/lib/format";
 
@@ -28,7 +32,32 @@ export function InvoicesClient({
   };
   monthly: { x: string; billed: number }[];
 }) {
+  const toast = useToast();
+  const router = useRouter();
   const [selected, setSelected] = useState<Invoice | null>(null);
+  const [recordingPayment, setRecordingPayment] = useState(false);
+
+  const recordPayment = async () => {
+    if (!selected) return;
+    if (!AUTH_CONFIGURED) {
+      toast.info("Demo invoice", "This isn't a real invoice — connect a backend to record payments.");
+      return;
+    }
+    setRecordingPayment(true);
+    try {
+      await patch(`/client-portal/invoices/${selected.id}`, { status: "paid" });
+      toast.success("Payment recorded", `${selected.number} is now marked paid.`);
+      setSelected(null);
+      router.refresh();
+    } catch (error) {
+      toast.error(
+        `Couldn't record payment for ${selected.number}`,
+        error instanceof ApiError ? error.message : "Please try again.",
+      );
+    } finally {
+      setRecordingPayment(false);
+    }
+  };
 
   const columns: Column<Invoice>[] = [
     {
@@ -80,7 +109,19 @@ export function InvoicesClient({
       <DashboardHeader
         title="Invoices"
         subtitle="Your billing"
-        actions={<Button icon={<FileText className="size-4" />}>New invoice</Button>}
+        actions={
+          <Button
+            icon={<FileText className="size-4" />}
+            onClick={() =>
+              toast.info(
+                "Not available here",
+                "Invoices are issued by your accountant — reach out to them to request one.",
+              )
+            }
+          >
+            New invoice
+          </Button>
+        }
       />
 
       <KpiRow>
@@ -166,7 +207,11 @@ export function InvoicesClient({
             <Button variant="secondary" onClick={() => setSelected(null)}>
               Close
             </Button>
-            <Button icon={<Banknote className="size-4" />}>Record payment</Button>
+            {selected && selected.status !== "paid" ? (
+              <Button icon={<Banknote className="size-4" />} loading={recordingPayment} onClick={recordPayment}>
+                Record payment
+              </Button>
+            ) : null}
           </>
         }
       >
@@ -193,10 +238,12 @@ export function InvoicesClient({
               </div>
             </dl>
 
-            <p className="text-[13px] leading-relaxed text-muted">
-              This is sample data. Once the billing endpoints are live, this panel will show the
-              real line items, payment history and a PDF download.
-            </p>
+            {!AUTH_CONFIGURED ? (
+              <p className="text-[13px] leading-relaxed text-muted">
+                This is sample data. Connect a backend to see real line items, payment history and
+                a PDF download.
+              </p>
+            ) : null}
           </div>
         ) : null}
       </Drawer>
