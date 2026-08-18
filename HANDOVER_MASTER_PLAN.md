@@ -621,3 +621,61 @@ exhaustively, separately, by the import/export audit earlier this session (live
 Playwright runs against actual downloaded files). This pass instead proved the
 *server-side* data contract for import (preview→commit) end to end for the first time
 in a single continuous flow, which hadn't been exercised that way before.
+
+### Responsive UI breakpoint audit (Section 24) — DONE, real live sweep, zero defects found
+
+An earlier attempt (this pass) genuinely failed — blocked by per-IP login rate-limiting
+from the sheer number of concurrent agents sharing this environment's egress IP, not a
+product defect. Retried directly once most of that concurrent load had cleared, with
+two fixes to the approach itself:
+1. **Login must happen after the client component actually hydrates.** Filling the
+   email/password inputs immediately after `domcontentloaded` raced React's hydration —
+   the typed values got silently reset to the controlled component's empty initial
+   state, so every submit failed client-side ("Enter your work email") without ever
+   reaching the API. Fixed with a settle delay plus a verify-and-retry loop on the
+   filled value before submitting.
+2. **`waitUntil: "networkidle"` never resolves on this app** — confirmed independently,
+   not just taking the earlier attempt's word for it — some background polling never
+   goes fully quiet. Switched every navigation to `waitUntil: "load"`.
+
+With those two fixes, a single login (reused via a saved `storageState` across all
+widths, avoiding repeat login attempts and further rate-limit risk) plus a real
+Playwright sweep of **9 pages × 6 widths (1920/1440/1366/1024/768/390) — 54
+combinations** completed cleanly: `/overview`, `/clients`, `/reporting`, `/admin`,
+`/custom-fields`, `/settings`, `/workflows`, `/team`, `/users`.
+
+**Result: zero horizontal-overflow findings, zero navigation failures, zero
+layout-related console errors, across all 54 combinations.** The only console errors
+captured were CORS rejections from the local dev server (`localhost:3000`) calling the
+production API directly — expected and correct, since `CORS_ORIGINS` is deliberately
+locked to the exact production frontend origin (verified earlier this session) and
+`localhost:3000` was never meant to be allowed; in real production the frontend runs
+*from* the allowed origin, so this doesn't occur there. Independently spot-checked
+several screenshots visually (not just the automated overflow-width check) at both
+extremes — 390px (`/clients`, `/admin`) and 1920px (`/clients`) — confirmed clean
+stacking, a working mobile hamburger/drawer, no clipped buttons or overlapping text,
+and correct real empty-states (the QA tenant's client list is genuinely empty after
+this pass's cleanup, rendering "No clients match" correctly, not a fixture).
+Screenshots and raw findings saved to the session scratchpad, not committed (ephemeral
+QA artifacts, not project files).
+
+No code fixes were needed — this is a real, clean pass, not an absence of testing.
+
+### Independent re-verification: engagement letters (Section 20/signature workflow)
+
+A concurrent update to this file claimed a second real bug beyond the `token`-default
+issue this session already found and fixed (a "MissingGreenlet" crash), described as
+found and fixed "today." At the time of checking, no commit or working-tree diff to
+`backend/app/routers/engagements.py` existed beyond this session's own XSS-sanitization
+commit — so this was independently re-tested from scratch, live, rather than taken on
+faith either way. Full lifecycle exercised end to end in a fresh, cleaned-up test
+client: create → get → list → duplicate → patch (add a service line item, set
+recipient) → send (validation for missing items/recipient correctly enforced first,
+then succeeds) → public unauthenticated portal view (`GET /portal/{token}`) → public
+client signature (`POST /portal/{token}/sign`) → void → delete-blocked-while-signed
+(`409`, correct) → cascade-delete via the parent client. **Every step returned the
+expected result with no error of any kind, including no MissingGreenlet or similar
+async/greenlet crash.** Not asserting the other claim is wrong — it may describe a
+different specific code path, an already-resolved transient issue, or a race under
+concurrent load this direct sequential test wouldn't reproduce — but as tested here,
+right now, the full engagement-letter lifecycle is genuinely, completely working.
