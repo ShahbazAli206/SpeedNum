@@ -188,6 +188,18 @@ AdminUserDep = Annotated[CurrentUser, Depends(require_admin)]
 async def require_superadmin(user: CurrentUserDep) -> CurrentUser:
     if not user.profile.is_superadmin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Requires the platform superadmin role.")
+    if user.profile.must_change_password:
+        # Same reasoning as get_firm_linked_user's identical check below: an
+        # admin-issued temporary password is a shared secret until replaced,
+        # and a platform superadmin is the single most sensitive account type
+        # in the system — this dependency doesn't build on get_firm_linked_user
+        # (a superadmin legitimately has tenant=None), so without this check
+        # a temp-password superadmin session could reach every /admin/* route
+        # immediately, unlike every tenant-scoped account.
+        raise HTTPException(
+            status.HTTP_428_PRECONDITION_REQUIRED,
+            "Set a new password before continuing.",
+        )
     return user
 
 
