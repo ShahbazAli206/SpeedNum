@@ -55,7 +55,10 @@ export function SettingsClient() {
     setChangingPassword(true);
     try {
       if (AUTH_CONFIGURED) {
-        await post("/auth/change-password", { new_password: passwords.next });
+        await post("/auth/change-password", {
+          current_password: passwords.current,
+          new_password: passwords.next,
+        });
       }
       setPasswords({ current: "", next: "" });
       toast.success("Password updated", "You'll stay signed in on this device.");

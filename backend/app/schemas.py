@@ -250,12 +250,16 @@ class VerifyEmailRequest(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
-    """No current-password check: this is the "replace an admin-issued
-    temporary password" flow, gated by already holding a valid session for
-    the account, not by the temporary password itself. A general
-    "change my password" settings feature might want to require the current
-    password too — not needed for the flow that exists today."""
+    """`current_password` is optional so the "replace an admin-issued
+    temporary password" flow (ForcePasswordModal) can keep skipping it — that
+    flow is already gated by holding a valid session minted from the
+    temporary password itself. A voluntary "change my password" settings
+    feature must pass it: without a current-password check, anyone who gets
+    hold of an already-authenticated session (a shared computer, a stolen
+    unlocked laptop) could silently take over the account by setting a new
+    password with no proof they knew the old one."""
 
+    current_password: str | None = None
     new_password: str = Field(min_length=8, max_length=200)
 
 

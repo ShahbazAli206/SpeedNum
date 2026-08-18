@@ -688,14 +688,32 @@ async def create_credentials(session: AsyncSession, *, profile_id: uuid.UUID, pa
     )
 
 
-async def change_own_password(session: AsyncSession, *, profile_id: uuid.UUID, new_password: str) -> None:
+async def change_own_password(
+    session: AsyncSession, *, profile_id: uuid.UUID, new_password: str, current_password: str | None = None
+) -> None:
     """The authenticated user replacing their own password (routers/auth.py's
     /auth/change-password — used to retire an admin-issued temporary
     password, or a general "change my password" action). Revokes every
     refresh token including the one behind the current page's session, the
     same defensive default as a forgot-password reset — the short-lived
     access token already in the browser keeps working until it naturally
-    expires, so this doesn't abruptly log the user out mid-flow."""
+    expires, so this doesn't abruptly log the user out mid-flow.
+
+    `current_password`, when given, must match before the change is allowed —
+    the only thing standing between a hijacked/left-open session and a full
+    account takeover for a voluntary settings-page change. The forced
+    temp-password flow doesn't pass it: that session was only ever mintable
+    by someone who already typed the temporary password to get it."""
+    if current_password is not None:
+        row = (
+            await session.execute(
+                text("select password_hash from public.auth_credentials where profile_id = :profile_id"),
+                {"profile_id": profile_id},
+            )
+        ).mappings().first()
+        if row is None or not verify_password(current_password, row["password_hash"]):
+            raise AuthError("Current password is incorrect.")
+
     await session.execute(
         text(
             "update public.auth_credentials set password_hash = :password_hash, "

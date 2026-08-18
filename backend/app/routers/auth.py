@@ -359,9 +359,15 @@ async def change_password(
     old Supabase updateUser() + complete-password-change pair. Uses
     CurrentUserDep, not TenantUserDep — a client-portal account must be able
     to call this about itself."""
-    await local_auth.change_own_password(
-        session, profile_id=user.profile.id, new_password=payload.new_password
-    )
+    try:
+        await local_auth.change_own_password(
+            session,
+            profile_id=user.profile.id,
+            new_password=payload.new_password,
+            current_password=payload.current_password,
+        )
+    except AuthError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
     user.profile.must_change_password = False
     await session.flush()
     return ProfileRead.model_validate(user.profile)
