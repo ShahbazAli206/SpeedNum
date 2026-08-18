@@ -28,6 +28,24 @@ rotation, opaque rotating refresh tokens with reuse detection) — see
 `AUTH_PROVIDER=supabase` / `STORAGE_PROVIDER=supabase` settings exist only as documented,
 inactive-by-default rollback paths and default safely to the self-hosted providers.
 
+## ⚠ Read this before anything else: the live frontend is not running this branch
+
+`https://speed-num.vercel.app` builds from `main`, not
+`migration/portable-production-architecture`. `main` is **80 commits behind** this branch (verify any time
+with `git rev-list --count origin/main..origin/migration/portable-production-architecture`)
+and was last touched 2026-08-16 — before task attachments/comments, the reporting/admin-
+console/custom-fields/client-detail live-data fixes, PDF export, the Task Master live-data
+wiring, the engagement-letter creation fix (that feature is **currently 100% broken for
+real users** — every create attempt 500s), the stored-XSS fix, and the current-password
+fix all landed. None of this project's work has reached real production traffic. The
+backend at `test.spidnums.com` *is* current — every backend fix deploys there directly
+over SSH, independent of Vercel — it is specifically the Vercel-served frontend that is
+frozen. Merging `migration/portable-production-architecture` into `main` (or repointing
+Vercel's production branch) is a real, externally-visible, hard-to-reverse cutover of
+~80 unreviewed-as-one-diff commits including the entire self-hosted-auth migration —
+deliberately left for the user to authorize explicitly, not executed silently. See the
+final acceptance report for the exact commands.
+
 ## What's live right now
 
 | Component | Where | Status |
@@ -35,7 +53,7 @@ inactive-by-default rollback paths and default safely to the self-hosted provide
 | Backend API | `srv1904640.hstgr.cloud` (`2.25.108.16`) via Caddy, `https://test.spidnums.com` | Up, healthy, migrations current |
 | Postgres 16 | Docker on the same VPS | Up, healthy |
 | MinIO (documents, backups) | Docker on the same VPS | Up, healthy |
-| Frontend | Vercel, `https://speed-num.vercel.app` | Deployed; production custom domain (`spidnums.com`) planned, not yet cut over — see ARCHITECTURE.md's DNS section |
+| Frontend | Vercel, `https://speed-num.vercel.app` | Deployed, but **from `main`, ~80 commits stale** — see the warning above |
 | Desktop app | Not distributed yet — build with `npm run dist` in `desktop/` | Functional, unsigned (see Known gaps) |
 
 VPS access: `ssh deploy@srv1904640.hstgr.cloud`, passwordless `sudo`. Root login and
