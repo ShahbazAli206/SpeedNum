@@ -53,8 +53,8 @@ export default async function DashboardPage() {
   return (
     <>
       <DashboardHeader
-        title={`Good to see you, ${DEMO_ACCOUNT.firstName}`}
-        subtitle={`${DEMO_ACCOUNT.business} · fiscal year ends ${DEMO_ACCOUNT.fiscalYearEnd} · managed by ${DEMO_ACCOUNT.accountant}`}
+        title={`Good to see you, ${overview.client_first_name ?? DEMO_ACCOUNT.firstName}`}
+        subtitle={`${overview.client_business_name ?? DEMO_ACCOUNT.business} · fiscal year ends ${overview.fiscal_year_end ?? DEMO_ACCOUNT.fiscalYearEnd} · managed by ${overview.accountant_name ?? DEMO_ACCOUNT.accountant}`}
       />
 
       <KpiRow>

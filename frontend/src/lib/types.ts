@@ -718,6 +718,10 @@ export interface ClientBookOverview {
   tax_owing: number;
   pending_expenses: number;
   monthly: PortalMonthPoint[];
+  client_first_name: string | null;
+  client_business_name: string | null;
+  fiscal_year_end: string | null;
+  accountant_name: string | null;
 }
 
 export interface AdminTenant {

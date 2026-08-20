@@ -15,10 +15,15 @@ from fastapi import APIRouter
 from sqlalchemy import func, select
 
 from ..deps import BookScopeDep, SessionDep
-from ..models import ClientExpense, ClientInvoice, ClientPayRun, ClientTaxObligation
+from ..models import Client, ClientExpense, ClientInvoice, ClientPayRun, ClientTaxObligation, Profile
 from ..schemas import ClientBookOverview, MonthPoint
 from ..utils import today_utc
 from .client_invoices import _effective_status
+
+MONTH_NAME = (
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)
 
 router = APIRouter(prefix="/client-portal", tags=["client-portal"])
 
@@ -159,6 +164,18 @@ async def overview(session: SessionDep, scope: BookScopeDep) -> ClientBookOvervi
     cash_now = await _cash_effect_as_of(session, scope, today)
     cash_start_of_month = await _cash_effect_as_of(session, scope, month_start - timedelta(days=1))
 
+    client_first_name = client_business_name = fiscal_year_end = accountant_name = None
+    if scope.client_id:
+        client = await session.get(Client, scope.client_id)
+        if client is not None:
+            client_business_name = client.business_name or client.legal_name
+            fiscal_year_end = f"{MONTH_NAME[client.year_end_month - 1]} {client.year_end_day}"
+            if client.owner_id:
+                owner = await session.get(Profile, client.owner_id)
+                accountant_name = owner.full_name if owner else None
+        if scope.user.profile.full_name:
+            client_first_name = scope.user.profile.full_name.split()[0]
+
     return ClientBookOverview(
         revenue_mtd=current.revenue,
         revenue_change=_pct_change(current.revenue, previous.revenue),
@@ -173,4 +190,8 @@ async def overview(session: SessionDep, scope: BookScopeDep) -> ClientBookOvervi
         tax_owing=round(tax_owing, 2),
         pending_expenses=pending_expenses,
         monthly=monthly,
+        client_first_name=client_first_name,
+        client_business_name=client_business_name,
+        fiscal_year_end=fiscal_year_end,
+        accountant_name=accountant_name,
     )

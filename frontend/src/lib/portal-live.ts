@@ -301,6 +301,10 @@ export async function fetchLiveOverview(): Promise<Overview | null> {
     revenueTrend: live.monthly.map((m) => m.revenue),
     expenseTrend: live.monthly.map((m) => m.expenses),
     netTrend: live.monthly.map((m) => m.net),
+    client_first_name: live.client_first_name,
+    client_business_name: live.client_business_name,
+    fiscal_year_end: live.fiscal_year_end,
+    accountant_name: live.accountant_name,
   };
 }
 

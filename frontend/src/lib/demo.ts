@@ -395,5 +395,9 @@ export function getOverview() {
     revenueTrend: months.map((m) => m.revenue),
     expenseTrend: months.map((m) => m.expenses),
     netTrend: months.map((m) => m.net),
+    client_first_name: DEMO_ACCOUNT.firstName as string | null,
+    client_business_name: DEMO_ACCOUNT.business as string | null,
+    fiscal_year_end: DEMO_ACCOUNT.fiscalYearEnd as string | null,
+    accountant_name: DEMO_ACCOUNT.accountant as string | null,
   };
 }

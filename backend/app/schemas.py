@@ -1440,6 +1440,12 @@ class ClientBookOverview(BaseModel):
     tax_owing: float = 0
     pending_expenses: int = 0
     monthly: list[MonthPoint] = Field(default_factory=list)
+    # Portal-only identity fields for the dashboard greeting — null for a firm
+    # staff caller (client_id is None, so there's no single client to name).
+    client_first_name: str | None = None
+    client_business_name: str | None = None
+    fiscal_year_end: str | None = None
+    accountant_name: str | None = None
 
 
 # --- Misc ---------------------------------------------------------------------
