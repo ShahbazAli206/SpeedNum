@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 
 import { Icon } from "@/components/icon";
 import { Logo } from "@/components/logo";
+import { Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { DEMO_ACCOUNT } from "@/lib/demo";
 import { useSession } from "@/lib/session";
@@ -104,15 +105,27 @@ export function Sidebar({
       <div className="border-t border-line p-3">
         {!collapsed ? (
           <div className="flex items-center gap-2.5 rounded-xl bg-surface-2 p-2.5">
-            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-brand-soft text-[12px] font-bold text-brand">
-              {initials}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13.5px] font-semibold text-ink">
-                {name}
-              </span>
-              <span className="block truncate text-[11.5px] text-muted">{email}</span>
-            </span>
+            {session.isLoading ? (
+              <>
+                <Skeleton className="size-9 shrink-0 rounded-full" />
+                <span className="min-w-0 flex-1 space-y-1.5">
+                  <Skeleton className="h-3.5 w-24" />
+                  <Skeleton className="h-3 w-16" />
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="grid size-9 shrink-0 place-items-center rounded-full bg-brand-soft text-[12px] font-bold text-brand">
+                  {initials}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13.5px] font-semibold text-ink">
+                    {name}
+                  </span>
+                  <span className="block truncate text-[11.5px] text-muted">{email}</span>
+                </span>
+              </>
+            )}
             {/* SignOutButton, not <Link href="/login">: a link never ended the
                 session, and the proxy bounces a signed-in user away from
                 /login — so "Sign out" put you straight back in the app. */}

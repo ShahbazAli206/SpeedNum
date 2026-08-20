@@ -315,11 +315,11 @@ export function Topbar({
           label="Account menu"
           minWidth={220}
           className="grid size-9 place-items-center rounded-full bg-brand-soft text-[12px] font-bold text-brand transition hover:brightness-95"
-          trigger={<span aria-hidden>{session.initials}</span>}
+          trigger={<span aria-hidden>{session.isLoading ? "" : session.initials}</span>}
           items={[
             {
-              label: session.displayName,
-              description: session.email || undefined,
+              label: session.isLoading ? "" : session.displayName,
+              description: session.isLoading ? "" : session.email || undefined,
               icon: <UserRound className="size-3.5" />,
               disabled: true,
             },

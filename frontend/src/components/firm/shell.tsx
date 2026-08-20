@@ -25,7 +25,7 @@ import { UrgentDeadlineBanner } from "@/components/dashboard/urgent-deadline-ban
 import { Icon } from "@/components/icon";
 import { Logo } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Menu } from "@/components/ui";
+import { Menu, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { getFirmOverview } from "@/lib/firm-demo";
 import { SessionProvider, useSession } from "@/lib/session";
@@ -232,17 +232,29 @@ function FirmShellInner({ children }: { children: ReactNode }) {
           <SignOutButton className="mx-auto grid size-9 place-items-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-danger" />
         ) : (
           <div className="flex items-center gap-2.5 rounded-xl bg-surface-2 p-2.5">
-            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-brand-soft text-[12px] font-bold text-brand">
-              {session.initials}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13.5px] font-semibold text-ink">
-                {session.displayName}
-              </span>
-              <span className="block truncate text-[11.5px] text-muted">
-                {session.displayTitle}
-              </span>
-            </span>
+            {session.isLoading ? (
+              <>
+                <Skeleton className="size-9 shrink-0 rounded-full" />
+                <span className="min-w-0 flex-1 space-y-1.5">
+                  <Skeleton className="h-3.5 w-24" />
+                  <Skeleton className="h-3 w-16" />
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="grid size-9 shrink-0 place-items-center rounded-full bg-brand-soft text-[12px] font-bold text-brand">
+                  {session.initials}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13.5px] font-semibold text-ink">
+                    {session.displayName}
+                  </span>
+                  <span className="block truncate text-[11.5px] text-muted">
+                    {session.displayTitle}
+                  </span>
+                </span>
+              </>
+            )}
             <SignOutButton />
           </div>
         )}
@@ -350,11 +362,11 @@ function FirmShellInner({ children }: { children: ReactNode }) {
               label="Account menu"
               minWidth={230}
               className="grid size-9 place-items-center rounded-full bg-brand-soft text-[12px] font-bold text-brand transition hover:brightness-95"
-              trigger={<span aria-hidden>{session.initials}</span>}
+              trigger={<span aria-hidden>{session.isLoading ? "" : session.initials}</span>}
               items={[
                 {
-                  label: session.displayName,
-                  description: session.email || session.displayTitle,
+                  label: session.isLoading ? "" : session.displayName,
+                  description: session.isLoading ? "" : session.email || session.displayTitle,
                   icon: <UserRound className="size-3.5" />,
                   disabled: true,
                 },
