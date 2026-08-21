@@ -9,13 +9,14 @@ import {
   Eye,
   Globe,
   KeyRound,
+  TriangleAlert,
   Users,
 } from "lucide-react";
 import { useMemo } from "react";
 
 import { KpiTile } from "@/components/charts";
 import { KpiRow } from "@/components/dashboard/page-shell";
-import { Badge, Card, EmptyState, LoadingBlock } from "@/components/ui";
+import { Badge, Button, Card, EmptyState, LoadingBlock } from "@/components/ui";
 import type { ReachData } from "@/lib/admin";
 import { useApi } from "@/lib/hooks";
 import { searchFootprint } from "@/lib/seo";
@@ -40,6 +41,24 @@ export function ReachClient() {
         icon={<Ban className="size-6" />}
         title="Superadmin access required"
         description="The Reach page is restricted to the platform superadmin role."
+      />
+    );
+  }
+  if (reach.error) {
+    return (
+      <EmptyState
+        icon={<TriangleAlert className="size-6" />}
+        title="Couldn't load Reach"
+        description={
+          reach.error.status === 404
+            ? "The platform reach endpoint isn't available on the API yet — deploy the latest backend, then retry."
+            : "Something went wrong reaching the API. Please try again."
+        }
+        action={
+          <Button variant="secondary" onClick={() => reach.reload()}>
+            Try again
+          </Button>
+        }
       />
     );
   }

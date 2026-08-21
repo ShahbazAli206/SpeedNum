@@ -52,6 +52,19 @@ export function TenantDetailClient({ tenantId }: { tenantId: string }) {
   if (tenant.error?.status === 404) {
     return <EmptyState title="Firm not found" description="It may have been deleted." />;
   }
+  if (tenant.error) {
+    return (
+      <EmptyState
+        title="Couldn't load this firm"
+        description="Something went wrong reaching the API. Please try again."
+        action={
+          <Button variant="secondary" onClick={() => tenant.reload()}>
+            Try again
+          </Button>
+        }
+      />
+    );
+  }
   if (tenant.isLoading || !tenant.data) {
     return <LoadingBlock label="Loading firm…" />;
   }

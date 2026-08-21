@@ -131,7 +131,13 @@ export function PlatformSettingsClient() {
           ) : null}
         </div>
 
-        {email.isLoading || !status ? (
+        {email.error ? (
+          <Alert tone="danger" className="mt-4">
+            {email.error.status === 404
+              ? "The platform email endpoint isn't available on the API yet — deploy the latest backend, then reload."
+              : "Couldn't load email delivery status. Reload the page to try again."}
+          </Alert>
+        ) : email.isLoading || !status ? (
           <LoadingBlock label="Loading email status…" />
         ) : (
           <>

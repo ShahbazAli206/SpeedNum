@@ -170,13 +170,13 @@ export function AdminClient() {
         />
         <KpiTile
           tone="amber"
-          value={stats.data ? String(stats.data.trialing_tenants) : "—"}
+          value={stats.data?.trialing_tenants != null ? String(stats.data.trialing_tenants) : "—"}
           label="Trialing"
           icon={<Building2 className="size-5" />}
         />
         <KpiTile
           tone="rose"
-          value={stats.data ? String(stats.data.suspended_tenants) : "—"}
+          value={stats.data?.suspended_tenants != null ? String(stats.data.suspended_tenants) : "—"}
           label="Suspended"
           icon={<Ban className="size-5" />}
         />
