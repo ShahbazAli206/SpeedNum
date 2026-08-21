@@ -402,6 +402,14 @@ class PortalInviteResult(BaseModel):
     invited_at: datetime
     email_sent: bool
     message: str
+    # Same reasoning as CredentialResult.temp_password/login_url above: when
+    # email_sent is false, this is the ONLY way the inviting staff member
+    # can act on this endpoint's own "share the credentials manually"
+    # message — accounts.provision()/reissue() already generate the
+    # password and accounts.login_url() the URL, neither was threaded
+    # through to the response.
+    temp_password: str
+    login_url: str
 
 
 class ContactBase(BaseModel):

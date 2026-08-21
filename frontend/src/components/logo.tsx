@@ -60,6 +60,7 @@ export function Logo({
   tone = "brand",
   sublabel,
   className,
+  logoUrl,
 }: {
   href?: string | null;
   size?: number;
@@ -67,32 +68,51 @@ export function Logo({
   /** Small caps line under the wordmark, e.g. "CLIENT" in the portal. */
   sublabel?: string;
   className?: string;
+  /** The tenant's own uploaded logo (Settings → Branding). When set, this
+   * replaces the SpeedNum mark + wordmark everywhere `<Logo>` is used, so a
+   * firm's chosen logo actually shows up in the chrome instead of only in
+   * the settings-page preview. */
+  logoUrl?: string | null;
 }) {
   const content = (
     <span className={cn("inline-flex items-center gap-2.5", className)}>
-      <LogoMark size={size} tone={tone} />
-      <span className="flex flex-col leading-none">
-        <span
-          className={cn(
-            "font-display font-extrabold tracking-tight",
-            tone === "invert" ? "text-white" : "text-ink",
+      {logoUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={logoUrl}
+          alt=""
+          className="shrink-0 rounded-lg object-contain"
+          style={{ height: size, maxWidth: size * 3.5 }}
+        />
+      ) : (
+        <LogoMark size={size} tone={tone} />
+      )}
+      {logoUrl && !sublabel ? null : (
+        <span className="flex flex-col leading-none">
+          {logoUrl ? null : (
+            <span
+              className={cn(
+                "font-display font-extrabold tracking-tight",
+                tone === "invert" ? "text-white" : "text-ink",
+              )}
+              style={{ fontSize: size * 0.53 }}
+            >
+              Speed
+              <span className={tone === "invert" ? "text-brand-on-dark" : "text-brand"}>Num</span>
+            </span>
           )}
-          style={{ fontSize: size * 0.53 }}
-        >
-          Speed
-          <span className={tone === "invert" ? "text-brand-on-dark" : "text-brand"}>Num</span>
+          {sublabel ? (
+            <span
+              className={cn(
+                "mt-1 text-[10px] font-semibold tracking-[0.18em]",
+                tone === "invert" ? "text-white/60" : "text-brand",
+              )}
+            >
+              {sublabel}
+            </span>
+          ) : null}
         </span>
-        {sublabel ? (
-          <span
-            className={cn(
-              "mt-1 text-[10px] font-semibold tracking-[0.18em]",
-              tone === "invert" ? "text-white/60" : "text-brand",
-            )}
-          >
-            {sublabel}
-          </span>
-        ) : null}
-      </span>
+      )}
     </span>
   );
 

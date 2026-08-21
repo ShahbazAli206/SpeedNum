@@ -50,3 +50,11 @@ Desktop.ini
 # password). deploy/api.env.example is the tracked template.
 deploy/api.env
 deploy/api.env.bak*
+
+# ---- Local dev-only artifacts ----
+# Self-signed TLS cert/key for local HTTPS dev — never commit key material,
+# even a throwaway dev one.
+backend/certs/
+# Local Postgres data/log/screenshot directory for the portable dev stack —
+# runtime state, not source.
+.localdb/

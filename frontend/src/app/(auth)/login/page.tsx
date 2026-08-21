@@ -7,7 +7,7 @@ import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = {
   title: "Log in",
-  description: "Sign in to your SpeedNum client portal.",
+  description: "Sign in to your SpeedNum account.",
   robots: { index: false, follow: false },
 };
 

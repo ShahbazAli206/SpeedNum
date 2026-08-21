@@ -33,11 +33,13 @@ import type {
   Task,
   TeamRow,
 } from "@/lib/firm-demo";
+import { CredentialsModal } from "@/components/dashboard/credentials-modal";
 import { formatBytes, formatDate, formatMoney, titleCase } from "@/lib/format";
 import { useApi } from "@/lib/hooks";
 import { clientDocumentUrl, UploadError, uploadClientDocument } from "@/lib/storage";
 import type {
   ClientDocument,
+  CredentialResult,
   Frequency,
   PortalInviteResult,
   Task as ApiTask,
@@ -159,6 +161,7 @@ export function ClientDetailClient({
   // acknowledgement (there is no live backend reachable yet in most setups).
   const [portalInvitedAt, setPortalInvitedAt] = useState(client.portal_invited_at);
   const [inviting, setInviting] = useState(false);
+  const [portalCredentials, setPortalCredentials] = useState<CredentialResult | null>(null);
 
   // Add service — a real POST to /clients/{id}/services. The optimistic row
   // only joins local state once that call actually succeeds, so a failed
@@ -309,7 +312,24 @@ export function ClientDetailClient({
     try {
       const result = await post<PortalInviteResult>(`/clients/${client.id}/portal-invite`);
       setPortalInvitedAt(result.invited_at);
-      toast.success(result.email_sent ? "Welcome email sent" : "Portal login ready", result.message);
+      if (result.email_sent) {
+        toast.success("Welcome email sent", result.message);
+      } else {
+        // A toast auto-dismisses — this password is otherwise unrecoverable
+        // once hashed, so it needs the same persistent modal team invites use
+        // (see CredentialsModal's own doc comment), not a toast that would
+        // lose it for good.
+        setPortalCredentials({
+          profile_id: client.id,
+          email: result.email,
+          full_name: client.business_name,
+          role: "member",
+          temp_password: result.temp_password,
+          login_url: result.login_url,
+          email_sent: result.email_sent,
+          message: result.message,
+        });
+      }
     } catch {
       // No live backend configured yet — acknowledge the action the
       // same way the rest of the firm-side app does on demo data.
@@ -928,6 +948,12 @@ export function ClientDetailClient({
               )}
             </button>
           </Modal>
+
+          <CredentialsModal
+            result={portalCredentials}
+            onClose={() => setPortalCredentials(null)}
+            kind="client portal"
+          />
         </>
       ) : null}
     </>

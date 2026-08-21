@@ -128,9 +128,19 @@ function FirmShellInner({ children }: { children: ReactNode }) {
         )}
       >
         {collapsed ? (
-          <Logo href="/overview" size={30} className="[&>span:last-child]:hidden" />
+          <Logo
+            href="/overview"
+            size={30}
+            className="[&>span:last-child]:hidden"
+            logoUrl={branding.logoUrl}
+          />
         ) : (
-          <Logo href="/overview" size={30} sublabel={branding.name.toUpperCase()} />
+          <Logo
+            href="/overview"
+            size={30}
+            sublabel={branding.name.toUpperCase()}
+            logoUrl={branding.logoUrl}
+          />
         )}
         <button
           type="button"

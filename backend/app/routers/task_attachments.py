@@ -297,6 +297,13 @@ async def update_comment(
 
     comment.body = payload.body
     await session.flush()
+    # updated_at is set by the task_comments_set_updated_at DB trigger (see
+    # db/migrations/0013_task_attachments_comments.sql), not by this ORM
+    # model (no `onupdate=` on the column) — without this refresh, the
+    # in-memory object still holds the pre-update value and the response
+    # below would echo a stale updated_at even though the row itself is
+    # correct (confirmed: a follow-up GET already showed the right value).
+    await session.refresh(comment)
 
     names = await profile_names(session, user.tenant_id)
     return TaskCommentRead(

@@ -313,6 +313,8 @@ async def invite_to_portal(
         email=email,
         invited_at=client.portal_invited_at,
         email_sent=email_sent,
+        temp_password=result.temp_password,
+        login_url=accounts.login_url(),
         message=(
             "Welcome email sent."
             if email_sent

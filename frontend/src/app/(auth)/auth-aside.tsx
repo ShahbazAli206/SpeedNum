@@ -26,6 +26,27 @@ const PANELS = {
       "Deadline alerts before they bite",
     ],
   },
+  // The firm/staff login — distinct from `default` below, which is the
+  // client-portal pitch. Before this entry existed, `/login` fell through to
+  // `default` and showed a "Client portal" badge and portal-oriented bullets
+  // to accountants signing into their own firm's dashboard.
+  "/login": {
+    eyebrow: "Practice management",
+    title: (
+      <>
+        Welcome back
+        <br />
+        to your practice.
+      </>
+    ),
+    lead: "Clients, deadlines, engagement letters and your whole team's workload — right where you left them.",
+    points: [
+      "Full client roster & task board",
+      "CRA deadlines tracked automatically",
+      "Engagement letters & e-signatures",
+      "Team workload at a glance",
+    ],
+  },
   default: {
     eyebrow: "Client portal",
     title: (
@@ -47,7 +68,7 @@ const PANELS = {
 
 export function AuthAside() {
   const pathname = usePathname();
-  const panel = pathname === "/signup" ? PANELS["/signup"] : PANELS.default;
+  const panel = pathname && pathname in PANELS ? PANELS[pathname as keyof typeof PANELS] : PANELS.default;
 
   return (
     <div className="relative my-auto hidden max-w-lg py-16 lg:block">

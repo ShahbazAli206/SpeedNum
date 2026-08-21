@@ -27,6 +27,9 @@ export function Sidebar({
 }) {
   const pathname = usePathname();
   const session = useSession();
+  // The client portal has no branding provider of its own — the firm's logo
+  // rides in on the same /auth/me call the identity chip already uses.
+  const logoUrl = session.isLive ? session.me?.tenant?.logo_url : null;
 
   // Real identity when signed in; the demo account only stands in when no API
   // is reachable, so a live client never sees someone else's name in the rail.
@@ -49,9 +52,14 @@ export function Sidebar({
         )}
       >
         {collapsed ? (
-          <Logo href="/dashboard" size={30} className="[&>span:last-child]:hidden" />
+          <Logo
+            href="/dashboard"
+            size={30}
+            className="[&>span:last-child]:hidden"
+            logoUrl={logoUrl}
+          />
         ) : (
-          <Logo href="/dashboard" size={30} sublabel="CLIENT" />
+          <Logo href="/dashboard" size={30} sublabel="CLIENT" logoUrl={logoUrl} />
         )}
         <button
           type="button"

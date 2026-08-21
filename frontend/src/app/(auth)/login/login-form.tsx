@@ -92,12 +92,15 @@ export function LoginForm() {
           <User className="size-4.5" />
         </span>
         <span className="rounded-full bg-brand-soft px-3 py-1 text-[11px] font-bold tracking-[0.12em] text-brand uppercase">
-          Client portal
+          Sign in
         </span>
       </div>
 
       <h1 className="mt-6 text-[1.75rem] font-extrabold tracking-tight text-ink">Welcome back</h1>
-      <p className="mt-1.5 text-[14.5px] text-muted">Sign in to your SpeedNum client portal.</p>
+      {/* This one form signs in both firm staff and client-portal accounts —
+          resolveHome() below sorts out where each lands only after auth
+          succeeds — so this copy must not claim either audience specifically. */}
+      <p className="mt-1.5 text-[14.5px] text-muted">Sign in to your SpeedNum account.</p>
 
       {!AUTH_CONFIGURED ? (
         <div className="mt-5">

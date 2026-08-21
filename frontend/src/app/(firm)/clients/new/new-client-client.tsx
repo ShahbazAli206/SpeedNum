@@ -13,11 +13,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { CredentialsModal } from "@/components/dashboard/credentials-modal";
 import { useToast } from "@/components/toast";
 import { Button, Checkbox, Field, Input, Select, Textarea, toOptions } from "@/components/ui";
 import { ApiError, post } from "@/lib/api";
 import type { CustomField, TeamRow } from "@/lib/firm-demo";
-import type { Client, PortalInviteResult } from "@/lib/types";
+import type { Client, CredentialResult, PortalInviteResult } from "@/lib/types";
 
 interface ContactDraft {
   id: string;
@@ -82,6 +83,7 @@ export function NewClientClient({
 
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [portalCredentials, setPortalCredentials] = useState<CredentialResult | null>(null);
 
   const addContact = () => {
     setContacts((current) => [
@@ -181,6 +183,22 @@ export function NewClientClient({
       if (willInvite) {
         const invite = await post<PortalInviteResult>(`/clients/${created.id}/portal-invite`);
         emailSent = invite.email_sent;
+        if (!emailSent) {
+          // Same reasoning as the client-detail page's invite flow: this
+          // password is unrecoverable once hashed, and this page was about
+          // to navigate away immediately after — guaranteed, not just
+          // likely, to lose it. Hold the redirect until the modal closes.
+          setPortalCredentials({
+            profile_id: created.id,
+            email: invite.email,
+            full_name: trimmedName,
+            role: "member",
+            temp_password: invite.temp_password,
+            login_url: invite.login_url,
+            email_sent: invite.email_sent,
+            message: invite.message,
+          });
+        }
       }
 
       toast.success(
@@ -191,7 +209,7 @@ export function NewClientClient({
             : "Client record created — portal login ready, but email delivery isn't configured yet."
           : "Client record created — you'll find them in the client book.",
       );
-      router.push("/clients");
+      if (!willInvite || emailSent) router.push("/clients");
     } catch (caught) {
       const unreachable = caught instanceof ApiError && caught.status === 0;
       if (!unreachable) {
@@ -472,6 +490,15 @@ export function NewClientClient({
           </Button>
         </div>
       </form>
+
+      <CredentialsModal
+        result={portalCredentials}
+        onClose={() => {
+          setPortalCredentials(null);
+          router.push("/clients");
+        }}
+        kind="client portal"
+      />
     </>
   );
 }

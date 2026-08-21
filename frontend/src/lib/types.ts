@@ -145,6 +145,8 @@ export interface PortalInviteResult {
   invited_at: string;
   email_sent: boolean;
   message: string;
+  temp_password: string;
+  login_url: string;
 }
 
 export interface Contact {
