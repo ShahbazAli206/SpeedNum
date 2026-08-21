@@ -31,6 +31,10 @@ yarn-error.log*
 # documents where each secret lives and how to retrieve it instead.
 *.secrets.local.md
 DEPLOYMENT.secrets.local.md
+# Real e2e/QA test credentials (incl. a superadmin login). The committed
+# e2e/test-accounts.example.json is the template; the .local.json holds live
+# passwords and must NEVER be pushed.
+e2e/test-accounts.local.json
 
 # ---- Large media ----
 # *.mp4 and *.zip are stored via Git LFS (see .gitattributes).

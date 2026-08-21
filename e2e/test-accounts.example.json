@@ -1,0 +1,32 @@
+{
+  "_comment": "Template for e2e test credentials. Copy to test-accounts.local.json (gitignored) and fill in the real passwords. Never put real passwords in THIS committed file.",
+  "baseUrl": "https://speed-num.vercel.app",
+  "loginUrl": "https://speed-num.vercel.app/login",
+  "apiUrl": "https://test.spidnums.com",
+  "accounts": {
+    "superadmin": {
+      "role": "superadmin + firm owner",
+      "email": "qa-owner-aug19@axelytix.com",
+      "password": "<fill-in>",
+      "notes": "Owns a firm, so it lands on /overview after login; go to /admin for the platform console."
+    },
+    "admin": {
+      "role": "firm admin",
+      "email": "qa-admin-aug20@axelytix.com",
+      "password": "<fill-in>",
+      "notes": "Firm-level admin (not a platform superadmin)."
+    },
+    "accountant": {
+      "role": "accountant (member)",
+      "email": "qa.accountant.one@axelytix.example",
+      "password": "<fill-in>",
+      "notes": "Staff member of a firm."
+    },
+    "client": {
+      "role": "client portal",
+      "email": "accounts@qatestclient.example",
+      "password": "<fill-in>",
+      "notes": "Client-portal login; lands on /dashboard."
+    }
+  }
+}
