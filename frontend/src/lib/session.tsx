@@ -49,6 +49,8 @@ export interface SessionValue {
   /** Firm staff (or demo mode). False only for a client-portal login. */
   isFirmStaff: boolean;
   isAdmin: boolean;
+  /** True when a platform superadmin is viewing this firm via impersonation. */
+  isImpersonating: boolean;
   /** Re-read /auth/me and the reminder counts now — call after an action that
    *  changes either (marking notifications read, acknowledging a reminder). */
   refresh: () => void;
@@ -162,7 +164,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // In demo mode there is no portal login to distinguish, so the firm
       // surface stays browsable.
       isFirmStaff: profile ? profile.client_id === null : true,
-      isAdmin: profile ? profile.role === "owner" || profile.role === "admin" : true,
+      isAdmin: profile
+        ? profile.role === "owner" || profile.role === "admin" || profile.is_superadmin
+        : true,
+      isImpersonating: isLive ? (me?.is_impersonating ?? false) : false,
       refresh: () => void load(),
       setUnread: (next) =>
         setUnreadOverride((current) =>
@@ -207,6 +212,7 @@ export function useSession(): SessionValue {
     unread: 0,
     isFirmStaff: true,
     isAdmin: true,
+    isImpersonating: false,
     refresh: () => {},
     setUnread: () => {},
   };

@@ -219,6 +219,18 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         description: "Super-admin: tenants, plans and audit log",
       },
       {
+        label: "Reach",
+        href: "/admin/reach",
+        icon: "line-chart",
+        description: "Superadmin: site traffic, search footprint and platform scale",
+      },
+      {
+        label: "Platform settings",
+        href: "/admin/settings",
+        icon: "shield-check",
+        description: "Superadmin: platform email delivery and how the platform is configured",
+      },
+      {
         label: "Backup & Recovery",
         href: "/admin/backups",
         icon: "hard-drive",

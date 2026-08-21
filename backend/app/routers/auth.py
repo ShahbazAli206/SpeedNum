@@ -323,6 +323,7 @@ async def me(session: SessionDep, user: CurrentUserDep) -> MeResponse:
         profile=ProfileRead.model_validate(user.profile),
         tenant=TenantRead.model_validate(user.tenant) if user.tenant else None,
         unread_notifications=unread,
+        is_impersonating=user.impersonating,
     )
 
 

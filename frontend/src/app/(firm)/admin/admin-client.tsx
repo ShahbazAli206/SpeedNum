@@ -1,35 +1,62 @@
 "use client";
 
-import { Building2, Globe, ShieldCheck, ShieldOff, Signature, Users } from "lucide-react";
+import {
+  Ban,
+  Building2,
+  Check,
+  Copy,
+  Eye,
+  Globe,
+  LogIn,
+  Pause,
+  Pencil,
+  Play,
+  Plus,
+  Signature,
+  Trash2,
+  Users,
+} from "lucide-react";
+import Link from "next/link";
+import { useMemo, useState } from "react";
 
 import { KpiTile } from "@/components/charts";
 import { KpiRow } from "@/components/dashboard/page-shell";
-import { EmptyState, LoadingBlock } from "@/components/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  Checkbox,
+  EmptyState,
+  Field,
+  Input,
+  LoadingBlock,
+  Modal,
+  NativeSelect,
+} from "@/components/ui";
+import {
+  createTenant,
+  deleteTenant,
+  suspendTenant,
+  updateTenant,
+  type CredentialResult,
+  type TenantEditInput,
+  type TenantSummary,
+} from "@/lib/admin";
+import { startImpersonation } from "@/lib/auth-client";
 import { cn } from "@/lib/cn";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { ApiError } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 
 interface PlatformStats {
   tenants: number;
   active_tenants: number;
+  suspended_tenants: number;
+  trialing_tenants: number;
   users: number;
   clients: number;
   deadlines: number;
   letters_signed: number;
-}
-
-interface PlatformTenant {
-  id: string;
-  name: string;
-  slug: string;
-  plan: string;
-  seats: number;
-  is_active: boolean;
-  custom_domain: string | null;
-  created_at: string;
-  clients: number;
-  users: number;
-  signed_letters: number;
 }
 
 interface PlatformAuditEntry {
@@ -43,29 +70,93 @@ interface PlatformAuditEntry {
   tenant_name: string | null;
 }
 
+const PLAN_OPTIONS = ["trial", "starter", "growth", "pro", "enterprise"];
+const cap = (n: number | null | undefined) => (n === null || n === undefined ? "∞" : String(n));
+
 /**
- * Real data, unlike this page used to be — every call hits a superadmin-only
- * backend endpoint (backend/app/routers/admin.py), same pattern as
- * admin/backups/page.tsx: a non-superadmin gets a real 403, which is the
- * actual enforcement boundary, and this page just reflects it.
+ * The platform superadmin's tenants console — every firm on the platform, with
+ * the full lifecycle: provision, impersonate, view, edit, suspend and delete.
+ * Every call hits a superadmin-only backend endpoint (backend/app/routers/admin.py);
+ * a non-superadmin gets a real 403, which is the actual enforcement boundary,
+ * and this page just reflects it.
  */
 export function AdminClient() {
   const stats = useApi<PlatformStats>("/admin/stats");
-  const tenants = useApi<PlatformTenant[]>("/admin/tenants");
+  const tenants = useApi<TenantSummary[]>("/admin/tenants");
   const audit = useApi<PlatformAuditEntry[]>("/admin/audit");
+
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "suspended">("all");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<TenantSummary | null>(null);
+  const [deleting, setDeleting] = useState<TenantSummary | null>(null);
+  const [credentials, setCredentials] = useState<CredentialResult | null>(null);
 
   const forbidden =
     stats.error?.status === 403 || tenants.error?.status === 403 || audit.error?.status === 403;
 
+  const refreshAll = () => {
+    stats.refresh();
+    tenants.refresh();
+    audit.refresh();
+  };
+
+  const filtered = useMemo(() => {
+    const rows = tenants.data ?? [];
+    const q = query.trim().toLowerCase();
+    return rows.filter((t) => {
+      if (statusFilter === "active" && !t.is_active) return false;
+      if (statusFilter === "suspended" && t.is_active) return false;
+      if (!q) return true;
+      return (
+        t.name.toLowerCase().includes(q) ||
+        t.slug.toLowerCase().includes(q) ||
+        (t.admin_email ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [tenants.data, query, statusFilter]);
+
   if (forbidden) {
     return (
       <EmptyState
-        icon={<ShieldOff className="size-6" />}
+        icon={<Ban className="size-6" />}
         title="Superadmin access required"
         description="The platform console is restricted to the platform superadmin role."
       />
     );
   }
+
+  const impersonate = async (tenant: TenantSummary) => {
+    setActionError(null);
+    setBusyId(tenant.id);
+    try {
+      await startImpersonation(tenant.id);
+      // A full navigation, not router.push: the session identity just changed
+      // (new access cookie), so the proxy and the firm shell must re-run and
+      // re-read /auth/me as the impersonated firm rather than reuse this tree.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+      window.location.assign("/overview");
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not open that firm.");
+      setBusyId(null);
+    }
+  };
+
+  const toggleSuspend = async (tenant: TenantSummary) => {
+    setActionError(null);
+    setBusyId(tenant.id);
+    try {
+      await suspendTenant(tenant.id, !tenant.is_active);
+      refreshAll();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   return (
     <>
@@ -73,60 +164,94 @@ export function AdminClient() {
         <KpiTile
           tone="blue"
           value={stats.data ? String(stats.data.tenants) : "—"}
-          label="Tenants"
+          label="Total tenants"
           hint={stats.data ? `${stats.data.active_tenants} active` : undefined}
           icon={<Building2 className="size-5" />}
         />
         <KpiTile
-          tone="green"
-          value={stats.data ? String(stats.data.clients) : "—"}
-          label="Clients across all firms"
-          icon={<Users className="size-5" />}
-        />
-        <KpiTile
           tone="amber"
-          value={stats.data ? String(stats.data.users) : "—"}
-          label="Seats in use"
-          icon={<Users className="size-5" />}
+          value={stats.data ? String(stats.data.trialing_tenants) : "—"}
+          label="Trialing"
+          icon={<Building2 className="size-5" />}
         />
         <KpiTile
           tone="rose"
+          value={stats.data ? String(stats.data.suspended_tenants) : "—"}
+          label="Suspended"
+          icon={<Ban className="size-5" />}
+        />
+        <KpiTile
+          tone="green"
+          value={stats.data ? String(stats.data.clients) : "—"}
+          label="Clients (all firms)"
+          icon={<Users className="size-5" />}
+        />
+        <KpiTile
+          tone="violet"
           value={stats.data ? String(stats.data.letters_signed) : "—"}
           label="Signed letters"
           icon={<Signature className="size-5" />}
         />
       </KpiRow>
 
+      {actionError ? (
+        <Alert tone="danger" className="mt-4" onDismiss={() => setActionError(null)}>
+          {actionError}
+        </Alert>
+      ) : null}
+
       <section className="mt-6 rounded-xl border border-line bg-surface shadow-[var(--shadow-card)]">
-        <div className="border-b border-line px-5 py-4">
-          <h2 className="text-[15px] font-semibold text-ink">Tenants</h2>
-          <p className="mt-0.5 text-[13px] text-muted">
-            Each fully isolated — tenant_id-scoped queries enforce the boundary in every request,
-            not only in the application layer
-          </p>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
+          <div className="min-w-0">
+            <h2 className="text-[15px] font-semibold text-ink">Firms</h2>
+            <p className="mt-0.5 text-[13px] text-muted">
+              {tenants.data ? `${tenants.data.length} firms` : "Every firm on the platform"} — create,
+              configure, impersonate and suspend
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search name, slug, email…"
+              className="h-9 w-56"
+            />
+            <NativeSelect
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+              className="h-9 w-36"
+            >
+              <option value="all">All statuses</option>
+              <option value="active">Active</option>
+              <option value="suspended">Suspended</option>
+            </NativeSelect>
+            <Button size="sm" icon={<Plus className="size-4" />} onClick={() => setCreating(true)}>
+              New tenant
+            </Button>
+          </div>
         </div>
 
         {tenants.isLoading ? (
           <LoadingBlock label="Loading tenants…" />
-        ) : !tenants.data?.length ? (
-          <EmptyState title="No tenants yet" />
+        ) : !filtered.length ? (
+          <EmptyState title={tenants.data?.length ? "No firms match your filters" : "No tenants yet"} />
         ) : (
           <div className="scroll-thin overflow-x-auto">
             <table className="w-full text-[13.5px]">
               <thead>
                 <tr className="border-b border-line text-[11.5px] tracking-wide text-muted uppercase">
                   <th className="px-5 py-2.5 text-left font-semibold">Firm</th>
+                  <th className="px-5 py-2.5 text-left font-semibold">Admin</th>
                   <th className="px-5 py-2.5 text-left font-semibold">Plan</th>
-                  <th className="px-5 py-2.5 text-left font-semibold">Domain</th>
                   <th className="px-5 py-2.5 text-right font-semibold">Clients</th>
-                  <th className="px-5 py-2.5 text-right font-semibold">Seats</th>
-                  <th className="px-5 py-2.5 text-right font-semibold">Signed</th>
+                  <th className="px-5 py-2.5 text-right font-semibold">Users</th>
+                  <th className="px-5 py-2.5 text-center font-semibold">Status</th>
                   <th className="px-5 py-2.5 text-right font-semibold">Created</th>
-                  <th className="px-5 py-2.5 text-right font-semibold">Status</th>
+                  <th className="px-5 py-2.5 text-right font-semibold">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {tenants.data.map((tenant) => (
+                {filtered.map((tenant) => (
                   <tr key={tenant.id} className="border-b border-line last:border-b-0">
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-2.5">
@@ -134,37 +259,81 @@ export function AdminClient() {
                           {tenant.name.slice(0, 2).toUpperCase()}
                         </span>
                         <span className="min-w-0">
-                          <span className="block truncate font-medium text-ink">{tenant.name}</span>
-                          <span className="block font-mono text-[11px] text-muted">{tenant.slug}</span>
+                          <Link
+                            href={`/admin/tenants/${tenant.id}`}
+                            className="block truncate font-medium text-ink hover:text-brand"
+                          >
+                            {tenant.name}
+                          </Link>
+                          <span className="flex items-center gap-1.5 font-mono text-[11px] text-muted">
+                            {tenant.custom_domain ? (
+                              <>
+                                <Globe className="size-3 text-brand" />
+                                {tenant.custom_domain}
+                              </>
+                            ) : (
+                              tenant.slug
+                            )}
+                            {tenant.is_demo ? (
+                              <Badge tone="warn" className="ml-1">
+                                Demo
+                              </Badge>
+                            ) : null}
+                          </span>
                         </span>
                       </div>
                     </td>
-                    <td className="px-5 py-3 text-ink-soft">{tenant.plan}</td>
-                    <td className="px-5 py-3">
-                      {tenant.custom_domain ? (
-                        <span className="inline-flex items-center gap-1.5 text-[12.5px] text-ink-soft">
-                          <Globe className="size-3.5 text-brand" />
-                          {tenant.custom_domain}
-                        </span>
-                      ) : (
-                        <span className="font-mono text-[11.5px] text-muted">{tenant.slug}.speednum.com</span>
-                      )}
-                    </td>
-                    <td className="px-5 py-3 text-right tabular-nums text-ink-soft">{tenant.clients}</td>
+                    <td className="px-5 py-3 text-ink-soft">{tenant.admin_email ?? "—"}</td>
+                    <td className="px-5 py-3 text-ink-soft capitalize">{tenant.plan}</td>
                     <td className="px-5 py-3 text-right tabular-nums text-ink-soft">
-                      {tenant.users} / {tenant.seats}
+                      {tenant.clients} / {cap(tenant.max_clients)}
                     </td>
-                    <td className="px-5 py-3 text-right tabular-nums text-ink-soft">{tenant.signed_letters}</td>
-                    <td className="px-5 py-3 text-right tabular-nums text-muted">{formatDate(tenant.created_at)}</td>
-                    <td className="px-5 py-3 text-right">
-                      <span
-                        className={cn(
-                          "inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold",
-                          tenant.is_active ? "bg-success-soft text-success" : "bg-surface-2 text-muted",
-                        )}
-                      >
+                    <td className="px-5 py-3 text-right tabular-nums text-ink-soft">
+                      {tenant.users} / {cap(tenant.max_users)}
+                    </td>
+                    <td className="px-5 py-3 text-center">
+                      <Badge tone={tenant.is_active ? "success" : "danger"}>
                         {tenant.is_active ? "Active" : "Suspended"}
-                      </span>
+                      </Badge>
+                    </td>
+                    <td className="px-5 py-3 text-right tabular-nums text-muted">
+                      {formatDate(tenant.created_at)}
+                    </td>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        <IconAction
+                          title="Open admin panel (impersonate)"
+                          onClick={() => impersonate(tenant)}
+                          busy={busyId === tenant.id}
+                        >
+                          <LogIn className="size-4" />
+                        </IconAction>
+                        <Link
+                          href={`/admin/tenants/${tenant.id}`}
+                          title="View firm"
+                          className="grid size-8 place-items-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-ink"
+                        >
+                          <Eye className="size-4" />
+                        </Link>
+                        <IconAction title="Edit tenant" onClick={() => setEditing(tenant)}>
+                          <Pencil className="size-4" />
+                        </IconAction>
+                        <IconAction
+                          title={tenant.is_active ? "Suspend firm" : "Re-activate firm"}
+                          onClick={() => toggleSuspend(tenant)}
+                          busy={busyId === tenant.id}
+                          tone={tenant.is_active ? "warn" : "success"}
+                        >
+                          {tenant.is_active ? <Pause className="size-4" /> : <Play className="size-4" />}
+                        </IconAction>
+                        <IconAction
+                          title="Delete tenant"
+                          tone="danger"
+                          onClick={() => setDeleting(tenant)}
+                        >
+                          <Trash2 className="size-4" />
+                        </IconAction>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -174,69 +343,491 @@ export function AdminClient() {
         )}
       </section>
 
-      <div className="mt-6 grid gap-5 lg:grid-cols-[1.4fr_1fr]">
-        <section className="rounded-xl border border-line bg-surface shadow-[var(--shadow-card)]">
-          <div className="border-b border-line px-5 py-4">
-            <h2 className="text-[15px] font-semibold text-ink">Audit log</h2>
-            <p className="mt-0.5 text-[13px] text-muted">
-              Append-only, across every tenant — &quot;who changed this, and when&quot; is a query,
-              not an investigation
-            </p>
-          </div>
-          {audit.isLoading ? (
-            <LoadingBlock label="Loading audit log…" />
-          ) : !audit.data?.length ? (
-            <EmptyState title="No audit events yet" />
-          ) : (
-            <ul className="divide-y divide-line">
-              {audit.data.map((entry) => (
-                <li key={entry.id} className="flex items-start gap-3 px-5 py-3">
-                  <span className="mt-1 size-1.5 shrink-0 rounded-full bg-brand" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[13px] leading-snug text-ink-soft">
-                      <strong className="font-semibold text-ink">{entry.actor_email ?? "System"}</strong>{" "}
-                      {entry.action}{" "}
-                      <span className="rounded bg-surface-2 px-1 py-0.5 font-mono text-[11px] text-muted">
-                        {entry.entity}
-                      </span>
-                      {entry.tenant_name ? ` · ${entry.tenant_name}` : ""}
-                      {entry.summary ? ` — ${entry.summary}` : ""}
-                    </p>
-                  </div>
-                  <span className="shrink-0 text-[11.5px] whitespace-nowrap text-muted">
-                    {formatDateTime(entry.created_at)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section className="rounded-xl border border-line bg-surface p-5 shadow-[var(--shadow-card)]">
-          <div className="flex items-start gap-3">
-            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-brand-soft text-brand">
-              <ShieldCheck className="size-4.5" />
-            </span>
-            <div>
-              <h2 className="text-[15px] font-semibold text-ink">Isolation model</h2>
-              <p className="mt-0.5 text-[13px] text-muted">How the boundary is enforced</p>
-            </div>
-          </div>
-          <ul className="mt-4 space-y-3">
-            {[
-              "Every API request is verified against the identity provider's public keys.",
-              "The caller's profile pins exactly one tenant; every query filters by it.",
-              "Every mutation writes to an append-only audit log with actor, action and entity.",
-              "Backups and object storage are provisioned per deployment, with retention automation.",
-            ].map((point) => (
-              <li key={point} className="flex items-start gap-2.5">
-                <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-brand" />
-                <span className="text-[13px] leading-relaxed text-ink-soft">{point}</span>
+      <section className="mt-6 rounded-xl border border-line bg-surface shadow-[var(--shadow-card)]">
+        <div className="border-b border-line px-5 py-4">
+          <h2 className="text-[15px] font-semibold text-ink">Audit log</h2>
+          <p className="mt-0.5 text-[13px] text-muted">
+            Append-only, across every tenant — including every superadmin action here
+          </p>
+        </div>
+        {audit.isLoading ? (
+          <LoadingBlock label="Loading audit log…" />
+        ) : !audit.data?.length ? (
+          <EmptyState title="No audit events yet" />
+        ) : (
+          <ul className="divide-y divide-line">
+            {audit.data.map((entry) => (
+              <li key={entry.id} className="flex items-start gap-3 px-5 py-3">
+                <span className="mt-1 size-1.5 shrink-0 rounded-full bg-brand" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] leading-snug text-ink-soft">
+                    <strong className="font-semibold text-ink">{entry.actor_email ?? "System"}</strong>{" "}
+                    {entry.action}{" "}
+                    <span className="rounded bg-surface-2 px-1 py-0.5 font-mono text-[11px] text-muted">
+                      {entry.entity}
+                    </span>
+                    {entry.tenant_name ? ` · ${entry.tenant_name}` : ""}
+                    {entry.summary ? ` — ${entry.summary}` : ""}
+                  </p>
+                </div>
+                <span className="shrink-0 text-[11.5px] whitespace-nowrap text-muted">
+                  {formatDateTime(entry.created_at)}
+                </span>
               </li>
             ))}
           </ul>
-        </section>
-      </div>
+        )}
+      </section>
+
+      {creating ? (
+        <CreateTenantModal
+          onClose={() => setCreating(false)}
+          onCreated={(result) => {
+            setCreating(false);
+            setCredentials(result);
+            refreshAll();
+          }}
+        />
+      ) : null}
+
+      {editing ? (
+        <EditTenantModal
+          tenant={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            refreshAll();
+          }}
+        />
+      ) : null}
+
+      {deleting ? (
+        <DeleteTenantModal
+          tenant={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={() => {
+            setDeleting(null);
+            refreshAll();
+          }}
+        />
+      ) : null}
+
+      {credentials ? (
+        <CredentialsModal credential={credentials} onClose={() => setCredentials(null)} />
+      ) : null}
     </>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+
+function IconAction({
+  title,
+  onClick,
+  busy = false,
+  tone = "neutral",
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  busy?: boolean;
+  tone?: "neutral" | "warn" | "danger" | "success";
+  children: React.ReactNode;
+}) {
+  const tones = {
+    neutral: "text-muted hover:text-ink",
+    warn: "text-warn hover:text-warn",
+    danger: "text-danger hover:text-danger",
+    success: "text-success hover:text-success",
+  };
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      disabled={busy}
+      className={cn(
+        "grid size-8 place-items-center rounded-lg transition hover:bg-surface-2 disabled:opacity-50",
+        tones[tone],
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function numberOrNull(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
+}
+
+function CreateTenantModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (credential: CredentialResult) => void;
+}) {
+  const [name, setName] = useState("");
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminName, setAdminName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [plan, setPlan] = useState("trial");
+  const [customDomain, setCustomDomain] = useState("");
+  const [maxClients, setMaxClients] = useState("");
+  const [maxUsers, setMaxUsers] = useState("");
+  const [isDemo, setIsDemo] = useState(false);
+  const [sendEmail, setSendEmail] = useState(true);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    setError(null);
+    if (name.trim().length < 2) return setError("Firm name is required.");
+    if (!adminEmail.trim()) return setError("An admin email is required.");
+    setPending(true);
+    try {
+      const result = await createTenant({
+        name: name.trim(),
+        admin_email: adminEmail.trim(),
+        admin_name: adminName.trim() || undefined,
+        slug: slug.trim() || null,
+        plan,
+        custom_domain: customDomain.trim() || null,
+        max_clients: numberOrNull(maxClients),
+        max_users: numberOrNull(maxUsers),
+        is_demo: isDemo,
+        send_email: sendEmail,
+      });
+      onCreated(result.admin);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+      setPending(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="New tenant"
+      description="Provision a firm and its first admin login in one step."
+      width="md"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={pending}>
+            Cancel
+          </Button>
+          <Button onClick={submit} loading={pending}>
+            Create firm
+          </Button>
+        </>
+      }
+    >
+      {error ? (
+        <Alert tone="danger" className="mb-4">
+          {error}
+        </Alert>
+      ) : null}
+      <div className="grid gap-4">
+        <Field label="Firm name" required>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Amzad Amiri Professional Corporation" />
+        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Admin email" required>
+            <Input
+              type="email"
+              value={adminEmail}
+              onChange={(e) => setAdminEmail(e.target.value)}
+              placeholder="admin@firm.com"
+            />
+          </Field>
+          <Field label="Admin name">
+            <Input value={adminName} onChange={(e) => setAdminName(e.target.value)} placeholder="Nadia Amiri" />
+          </Field>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Slug / subdomain" hint="Blank auto-generates from the name">
+            <Input value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="amzad-amiri" />
+          </Field>
+          <Field label="Plan">
+            <NativeSelect value={plan} onChange={(e) => setPlan(e.target.value)}>
+              {PLAN_OPTIONS.map((p) => (
+                <option key={p} value={p} className="capitalize">
+                  {p}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+        </div>
+        <Field label="Custom domain (white-label)" hint="Optional — requires DNS setup">
+          <Input value={customDomain} onChange={(e) => setCustomDomain(e.target.value)} placeholder="app.firmname.com" />
+        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Max clients" hint="Blank = ∞">
+            <Input value={maxClients} onChange={(e) => setMaxClients(e.target.value)} placeholder="∞" inputMode="numeric" />
+          </Field>
+          <Field label="Max users" hint="Blank = ∞">
+            <Input value={maxUsers} onChange={(e) => setMaxUsers(e.target.value)} placeholder="∞" inputMode="numeric" />
+          </Field>
+        </div>
+        <Checkbox
+          checked={isDemo}
+          onChange={(e) => setIsDemo(e.target.checked)}
+          label={
+            <span>
+              Sandbox / demo tenant
+              <span className="block text-[12px] text-muted">For evaluation — keep real client data out of it.</span>
+            </span>
+          }
+        />
+        <Checkbox
+          checked={sendEmail}
+          onChange={(e) => setSendEmail(e.target.checked)}
+          label="Email the admin their sign-in credentials"
+        />
+      </div>
+    </Modal>
+  );
+}
+
+export function EditTenantModal({
+  tenant,
+  onClose,
+  onSaved,
+}: {
+  tenant: TenantSummary;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(tenant.name);
+  const [slug, setSlug] = useState(tenant.slug);
+  const [email, setEmail] = useState(tenant.admin_email ?? "");
+  const [plan, setPlan] = useState(tenant.plan);
+  const [customDomain, setCustomDomain] = useState(tenant.custom_domain ?? "");
+  const [isActive, setIsActive] = useState(tenant.is_active);
+  const [maxClients, setMaxClients] = useState(tenant.max_clients === null ? "" : String(tenant.max_clients));
+  const [maxUsers, setMaxUsers] = useState(tenant.max_users === null ? "" : String(tenant.max_users));
+  const [isDemo, setIsDemo] = useState(tenant.is_demo);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    setError(null);
+    setPending(true);
+    const payload: TenantEditInput = {
+      name: name.trim(),
+      slug: slug.trim(),
+      email: email.trim() || null,
+      plan,
+      custom_domain: customDomain.trim() || null,
+      is_active: isActive,
+      max_clients: numberOrNull(maxClients),
+      max_users: numberOrNull(maxUsers),
+      is_demo: isDemo,
+    };
+    try {
+      await updateTenant(tenant.id, payload);
+      onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+      setPending(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Edit tenant"
+      description="Update this firm's plan, limits and status."
+      width="md"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={pending}>
+            Cancel
+          </Button>
+          <Button onClick={submit} loading={pending}>
+            Save changes
+          </Button>
+        </>
+      }
+    >
+      {error ? (
+        <Alert tone="danger" className="mb-4">
+          {error}
+        </Alert>
+      ) : null}
+      <div className="grid gap-4">
+        <Field label="Firm name" required>
+          <Input value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Slug / subdomain">
+            <Input value={slug} onChange={(e) => setSlug(e.target.value)} />
+          </Field>
+          <Field label="Contact email">
+            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </Field>
+        </div>
+        <Field label="Custom domain (white-label)">
+          <Input value={customDomain} onChange={(e) => setCustomDomain(e.target.value)} placeholder="app.firmname.com" />
+        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Plan">
+            <NativeSelect value={plan} onChange={(e) => setPlan(e.target.value)}>
+              {[...new Set([tenant.plan, ...PLAN_OPTIONS])].map((p) => (
+                <option key={p} value={p} className="capitalize">
+                  {p}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+          <Field label="Status">
+            <NativeSelect value={isActive ? "active" : "suspended"} onChange={(e) => setIsActive(e.target.value === "active")}>
+              <option value="active">Active</option>
+              <option value="suspended">Suspended</option>
+            </NativeSelect>
+          </Field>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Max clients" hint="Blank = ∞">
+            <Input value={maxClients} onChange={(e) => setMaxClients(e.target.value)} placeholder="∞" inputMode="numeric" />
+          </Field>
+          <Field label="Max users" hint="Blank = ∞">
+            <Input value={maxUsers} onChange={(e) => setMaxUsers(e.target.value)} placeholder="∞" inputMode="numeric" />
+          </Field>
+        </div>
+        <Checkbox
+          checked={isDemo}
+          onChange={(e) => setIsDemo(e.target.checked)}
+          label={
+            <span>
+              Sandbox / demo tenant
+              <span className="block text-[12px] text-muted">For evaluation — keep real client data out of it.</span>
+            </span>
+          }
+        />
+      </div>
+    </Modal>
+  );
+}
+
+function DeleteTenantModal({
+  tenant,
+  onClose,
+  onDeleted,
+}: {
+  tenant: TenantSummary;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const [confirm, setConfirm] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const armed = confirm.trim() === tenant.slug;
+
+  const submit = async () => {
+    if (!armed) return;
+    setError(null);
+    setPending(true);
+    try {
+      await deleteTenant(tenant.id);
+      onDeleted();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+      setPending(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Delete tenant"
+      description="This permanently removes the firm and all of its data."
+      width="sm"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={pending}>
+            Cancel
+          </Button>
+          <Button variant="danger" onClick={submit} loading={pending} disabled={!armed}>
+            Delete permanently
+          </Button>
+        </>
+      }
+    >
+      {error ? (
+        <Alert tone="danger" className="mb-4">
+          {error}
+        </Alert>
+      ) : null}
+      <Alert tone="danger" className="mb-4">
+        Deleting <strong>{tenant.name}</strong> removes {tenant.clients} client
+        {tenant.clients === 1 ? "" : "s"}, {tenant.users} user{tenant.users === 1 ? "" : "s"}, and every
+        task, deadline and letter under it. This cannot be undone.
+      </Alert>
+      <Field label={`Type the slug "${tenant.slug}" to confirm`}>
+        <Input value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder={tenant.slug} autoFocus />
+      </Field>
+    </Modal>
+  );
+}
+
+export function CredentialsModal({
+  credential,
+  onClose,
+  title = "Firm created",
+}: {
+  credential: CredentialResult;
+  onClose: () => void;
+  title?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(credential.temp_password);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard blocked — the password is visible to copy by hand
+    }
+  };
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={title}
+      width="sm"
+      footer={<Button onClick={onClose}>Done</Button>}
+    >
+      <Alert tone={credential.email_sent ? "success" : "warn"} className="mb-4">
+        {credential.message}
+      </Alert>
+      <div className="space-y-3 text-sm">
+        <div>
+          <p className="text-[12px] font-medium text-muted uppercase">Admin login</p>
+          <p className="font-medium text-ink">{credential.email}</p>
+        </div>
+        <div>
+          <p className="text-[12px] font-medium text-muted uppercase">Temporary password</p>
+          <div className="mt-1 flex items-center gap-2">
+            <code className="flex-1 rounded-lg border border-line bg-surface-2 px-3 py-2 font-mono text-[13px] text-ink">
+              {credential.temp_password}
+            </code>
+            <Button size="sm" variant="ghost" icon={copied ? <Check className="size-4" /> : <Copy className="size-4" />} onClick={copy}>
+              {copied ? "Copied" : "Copy"}
+            </Button>
+          </div>
+          <p className="mt-1 text-[12px] text-muted">
+            They&apos;ll be forced to set a new password on first sign-in.
+          </p>
+        </div>
+      </div>
+    </Modal>
   );
 }

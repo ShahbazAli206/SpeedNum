@@ -29,6 +29,12 @@ class CurrentUser:
     profile: Profile
     tenant: Tenant | None
     claims: TokenClaims
+    # True when a platform superadmin is browsing a firm via the impersonation
+    # (act_as_tenant) claim rather than their own tenant. `tenant` is then the
+    # firm being viewed, not the superadmin's own (they have none). Every
+    # tenant-scoped router serves that firm's data automatically as a result;
+    # audit rows still record the superadmin's real identity as the actor.
+    impersonating: bool = False
 
     @property
     def id(self) -> uuid.UUID:
@@ -112,11 +118,27 @@ async def get_current_user(
     if profile.tenant_id is not None:
         tenant = await session.get(Tenant, profile.tenant_id)
 
+    # Platform-superadmin impersonation: a signed act_as_tenant claim swaps the
+    # acting tenant to the firm being viewed, so every tenant-scoped router
+    # serves that firm's data. Gated on is_superadmin as defence in depth —
+    # the claim is only ever minted for a superadmin, but even a forged-in one
+    # (impossible without the signing key) would be ignored for anyone else.
+    impersonating = False
+    act_as = claims.raw.get("act_as_tenant") if profile.is_superadmin else None
+    if act_as:
+        try:
+            acting = await session.get(Tenant, uuid.UUID(str(act_as)))
+        except ValueError:
+            acting = None
+        if acting is not None:
+            tenant = acting
+            impersonating = True
+
     now = datetime.now(timezone.utc)
     if profile.last_seen_at is None or (now - profile.last_seen_at) > timedelta(minutes=10):
         profile.last_seen_at = now
 
-    return CurrentUser(profile=profile, tenant=tenant, claims=claims)
+    return CurrentUser(profile=profile, tenant=tenant, claims=claims, impersonating=impersonating)
 
 
 CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]

@@ -84,6 +84,10 @@ export interface Me {
   profile: Profile;
   tenant: Tenant | null;
   unread_notifications: number;
+  /** True when a platform superadmin is viewing this firm via impersonation.
+   *  The firm shell shows the "viewing as superadmin / exit to platform"
+   *  banner off this flag. */
+  is_impersonating?: boolean;
 }
 
 export interface Invitation {

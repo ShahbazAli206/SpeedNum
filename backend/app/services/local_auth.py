@@ -77,17 +77,38 @@ def _routing_metadata(*, tenant_id: uuid.UUID | None, client_id: uuid.UUID | Non
     }
 
 
-def create_access_token(profile: Profile) -> str:
+def create_access_token(profile: Profile, *, act_as_tenant: uuid.UUID | None = None) -> str:
+    """Mint an access token for `profile`.
+
+    `act_as_tenant` is the platform-superadmin impersonation hook: when set, the
+    token still identifies the real superadmin (its `sub` is their profile id, so
+    every mutation is audited under their email), but it also carries an
+    `act_as_tenant` claim and its routing metadata points at that firm. The
+    backend only honours the claim for an actual superadmin (deps.get_current_user),
+    and the frontend proxy reads the metadata to route them onto the firm surface.
+    The claim is only ever minted by the superadmin-only impersonate endpoint, and
+    the token is signed, so it can't be forged into existence."""
     ring = jwt_keys.keyring()
     now = datetime.now(timezone.utc)
+    if act_as_tenant is not None:
+        metadata = {
+            "tenant_id": str(act_as_tenant),
+            "client_id": None,
+            "is_portal": False,
+            "is_staff": True,
+        }
+    else:
+        metadata = _routing_metadata(tenant_id=profile.tenant_id, client_id=profile.client_id)
     payload = {
         "sub": str(profile.id),
         "email": profile.email,
         "role": "authenticated",
-        "user_metadata": _routing_metadata(tenant_id=profile.tenant_id, client_id=profile.client_id),
+        "user_metadata": metadata,
         "iat": now,
         "exp": now + timedelta(seconds=settings.access_token_ttl_seconds),
     }
+    if act_as_tenant is not None:
+        payload["act_as_tenant"] = str(act_as_tenant)
     return pyjwt.encode(payload, ring.private_key, algorithm="EdDSA", headers={"kid": ring.kid})
 
 

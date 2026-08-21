@@ -22,6 +22,14 @@ export const BACKEND_API_URL = `${RAW_API_BASE.replace(/\/+$/, "")}/api/v1`;
 
 export const ACCESS_COOKIE = "sn_access";
 export const REFRESH_COOKIE = "sn_refresh";
+/**
+ * Set while a platform superadmin is impersonating a firm. Holds the target
+ * tenant id. The refresh cookie stays the superadmin's own throughout — this
+ * is the only marker that says "re-mint the short-lived access token as an
+ * impersonation token, not a plain one" (see refreshFromCookie). Dropping it
+ * ends the impersonation on the next refresh.
+ */
+export const ACT_AS_COOKIE = "sn_act_as";
 
 // The backend deliberately doesn't return the refresh token's real expiry in
 // its JSON body (only via the cookie it sets, matching its own
@@ -124,13 +132,58 @@ export async function proxyAuthAndSetCookies(
   return new NextResponse(text, { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
+function setAccessCookie(
+  jar: { set: (name: string, value: string, opts: Record<string, unknown>) => void },
+  token: string,
+  maxAge: number,
+): void {
+  jar.set(ACCESS_COOKIE, token, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge,
+  });
+}
+
+/**
+ * Exchange a superadmin's access token for a short-lived impersonation token
+ * scoped to `tenantId` (backend POST /admin/tenants/{id}/impersonate). Returns
+ * null on any failure — the caller falls back to the plain superadmin token and
+ * drops the impersonation, which is the correct behaviour if the firm was
+ * deleted, suspended, or the caller is no longer a superadmin.
+ */
+export async function mintImpersonationToken(
+  bearer: string,
+  tenantId: string,
+): Promise<{ access_token: string; expires_in: number; tenant_name: string } | null> {
+  try {
+    const response = await fetch(`${BACKEND_API_URL}/admin/tenants/${tenantId}/impersonate`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${bearer}` },
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as { access_token: string; expires_in: number; tenant_name: string };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Shared by /api/auth/refresh (explicit client-triggered refresh) and
  * /api/auth/session (page-load bootstrap, when there's no access cookie yet
  * to read directly) — both need "read the refresh cookie, ask the backend
  * for a fresh pair, re-mint both cookies" and nothing else.
+ *
+ * If the impersonation marker (ACT_AS_COOKIE) is set, the freshly minted
+ * superadmin access token is immediately traded for an impersonation token so
+ * a superadmin's view of a firm survives the 15-minute access-token expiry.
+ * The refresh cookie itself always stays the superadmin's own.
  */
-export async function refreshFromCookie(): Promise<
+export async function refreshFromCookie(
+  { ignoreImpersonation = false }: { ignoreImpersonation?: boolean } = {},
+): Promise<
   { ok: true; accessToken: string; expiresIn: number } | { ok: false; status: number; body: string }
 > {
   const { cookies } = await import("next/headers");
@@ -159,6 +212,7 @@ export async function refreshFromCookie(): Promise<
   if (!backendResponse.ok) {
     jar.delete(REFRESH_COOKIE);
     jar.delete(ACCESS_COOKIE);
+    jar.delete(ACT_AS_COOKIE);
     return { ok: false, status: backendResponse.status, body: text };
   }
 
@@ -174,13 +228,18 @@ export async function refreshFromCookie(): Promise<
       maxAge: REFRESH_COOKIE_MAX_AGE_SECONDS,
     });
   }
-  jar.set(ACCESS_COOKIE, parsed.access_token, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: parsed.expires_in,
-  });
 
+  const actingTenant = ignoreImpersonation ? undefined : jar.get(ACT_AS_COOKIE)?.value;
+  if (actingTenant) {
+    const impersonation = await mintImpersonationToken(parsed.access_token, actingTenant);
+    if (impersonation) {
+      setAccessCookie(jar, impersonation.access_token, impersonation.expires_in);
+      return { ok: true, accessToken: impersonation.access_token, expiresIn: impersonation.expires_in };
+    }
+    // Couldn't re-enter the firm — end the impersonation and fall back.
+    jar.delete(ACT_AS_COOKIE);
+  }
+
+  setAccessCookie(jar, parsed.access_token, parsed.expires_in);
   return { ok: true, accessToken: parsed.access_token, expiresIn: parsed.expires_in };
 }

@@ -146,3 +146,40 @@ export async function logout(): Promise<void> {
     setAccessToken(null);
   }
 }
+
+/**
+ * Platform-superadmin impersonation. `startImpersonation` swaps the in-memory
+ * access token for one scoped to that firm; the caller then does a full-page
+ * navigation so the proxy and firm shell re-read the new session. `exit` puts
+ * the superadmin back on their own session the same way. Both talk to the
+ * BFF route (src/app/api/auth/impersonate) — the cookie work lives there.
+ */
+export async function startImpersonation(tenantId: string): Promise<{ tenant_name: string }> {
+  const response = await fetch("/api/auth/impersonate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tenant_id: tenantId }),
+  });
+  const text = await response.text();
+  const parsed = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    throw new Error(
+      parsed && typeof parsed === "object" && "detail" in parsed
+        ? String((parsed as { detail: unknown }).detail)
+        : "Could not open that firm.",
+    );
+  }
+  setAccessToken(parsed.access_token);
+  return { tenant_name: parsed.tenant_name };
+}
+
+export async function exitImpersonation(): Promise<void> {
+  try {
+    const response = await fetch("/api/auth/impersonate", { method: "DELETE" });
+    const text = await response.text();
+    const parsed = text ? JSON.parse(text) : null;
+    setAccessToken(parsed?.access_token ?? null);
+  } catch {
+    setAccessToken(null);
+  }
+}

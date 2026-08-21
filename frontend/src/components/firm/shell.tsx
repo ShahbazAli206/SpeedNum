@@ -20,6 +20,7 @@ import { AlertBell, UnreadDot } from "@/components/dashboard/alert-bell";
 import { CommandPalette } from "@/components/dashboard/command-palette";
 import { DesktopAppButton } from "@/components/dashboard/desktop-app-button";
 import { ForcePasswordModal } from "@/components/dashboard/force-password-modal";
+import { ImpersonationBanner } from "@/components/dashboard/impersonation-banner";
 import { SignOutButton, useSignOut } from "@/components/dashboard/sign-out-button";
 import { UrgentDeadlineBanner } from "@/components/dashboard/urgent-deadline-banner";
 import { Icon } from "@/components/icon";
@@ -402,6 +403,8 @@ function FirmShellInner({ children }: { children: ReactNode }) {
             />
           </div>
         </header>
+
+        <ImpersonationBanner />
 
         <UrgentDeadlineBanner />
 

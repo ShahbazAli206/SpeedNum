@@ -166,6 +166,17 @@ class Settings(BaseSettings):
     # reminder digest has no human sender, for instance.
     email_reply_to: str = Field(default="", alias="EMAIL_REPLY_TO")
 
+    # --- Vercel Web Analytics (superadmin "Reach" page) -------------------------
+    # Server-only credentials the /admin/reach endpoint uses to read the public
+    # Web Analytics query API (https://api.vercel.com/v1/query/web-analytics).
+    # NEVER expose these to the browser (no NEXT_PUBLIC_ prefix) — the token can
+    # read all of the team's analytics. Absent = the Reach page shows a setup
+    # card instead of live numbers. team_id is only needed for team-owned
+    # projects; personal-account projects omit it.
+    vercel_api_token: str = Field(default="", alias="VERCEL_API_TOKEN")
+    vercel_project_id: str = Field(default="", alias="VERCEL_PROJECT_ID")
+    vercel_team_id: str = Field(default="", alias="VERCEL_TEAM_ID")
+
     # --- Reminder scheduler ----------------------------------------------------
     # An in-process daily sweep (services/scheduler.py). Turn it off if you drive
     # POST /admin/reminders/sweep from an external cron, or if you run more than

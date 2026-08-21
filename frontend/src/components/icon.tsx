@@ -5,6 +5,7 @@ import {
   CalendarCheck,
   CalendarClock,
   ChartColumn,
+  ChartLine,
   FileSpreadsheet,
   FileText,
   Folder,
@@ -40,6 +41,7 @@ import {
 const ICONS: Record<string, LucideIcon> = {
   "arrow-right": ArrowRight,
   "bar-chart-3": ChartColumn,
+  "line-chart": ChartLine,
   bell: Bell,
   "bell-ring": BellRing,
   "calendar-check": CalendarCheck,

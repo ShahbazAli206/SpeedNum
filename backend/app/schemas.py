@@ -190,6 +190,102 @@ class MeResponse(BaseModel):
     profile: ProfileRead
     tenant: TenantRead | None = None
     unread_notifications: int = 0
+    # True when a platform superadmin is viewing this firm via impersonation
+    # (deps.CurrentUser.impersonating). The firm shell shows a "viewing as
+    # superadmin / exit to platform" banner off this flag.
+    is_impersonating: bool = False
+
+
+# --- Platform superadmin console (cross-tenant) ------------------------------
+# The tenants surface at frontend/src/app/(firm)/admin: every firm on the
+# platform, with create / edit / suspend / delete / impersonate / resend-invite.
+# `max_clients` / `max_users` / `is_demo` live in Tenant.settings (JSONB) so no
+# migration is needed; null caps read as unlimited.
+class TenantAdminSummary(BaseModel):
+    """One row in the tenants table."""
+
+    id: uuid.UUID
+    name: str
+    slug: str
+    plan: str
+    seats: int
+    is_active: bool
+    is_demo: bool = False
+    custom_domain: str | None = None
+    admin_email: str | None = None
+    trial_ends_at: datetime | None = None
+    created_at: datetime | None = None
+    clients: int = 0
+    users: int = 0
+    signed_letters: int = 0
+    max_clients: int | None = None
+    max_users: int | None = None
+
+
+class TenantAdminDetail(TenantAdminSummary):
+    """The tenant detail page: the summary plus firm profile and the admin login."""
+
+    legal_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    website: str | None = None
+    brand_color: str = "#1d4ed8"
+    accent_color: str = "#0f172a"
+    logo_url: str | None = None
+    email_from_name: str | None = None
+    admin_id: uuid.UUID | None = None
+    admin_name: str | None = None
+    admin_last_seen: datetime | None = None
+
+
+class TenantAdminCreate(BaseModel):
+    """Provision a brand-new firm and its first admin login in one step."""
+
+    name: str = Field(min_length=2, max_length=120)
+    admin_email: EmailStr
+    admin_name: str = Field(default="", max_length=120)
+    slug: str | None = Field(default=None, max_length=120)
+    plan: str = Field(default="trial", max_length=40)
+    custom_domain: str | None = Field(default=None, max_length=200)
+    max_clients: int | None = Field(default=None, ge=0)
+    max_users: int | None = Field(default=None, ge=0)
+    is_demo: bool = False
+    send_email: bool = True
+
+
+class TenantAdminEdit(BaseModel):
+    """Edit an existing firm — the superadmin edit-tenant form."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    slug: str | None = Field(default=None, min_length=1, max_length=120)
+    email: str | None = Field(default=None, max_length=200)
+    custom_domain: str | None = Field(default=None, max_length=200)
+    plan: str | None = Field(default=None, max_length=40)
+    is_active: bool | None = None
+    max_clients: int | None = Field(default=None, ge=0)
+    max_users: int | None = Field(default=None, ge=0)
+    is_demo: bool | None = None
+
+
+class ImpersonateResult(BaseModel):
+    """A short-lived access token that puts the caller (a superadmin) into a
+    firm. No refresh token — the superadmin's own session refreshes it back
+    into being (frontend re-mints on each refresh while the act_as cookie is
+    set), and dropping that cookie ends the impersonation."""
+
+    access_token: str
+    expires_in: int
+    tenant_id: uuid.UUID
+    tenant_name: str
+
+
+class TenantProvisionResult(BaseModel):
+    """The outcome of POST /admin/tenants — the new firm plus its admin's
+    one-time credentials (echoed once so the superadmin can hand them over if
+    email delivery isn't configured)."""
+
+    tenant: TenantAdminDetail
+    admin: CredentialResult
 
 
 class BootstrapRequest(BaseModel):
