@@ -16,6 +16,7 @@ import { useState } from "react";
 import { RichTextEditor } from "@/components/editor/rich-text-editor";
 import { LetterDocument } from "@/components/engagement/letter-document";
 import { SignaturePad } from "@/components/engagement/signature-pad";
+import { useConfirm } from "@/components/confirm";
 import { useToast } from "@/components/toast";
 import { Button, Field, Input, Select } from "@/components/ui";
 import { ApiError } from "@/lib/api";
@@ -71,6 +72,7 @@ export function EngagementDetailClient({
   firmLogoUrl: string | null;
 }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const router = useRouter();
 
   const [letter, setLetter] = useState(initialLetter);
@@ -174,8 +176,9 @@ export function EngagementDetailClient({
       if (updated) toast.success(letter.status === "draft" ? "Letter sent" : "Letter resent", `${updated.recipient_email} will get a signing link.`);
     });
 
-  const onVoid = () => {
-    if (!window.confirm("Void this letter? It can no longer be sent or signed.")) return;
+  const onVoid = async () => {
+    const ok = await confirm({ description: "Void this letter? It can no longer be sent or signed.", confirmLabel: "Void", danger: true });
+    if (!ok) return;
     withError("void", () => voidEngagement(letter.id)).then((updated) => {
       if (updated) toast.success("Letter voided");
     });
@@ -195,7 +198,8 @@ export function EngagementDetailClient({
   };
 
   const onDelete = async () => {
-    if (!window.confirm("Delete this letter? This cannot be undone.")) return;
+    const ok = await confirm({ description: "Delete this letter? This cannot be undone.", confirmLabel: "Delete", danger: true });
+    if (!ok) return;
     setBusyAction("delete");
     try {
       await deleteEngagement(letter.id);
@@ -207,8 +211,12 @@ export function EngagementDetailClient({
     }
   };
 
-  const onMarkSigned = () => {
-    if (!window.confirm("Mark as signed manually? Use this only for a signature captured outside the app (paper, email).")) return;
+  const onMarkSigned = async () => {
+    const ok = await confirm({
+      description: "Mark as signed manually? Use this only for a signature captured outside the app (paper, email).",
+      confirmLabel: "Mark as signed",
+    });
+    if (!ok) return;
     withError("mark-signed", () => markEngagementSigned(letter.id, { signer_name: letter.recipient_name ?? undefined })).then(
       (updated) => {
         if (updated) toast.success("Marked as signed");

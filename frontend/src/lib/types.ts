@@ -139,6 +139,9 @@ export interface Client {
   overdue_deadlines: number;
   next_due_date: string | null;
   service_count: number;
+  /** True once a client-portal login has actually authenticated — unlike
+   *  `portal_enabled`, which just means an invite was sent. */
+  portal_signed_in: boolean;
 }
 
 /** Response for POST /clients/{id}/portal-invite — covers both the first

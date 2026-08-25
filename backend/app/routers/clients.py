@@ -62,6 +62,7 @@ async def _aggregates(session: SessionDep, client_ids: list[uuid.UUID]) -> dict[
             "overdue_deadlines": 0,
             "next_due_date": None,
             "service_count": 0,
+            "portal_signed_in": False,
         }
         for cid in client_ids
     }
@@ -96,6 +97,18 @@ async def _aggregates(session: SessionDep, client_ids: list[uuid.UUID]) -> dict[
     )
     for cid, count in service_rows:
         out[cid]["service_count"] = count
+
+    # `last_seen_at` is set by deps.get_current_user on every authenticated
+    # request (users.py maps the same column to "last sign-in" on the Users
+    # page) — a client-portal login with it set has actually signed in at
+    # least once, as opposed to merely having an invite outstanding.
+    signed_in_rows = await session.execute(
+        select(Profile.client_id)
+        .where(Profile.client_id.in_(client_ids), Profile.last_seen_at.isnot(None))
+        .distinct()
+    )
+    for (cid,) in signed_in_rows:
+        out[cid]["portal_signed_in"] = True
 
     return out
 

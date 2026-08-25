@@ -20,6 +20,7 @@ import { useMemo, useState } from "react";
 import { KpiTile } from "@/components/charts";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { DashboardHeader } from "@/components/dashboard/page-shell";
+import { useConfirm } from "@/components/confirm";
 import { useToast } from "@/components/toast";
 import { ButtonLink, Select } from "@/components/ui";
 import { del, patch } from "@/lib/api";
@@ -89,6 +90,7 @@ export function WorkflowsClient({
   assignees: string[];
 }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const router = useRouter();
   const [view, setView] = useState<"board" | "table">("board");
   const [typeFilter, setTypeFilter] = useState<"all" | TaskType>("all");
@@ -152,9 +154,8 @@ export function WorkflowsClient({
   };
 
   const remove = async (task: Task) => {
-    if (typeof window !== "undefined" && !window.confirm(`Delete "${task.title}"? This can't be undone.`)) {
-      return;
-    }
+    const ok = await confirm({ description: `Delete "${task.title}"? This can't be undone.`, confirmLabel: "Delete", danger: true });
+    if (!ok) return;
     try {
       await del(`/tasks/${task.id}`);
       setRemoved((current) => new Set(current).add(task.id));

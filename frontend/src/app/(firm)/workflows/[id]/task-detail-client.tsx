@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, type ReactNode } from "react";
 
+import { useConfirm } from "@/components/confirm";
 import { useToast } from "@/components/toast";
 import { Button, EmptyState, Field, Input, LoadingBlock, Select, Textarea } from "@/components/ui";
 import { del, patch, post } from "@/lib/api";
@@ -76,6 +77,7 @@ export function TaskDetailClient({
   isLive: boolean;
 }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const router = useRouter();
 
   const [deleted, setDeleted] = useState(false);
@@ -144,7 +146,8 @@ export function TaskDetailClient({
   const [deleting, setDeleting] = useState(false);
 
   const removeTask = async () => {
-    if (typeof window !== "undefined" && !window.confirm(`Delete "${title}"? This can't be undone.`)) return;
+    const ok = await confirm({ description: `Delete "${title}"? This can't be undone.`, confirmLabel: "Delete", danger: true });
+    if (!ok) return;
     setDeleting(true);
     try {
       await del(`/tasks/${task.id}`);

@@ -20,6 +20,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
+import { useConfirm } from "@/components/confirm";
 import { useToast } from "@/components/toast";
 import { Button, Card, CardHeader, Field, Input, LoadingBlock, Modal, Select, Tab, Tabs } from "@/components/ui";
 import { ApiError, del, patch, post } from "@/lib/api";
@@ -176,6 +177,7 @@ export function ClientDetailClient({
   isLive: boolean;
 }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const router = useRouter();
   const session = useSession();
   const [tab, setTab] = useState<TabId>(initialTab ?? "overview");
@@ -252,14 +254,13 @@ export function ClientDetailClient({
   };
 
   const deleteClient = async () => {
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm(
-        `Delete ${client.business_name}? This removes the client record and everything linked to it — deadlines, tasks, letters and files. This can't be undone.`,
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: "Delete client?",
+      description: `Delete ${client.business_name}? This removes the client record and everything linked to it — deadlines, tasks, letters and files. This can't be undone.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
     setDeleting(true);
     try {
       await del(`/clients/${client.id}`);
@@ -411,7 +412,12 @@ export function ClientDetailClient({
   };
 
   const removeFile = async (file: ClientDocument) => {
-    if (typeof window !== "undefined" && !window.confirm(`Delete "${file.name}"? This can't be undone.`)) return;
+    const ok = await confirm({
+      description: `Delete "${file.name}"? This can't be undone.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await del(`/clients/${client.id}/documents/${file.id}`);
       toast.success("File removed", file.name);

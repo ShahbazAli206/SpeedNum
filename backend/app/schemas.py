@@ -486,6 +486,11 @@ class ClientRead(ORMModel):
     overdue_deadlines: int = 0
     next_due_date: date | None = None
     service_count: int = 0
+    # True once a client-portal login for this client has actually
+    # authenticated — as opposed to `portal_enabled`, which just means an
+    # invite was sent. Always False on a just-created client (no aggregates
+    # run yet) and on one never invited to begin with.
+    portal_signed_in: bool = False
 
 
 class PortalInviteResult(BaseModel):

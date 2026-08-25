@@ -3,6 +3,7 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import type { Metadata, Viewport } from "next";
 import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 
+import { ConfirmProvider } from "@/components/confirm";
 import { ToastProvider } from "@/components/toast";
 import { SITE } from "@/lib/site";
 
@@ -83,7 +84,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         >
           Skip to content
         </a>
-        <ToastProvider>{children}</ToastProvider>
+        <ToastProvider>
+          <ConfirmProvider>{children}</ConfirmProvider>
+        </ToastProvider>
         {/* Privacy-friendly, cookieless. No-ops off Vercel and in dev, so they
             cost nothing locally and start collecting once deployed — the data
             the superadmin Reach page surfaces. */}

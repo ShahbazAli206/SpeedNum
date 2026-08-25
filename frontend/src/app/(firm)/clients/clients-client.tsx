@@ -17,6 +17,7 @@ import { useState } from "react";
 import { KpiTile } from "@/components/charts";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { DashboardHeader, KpiRow } from "@/components/dashboard/page-shell";
+import { useConfirm } from "@/components/confirm";
 import { useToast } from "@/components/toast";
 import { Button, ButtonLink, Modal, Select, toOptions } from "@/components/ui";
 import { ApiError, del, post } from "@/lib/api";
@@ -77,6 +78,7 @@ export function ClientsClient({
   isLive: boolean;
 }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const router = useRouter();
   const session = useSession();
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -87,14 +89,13 @@ export function ClientsClient({
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const deleteClient = async (row: ClientRow) => {
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm(
-        `Delete ${row.business_name}? This removes the client record and everything linked to it — deadlines, tasks, letters and files. This can't be undone.`,
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: "Delete client?",
+      description: `Delete ${row.business_name}? This removes the client record and everything linked to it — deadlines, tasks, letters and files. This can't be undone.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
     setDeletingId(row.id);
     try {
       await del(`/clients/${row.id}`);
