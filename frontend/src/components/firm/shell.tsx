@@ -410,9 +410,14 @@ function FirmShellInner({ children }: { children: ReactNode }) {
                   disabled: true,
                 },
                 {
+                  label: "My account",
+                  icon: <UserRound className="size-3.5" />,
+                  separated: true,
+                  onSelect: () => router.push("/account"),
+                },
+                {
                   label: "Firm settings",
                   icon: <Settings className="size-3.5" />,
-                  separated: true,
                   onSelect: () => router.push("/settings"),
                 },
                 {

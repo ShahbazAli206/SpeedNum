@@ -1,17 +1,28 @@
 "use client";
 
-import { Building2, Lock, Bell as BellIcon, Palette } from "lucide-react";
-import { useState } from "react";
+import { Building2, Lock, Bell as BellIcon, Palette, UserRound } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useToast } from "@/components/toast";
 import { Button, Field, Input, Switch } from "@/components/ui";
-import { post } from "@/lib/api";
+import { patch, post } from "@/lib/api";
 import { AUTH_CONFIGURED, validatePassword } from "@/lib/auth";
 import { DEMO_ACCOUNT } from "@/lib/demo";
+import { useSession } from "@/lib/session";
 
 export function SettingsClient() {
   const toast = useToast();
+  const { me, isLoading, refresh } = useSession();
+
+  const [name, setName] = useState({ fullName: "" });
+  const [savingName, setSavingName] = useState(false);
+
+  useEffect(() => {
+    if (!me) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setName({ fullName: me.profile.full_name ?? "" });
+  }, [me]);
 
   const [profile, setProfile] = useState({
     business: DEMO_ACCOUNT.business,
@@ -34,6 +45,26 @@ export function SettingsClient() {
 
   const set = (key: keyof typeof profile) => (event: React.ChangeEvent<HTMLInputElement>) =>
     setProfile((current) => ({ ...current, [key]: event.target.value }));
+
+  const saveName = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!name.fullName.trim()) {
+      toast.error("Name is required");
+      return;
+    }
+    setSavingName(true);
+    try {
+      if (AUTH_CONFIGURED) {
+        await patch("/auth/me", { full_name: name.fullName.trim() });
+        refresh();
+      }
+      toast.success("Name updated", "Shown across the portal and on documents you sign.");
+    } catch (error) {
+      toast.error("Could not update your name", error instanceof Error ? error.message : "Try again.");
+    } finally {
+      setSavingName(false);
+    }
+  };
 
   const saveProfile = (event: React.FormEvent) => {
     event.preventDefault();
@@ -71,6 +102,31 @@ export function SettingsClient() {
 
   return (
     <div className="space-y-5">
+      <Panel
+        icon={<UserRound className="size-4.5" />}
+        title="Your profile"
+        description="Your name, shown across the portal and on documents you sign"
+      >
+        <form onSubmit={saveName}>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Full name" required>
+              <Input
+                value={name.fullName}
+                onChange={(event) => setName({ fullName: event.target.value })}
+                disabled={isLoading}
+                autoComplete="name"
+              />
+            </Field>
+            <Field label="Email" hint="Email cannot be changed here.">
+              <Input value={me?.profile.email ?? DEMO_ACCOUNT.email} disabled />
+            </Field>
+          </div>
+          <Button type="submit" className="mt-5" loading={savingName}>
+            Save name
+          </Button>
+        </form>
+      </Panel>
+
       <Panel
         icon={<Building2 className="size-4.5" />}
         title="Business profile"

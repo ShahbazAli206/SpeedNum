@@ -114,7 +114,9 @@ export function NewClientClient({
 
     const trimmedName = businessName.trim();
     if (!trimmedName) {
-      setError("Business / trade name is required.");
+      const message = "Business / trade name is required.";
+      setError(message);
+      toast.error("Could not add client", message);
       return;
     }
 
@@ -122,7 +124,13 @@ export function NewClientClient({
       (field) => field.is_required && !customValues[field.id]?.trim(),
     );
     if (missingRequired) {
-      setError(`"${missingRequired.label}" is required.`);
+      // Previously this only set the inline red text below the form — easy to
+      // miss on a long page, and unlike every other failure path here (which
+      // all toast), it left a click on "Create client" looking like it did
+      // nothing at all.
+      const message = `"${missingRequired.label}" is required.`;
+      setError(message);
+      toast.error("Could not add client", message);
       return;
     }
 
