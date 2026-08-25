@@ -19,10 +19,11 @@ import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { DashboardHeader, KpiRow } from "@/components/dashboard/page-shell";
 import { useToast } from "@/components/toast";
 import { Button, ButtonLink, Modal, Select, toOptions } from "@/components/ui";
-import { post } from "@/lib/api";
+import { ApiError, del, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import type { ClientRow } from "@/lib/firm-demo";
 import { formatDate, formatMoney } from "@/lib/format";
+import { useSession } from "@/lib/session";
 import type { Client } from "@/lib/types";
 
 interface BulkRow {
@@ -77,11 +78,37 @@ export function ClientsClient({
 }) {
   const toast = useToast();
   const router = useRouter();
+  const session = useSession();
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkRows, setBulkRows] = useState<BulkRow[]>(() =>
     Array.from({ length: 5 }, blankBulkRow),
   );
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const deleteClient = async (row: ClientRow) => {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `Delete ${row.business_name}? This removes the client record and everything linked to it — deadlines, tasks, letters and files. This can't be undone.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingId(row.id);
+    try {
+      await del(`/clients/${row.id}`);
+      toast.success("Client deleted", `${row.business_name} has been removed.`);
+      router.refresh();
+    } catch (error) {
+      toast.error(
+        "Could not delete this client",
+        error instanceof ApiError ? error.message : "Please try again.",
+      );
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const active = clients.filter((client) => client.status === "active");
   const recurring = clients.reduce((total, client) => total + client.annual_fee, 0);
@@ -192,6 +219,28 @@ export function ClientsClient({
       sortValue: (row) => row.status,
     },
   ];
+
+  if (isLive && session.isAdmin) {
+    columns.push({
+      key: "actions",
+      header: "",
+      align: "right",
+      cell: (row) => (
+        <button
+          type="button"
+          disabled={deletingId === row.id}
+          onClick={(event) => {
+            event.stopPropagation();
+            void deleteClient(row);
+          }}
+          aria-label={`Delete ${row.business_name}`}
+          className="rounded-lg p-1.5 text-muted transition hover:bg-danger-soft hover:text-danger disabled:opacity-50"
+        >
+          <Trash2 className="size-4" />
+        </button>
+      ),
+    });
+  }
 
   const readyCount = bulkRows.filter((row) => row.business.trim() !== "").length;
 

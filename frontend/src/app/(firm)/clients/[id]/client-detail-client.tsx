@@ -6,6 +6,7 @@ import {
   FileText,
   Mail,
   MapPin,
+  Pencil,
   Phone,
   Plus,
   Send,
@@ -16,11 +17,12 @@ import {
   Users,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
 import { useToast } from "@/components/toast";
 import { Button, Card, CardHeader, Field, Input, LoadingBlock, Modal, Select, Tab, Tabs } from "@/components/ui";
-import { ApiError, del, post } from "@/lib/api";
+import { ApiError, del, patch, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { assignClientService } from "@/lib/client-services";
 import type {
@@ -36,9 +38,12 @@ import type {
 import { CredentialsModal } from "@/components/dashboard/credentials-modal";
 import { formatBytes, formatDate, formatMoney, titleCase } from "@/lib/format";
 import { useApi } from "@/lib/hooks";
+import { useSession } from "@/lib/session";
 import { clientDocumentUrl, UploadError, uploadClientDocument } from "@/lib/storage";
 import type {
+  Client,
   ClientDocument,
+  ClientType,
   CredentialResult,
   Frequency,
   PortalInviteResult,
@@ -46,6 +51,22 @@ import type {
   TaskPriority,
   TaskStatus,
 } from "@/lib/types";
+
+const CLIENT_TYPE_OPTIONS: { value: ClientType; label: string }[] = [
+  { value: "corporation", label: "Corporation" },
+  { value: "sole_proprietor", label: "Sole proprietor" },
+  { value: "partnership", label: "Partnership" },
+  { value: "individual", label: "Individual" },
+  { value: "nonprofit", label: "Nonprofit" },
+  { value: "trust", label: "Trust" },
+];
+
+const CLIENT_STATUS_OPTIONS = [
+  { value: "active", label: "Active" },
+  { value: "prospect", label: "Prospect" },
+  { value: "inactive", label: "Inactive" },
+  { value: "archived", label: "Archived" },
+];
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -155,7 +176,100 @@ export function ClientDetailClient({
   isLive: boolean;
 }) {
   const toast = useToast();
+  const router = useRouter();
+  const session = useSession();
   const [tab, setTab] = useState<TabId>(initialTab ?? "overview");
+
+  // Edit client — a real PATCH to /clients/{id}. Refreshes the server
+  // component afterwards rather than patching local state, since the header
+  // shows several fields (owner_name, aggregates) this page doesn't compute
+  // client-side.
+  const [editOpen, setEditOpen] = useState(false);
+  const [editBusinessName, setEditBusinessName] = useState(client.business_name);
+  const [editLegalName, setEditLegalName] = useState(client.legal_name);
+  const [editCode, setEditCode] = useState(client.code ?? "");
+  const [editClientType, setEditClientType] = useState<ClientType>(client.client_type);
+  const [editStatus, setEditStatus] = useState<string>(client.status);
+  const [editBusinessNumber, setEditBusinessNumber] = useState(client.business_number ?? "");
+  const [editCity, setEditCity] = useState(client.city ?? "");
+  const [editProvince, setEditProvince] = useState(client.province ?? "");
+  const [editYearEndMonth, setEditYearEndMonth] = useState(String(client.year_end_month));
+  const [editYearEndDay, setEditYearEndDay] = useState(String(client.year_end_day));
+  const [editAnnualFee, setEditAnnualFee] = useState(String(client.annual_fee));
+  const [editOwnerId, setEditOwnerId] = useState(client.owner_id || "");
+  const [editTags, setEditTags] = useState(client.tags.join(", "));
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const openEdit = () => {
+    setEditBusinessName(client.business_name);
+    setEditLegalName(client.legal_name);
+    setEditCode(client.code ?? "");
+    setEditClientType(client.client_type);
+    setEditStatus(client.status);
+    setEditBusinessNumber(client.business_number ?? "");
+    setEditCity(client.city ?? "");
+    setEditProvince(client.province ?? "");
+    setEditYearEndMonth(String(client.year_end_month));
+    setEditYearEndDay(String(client.year_end_day));
+    setEditAnnualFee(String(client.annual_fee));
+    setEditOwnerId(client.owner_id || "");
+    setEditTags(client.tags.join(", "));
+    setEditOpen(true);
+  };
+
+  const submitEdit = async () => {
+    const trimmed = editBusinessName.trim();
+    if (!trimmed) return;
+    setSavingEdit(true);
+    try {
+      await patch<Client>(`/clients/${client.id}`, {
+        legal_name: editLegalName.trim() || trimmed,
+        business_name: trimmed,
+        code: editCode.trim() || null,
+        client_type: editClientType,
+        status: editStatus,
+        business_number: editBusinessNumber.trim() || null,
+        city: editCity.trim() || null,
+        province: editProvince.trim() || null,
+        year_end_month: Number(editYearEndMonth) || client.year_end_month,
+        year_end_day: Number(editYearEndDay) || client.year_end_day,
+        annual_fee: Number(editAnnualFee) || 0,
+        owner_id: editOwnerId || null,
+        tags: editTags
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+      });
+      toast.success(`${trimmed} updated`, "Changes saved to the client record.");
+      setEditOpen(false);
+      router.refresh();
+    } catch (error) {
+      toast.error("Could not save changes", message(error, "Please try again."));
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const deleteClient = async () => {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `Delete ${client.business_name}? This removes the client record and everything linked to it — deadlines, tasks, letters and files. This can't be undone.`,
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await del(`/clients/${client.id}`);
+      toast.success("Client deleted", `${client.business_name} has been removed.`);
+      router.push("/clients");
+    } catch (error) {
+      toast.error("Could not delete this client", message(error, "Please try again."));
+      setDeleting(false);
+    }
+  };
 
   // Client portal invite — tries the real endpoint, falls back to a demo
   // acknowledgement (there is no live backend reachable yet in most setups).
@@ -388,14 +502,35 @@ export function ClientDetailClient({
             </div>
           </div>
 
-          <dl className="grid grid-cols-2 gap-x-8 gap-y-2 sm:grid-cols-3">
-            <Meta label="Fiscal year-end" value={`${MONTHS[client.year_end_month - 1]} ${client.year_end_day}`} />
-            <Meta label="Annual fee" value={client.annual_fee > 0 ? formatMoney(client.annual_fee) : "—"} />
-            <Meta label="Assigned to" value={client.owner_name} />
-            <Meta label="Business number" value={client.business_number} />
-            <Meta label="Client since" value={formatDate(client.joined)} />
-            <Meta label="Type" value={titleCase(client.client_type)} />
-          </dl>
+          <div className="flex flex-col items-end gap-3">
+            {isLive ? (
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="secondary" icon={<Pencil className="size-3.5" />} onClick={openEdit}>
+                  Edit
+                </Button>
+                {session.isAdmin ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={<Trash2 className="size-3.5" />}
+                    loading={deleting}
+                    onClick={() => void deleteClient()}
+                    className="text-danger hover:bg-danger-soft"
+                  >
+                    Delete
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            <dl className="grid grid-cols-2 gap-x-8 gap-y-2 sm:grid-cols-3">
+              <Meta label="Fiscal year-end" value={`${MONTHS[client.year_end_month - 1]} ${client.year_end_day}`} />
+              <Meta label="Annual fee" value={client.annual_fee > 0 ? formatMoney(client.annual_fee) : "—"} />
+              <Meta label="Assigned to" value={client.owner_name} />
+              <Meta label="Business number" value={client.business_number} />
+              <Meta label="Client since" value={formatDate(client.joined)} />
+              <Meta label="Type" value={titleCase(client.client_type)} />
+            </dl>
+          </div>
         </div>
       </div>
 
@@ -778,6 +913,107 @@ export function ClientDetailClient({
           to (same reasoning as task-detail-client.tsx's Attachments tab). */}
       {isLive ? (
         <>
+          {/* Edit client */}
+          <Modal
+            open={editOpen}
+            onClose={() => setEditOpen(false)}
+            title="Edit client"
+            description="Update this client's record."
+            width="lg"
+            footer={
+              <>
+                <Button variant="secondary" onClick={() => setEditOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  icon={<Pencil className="size-4" />}
+                  disabled={!editBusinessName.trim() || savingEdit}
+                  loading={savingEdit}
+                  onClick={() => void submitEdit()}
+                >
+                  Save changes
+                </Button>
+              </>
+            }
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Business / trade name" required>
+                <Input value={editBusinessName} onChange={(event) => setEditBusinessName(event.target.value)} />
+              </Field>
+              <Field label="Legal name">
+                <Input value={editLegalName} onChange={(event) => setEditLegalName(event.target.value)} />
+              </Field>
+              <Field label="Client code">
+                <Input value={editCode} onChange={(event) => setEditCode(event.target.value)} />
+              </Field>
+              <Field label="Client type">
+                <Select
+                  value={editClientType}
+                  onValueChange={(value) => setEditClientType(value as ClientType)}
+                  options={CLIENT_TYPE_OPTIONS}
+                />
+              </Field>
+              <Field label="Status">
+                <Select value={editStatus} onValueChange={setEditStatus} options={CLIENT_STATUS_OPTIONS} />
+              </Field>
+              <Field label="Business number">
+                <Input value={editBusinessNumber} onChange={(event) => setEditBusinessNumber(event.target.value)} />
+              </Field>
+              <Field label="City">
+                <Input value={editCity} onChange={(event) => setEditCity(event.target.value)} />
+              </Field>
+              <Field label="Province">
+                <Input
+                  value={editProvince}
+                  onChange={(event) => setEditProvince(event.target.value.toUpperCase().slice(0, 2))}
+                />
+              </Field>
+              <Field label="Fiscal year-end month">
+                <Select
+                  value={editYearEndMonth}
+                  onValueChange={setEditYearEndMonth}
+                  options={MONTHS.map((label, index) => ({ value: String(index + 1), label }))}
+                />
+              </Field>
+              <Field label="Fiscal year-end day">
+                <Input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={editYearEndDay}
+                  onChange={(event) => setEditYearEndDay(event.target.value)}
+                />
+              </Field>
+              <Field label="Annual fee ($)">
+                <Input
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={editAnnualFee}
+                  onChange={(event) => setEditAnnualFee(event.target.value)}
+                />
+              </Field>
+              <Field label="Assigned accountant / manager">
+                <Select
+                  value={editOwnerId}
+                  onValueChange={setEditOwnerId}
+                  placeholder="Unassigned"
+                  options={[
+                    { value: "", label: "Unassigned" },
+                    ...team.map((member) => ({
+                      value: member.id,
+                      label: member.full_name,
+                      description: member.email,
+                    })),
+                  ]}
+                />
+              </Field>
+              <Field label="Tags" hint="Comma-separated" className="sm:col-span-2">
+                <Input value={editTags} onChange={(event) => setEditTags(event.target.value)} placeholder="Growth, Priority" />
+              </Field>
+            </div>
+          </Modal>
+
           {/* Add a service */}
           <Modal
             open={serviceModalOpen}

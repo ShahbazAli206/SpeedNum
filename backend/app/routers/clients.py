@@ -7,7 +7,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select
 
-from ..deps import SessionDep, TenantUserDep, client_ip
+from ..deps import AdminUserDep, SessionDep, TenantUserDep, client_ip
 from ..models import Client, ClientService, Contact, Deadline, Profile, Service, Task
 from ..schemas import (
     ClientCreate,
@@ -232,8 +232,11 @@ async def update_client(
 
 @router.delete("/clients/{client_id}", response_model=Ok)
 async def delete_client(
-    client_id: uuid.UUID, session: SessionDep, user: TenantUserDep, request: Request
+    client_id: uuid.UUID, session: SessionDep, user: AdminUserDep, request: Request
 ) -> Ok:
+    """Admin-gated: this is a hard delete of the client and everything FK'd to
+    it (deadlines, tasks, letters, files) — too destructive to leave open to
+    any staff member the way read/update access is."""
     row = await session.scalar(
         select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
     )
