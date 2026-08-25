@@ -593,6 +593,31 @@ class ClientTaxObligation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class TeamNote(Base):
+    """An internal, admin-only note about a staff member — capacity,
+    specialisations, time off. Flat like ClientMessage: no threading, no
+    editing, just add and remove. `profile_id` is who the note is about;
+    `author_id` is who wrote it, kept nullable so a note survives its
+    author's account being removed later.
+    """
+
+    __tablename__ = "team_notes"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    author_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL")
+    )
+    author_name: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ClientMessage(Base):
     """A free-text message from the client portal to the firm — a question, a
     complaint, anything outside the structured books (invoices, expenses,

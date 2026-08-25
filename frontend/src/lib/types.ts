@@ -80,6 +80,17 @@ export interface TeamMember extends Profile {
   overdue: number;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Team notes — GET/POST/DELETE /team/{id}/notes.                              */
+/* -------------------------------------------------------------------------- */
+export interface TeamNoteApi {
+  id: string;
+  profile_id: string;
+  author_name: string;
+  body: string;
+  created_at: string;
+}
+
 export interface Me {
   profile: Profile;
   tenant: Tenant | null;

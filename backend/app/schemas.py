@@ -122,6 +122,18 @@ class TeamMemberRead(ProfileRead):
     overdue: int = 0
 
 
+class TeamNoteCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=4000)
+
+
+class TeamNoteRead(ORMModel):
+    id: uuid.UUID
+    profile_id: uuid.UUID
+    author_name: str
+    body: str
+    created_at: datetime
+
+
 class StaffCreate(BaseModel):
     """Create a firm staff (accountant) login directly, rather than emailing an
     invitation link and waiting for them to sign themselves up."""

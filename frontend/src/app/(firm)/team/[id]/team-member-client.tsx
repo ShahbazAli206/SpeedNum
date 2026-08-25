@@ -4,6 +4,7 @@ import {
   Building2,
   ChevronRight,
   Info,
+  KeyRound,
   ListChecks,
   Mail,
   Phone,
@@ -16,14 +17,15 @@ import {
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import { CredentialsModal } from "@/components/dashboard/credentials-modal";
 import { useToast } from "@/components/toast";
 import { Button, Modal, Select, Textarea } from "@/components/ui";
-import { ApiError, patch } from "@/lib/api";
+import { ApiError, del, patch, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { daysFromToday, TODAY } from "@/lib/firm-demo";
 import type { ClientRow, Task, TeamNote, TeamRow, TeamStatus } from "@/lib/firm-demo";
 import { dueLabel, formatDate, initials, pluralise, titleCase } from "@/lib/format";
-import type { TaskStatus } from "@/lib/types";
+import type { CredentialResult, TaskStatus, TeamNoteApi } from "@/lib/types";
 
 import { AccountantModal, type AccountantFormValues } from "../accountant-modal";
 
@@ -90,6 +92,9 @@ export function TeamMemberClient({
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<TabId>("overview");
 
+  const [granting, setGranting] = useState(false);
+  const [credentials, setCredentials] = useState<CredentialResult | null>(null);
+
   const [assignedClientIds, setAssignedClientIds] = useState(
     () => new Set(allClients.filter((client) => client.owner_id === member.id).map((client) => client.id)),
   );
@@ -112,6 +117,7 @@ export function TeamMemberClient({
     initialNotes.map((note) => ({ id: note.id, body: note.body, when: note.when })),
   );
   const [noteDraft, setNoteDraft] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
 
   const assignedClients = useMemo(
     () =>
@@ -236,15 +242,55 @@ export function TeamMemberClient({
     );
   };
 
-  const addNote = () => {
+  const addNote = async () => {
     const trimmed = noteDraft.trim();
     if (!trimmed) return;
-    setNotes((current) => [{ id: nextId("note"), body: trimmed, when: formatDate(TODAY, "long") }, ...current]);
-    setNoteDraft("");
+    if (!isLive) {
+      setNotes((current) => [{ id: nextId("note"), body: trimmed, when: formatDate(TODAY, "long") }, ...current]);
+      setNoteDraft("");
+      return;
+    }
+    setSavingNote(true);
+    try {
+      const created = await post<TeamNoteApi>(`/team/${member.id}/notes`, { body: trimmed });
+      setNotes((current) => [
+        { id: created.id, body: created.body, when: formatDate(created.created_at, "long") },
+        ...current,
+      ]);
+      setNoteDraft("");
+    } catch (error) {
+      toast.error("Could not save that note", error instanceof ApiError ? error.message : "Please try again.");
+    } finally {
+      setSavingNote(false);
+    }
   };
 
-  const removeNote = (id: string) => {
+  const removeNote = async (id: string) => {
+    const previous = notes;
     setNotes((current) => current.filter((note) => note.id !== id));
+    if (!isLive) return;
+    try {
+      await del(`/team/${member.id}/notes/${id}`);
+    } catch (error) {
+      setNotes(previous);
+      toast.error("Could not remove that note", error instanceof ApiError ? error.message : "Please try again.");
+    }
+  };
+
+  const grantLogin = async () => {
+    if (!isLive) {
+      toast.info("Demo mode", "Connect a backend to issue a real login.");
+      return;
+    }
+    setGranting(true);
+    try {
+      const result = await post<CredentialResult>(`/team/${member.id}/resend-credentials`);
+      setCredentials(result);
+    } catch (error) {
+      toast.error("Could not issue a login", error instanceof ApiError ? error.message : "Please try again.");
+    } finally {
+      setGranting(false);
+    }
   };
 
   const submitEdit = async (values: AccountantFormValues) => {
@@ -317,9 +363,19 @@ export function TeamMemberClient({
             </p>
           </div>
         </div>
-        <Button icon={<UserPlus className="size-4" />} onClick={() => setEditOpen(true)}>
-          Edit member
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            icon={<KeyRound className="size-4" />}
+            loading={granting}
+            onClick={() => void grantLogin()}
+          >
+            Grant login
+          </Button>
+          <Button icon={<UserPlus className="size-4" />} onClick={() => setEditOpen(true)}>
+            Edit member
+          </Button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-1 rounded-xl border border-line bg-surface p-1.5 shadow-[var(--shadow-card)]">
@@ -556,8 +612,9 @@ export function TeamMemberClient({
                 <Button
                   size="sm"
                   icon={<Plus className="size-3.5" />}
-                  disabled={!noteDraft.trim()}
-                  onClick={addNote}
+                  disabled={!noteDraft.trim() || savingNote}
+                  loading={savingNote}
+                  onClick={() => void addNote()}
                 >
                   Add note
                 </Button>
@@ -575,7 +632,7 @@ export function TeamMemberClient({
                     </div>
                     <button
                       type="button"
-                      onClick={() => removeNote(note.id)}
+                      onClick={() => void removeNote(note.id)}
                       className="grid size-7 shrink-0 place-items-center rounded-md text-muted transition hover:bg-danger-soft hover:text-danger"
                       aria-label="Remove note"
                     >
@@ -588,6 +645,8 @@ export function TeamMemberClient({
           </section>
         ) : null}
       </div>
+
+      <CredentialsModal result={credentials} onClose={() => setCredentials(null)} kind="accountant" />
 
       <AccountantModal
         open={editOpen}

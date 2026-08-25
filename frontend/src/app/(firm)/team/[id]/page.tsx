@@ -4,7 +4,8 @@ import { notFound } from "next/navigation";
 import { toClientRow, toDemoTask, toTeamRow } from "@/lib/adapt";
 import { apiServer } from "@/lib/api-server";
 import { getClients, getTasks, getTeamMember, getTeamNotes } from "@/lib/firm-demo";
-import type { Client, Task, TeamMember } from "@/lib/types";
+import { formatDate } from "@/lib/format";
+import type { Client, Task, TeamMember, TeamNoteApi } from "@/lib/types";
 
 import { TeamMemberClient } from "./team-member-client";
 
@@ -24,11 +25,12 @@ async function loadLive(id: string) {
 
   // Clients and tasks drive the "assigned to them" tabs; both are firm-wide
   // lists the page filters in the browser, exactly as the demo does.
-  const [clients, tasks] = await Promise.all([
+  const [clients, tasks, notes] = await Promise.all([
     apiServer<Client[]>("/clients"),
     apiServer<Task[]>("/tasks"),
+    apiServer<TeamNoteApi[]>(`/team/${id}/notes`),
   ]);
-  return { member, clients: clients ?? [], tasks: tasks ?? [] };
+  return { member, clients: clients ?? [], tasks: tasks ?? [], notes: notes ?? [] };
 }
 
 export async function generateMetadata({
@@ -51,9 +53,12 @@ export default async function TeamMemberPage({ params }: PageProps<"/team/[id]">
         member={toTeamRow(live.member)}
         allClients={live.clients.map(toClientRow)}
         allTasks={live.tasks.map(toDemoTask)}
-        // Per-member notes have no table yet; the demo keeps a fixture so the
-        // tab can be designed. Live accounts simply start empty.
-        initialNotes={[]}
+        initialNotes={live.notes.map((note) => ({
+          id: note.id,
+          member_id: note.profile_id,
+          body: note.body,
+          when: formatDate(note.created_at, "long"),
+        }))}
         isLive
       />
     );

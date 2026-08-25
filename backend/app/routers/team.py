@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 
 from ..config import settings
 from ..deps import AdminUserDep, CurrentUserDep, SessionDep, TenantUserDep, client_ip
-from ..models import Client, Deadline, Invitation, Profile, Task
+from ..models import Client, Deadline, Invitation, Profile, Task, TeamNote
 from ..schemas import (
     CredentialResult,
     InvitationAccept,
@@ -22,6 +22,8 @@ from ..schemas import (
     ProfileUpdate,
     StaffCreate,
     TeamMemberRead,
+    TeamNoteCreate,
+    TeamNoteRead,
 )
 from ..services import accounts, audit
 from ..services.accounts import ROLE_LABELS, AccountError
@@ -338,6 +340,68 @@ async def remove_member(
             else f"{member.full_name or member.email} deactivated — they can no longer sign in."
         )
     )
+
+
+async def _get_member(session: SessionDep, tenant_id: uuid.UUID, profile_id: uuid.UUID) -> Profile:
+    member = await session.scalar(
+        select(Profile).where(
+            Profile.id == profile_id,
+            Profile.tenant_id == tenant_id,
+            Profile.client_id.is_(None),
+        )
+    )
+    return ensure_found(member, "Team member")
+
+
+@router.get("/{profile_id}/notes", response_model=list[TeamNoteRead])
+async def list_team_notes(
+    profile_id: uuid.UUID, session: SessionDep, user: TenantUserDep
+) -> list[TeamNoteRead]:
+    await _get_member(session, user.tenant_id, profile_id)
+    rows = (
+        await session.scalars(
+            select(TeamNote)
+            .where(TeamNote.tenant_id == user.tenant_id, TeamNote.profile_id == profile_id)
+            .order_by(TeamNote.created_at.desc())
+        )
+    ).all()
+    return [TeamNoteRead.model_validate(row) for row in rows]
+
+
+@router.post("/{profile_id}/notes", response_model=TeamNoteRead, status_code=status.HTTP_201_CREATED)
+async def create_team_note(
+    profile_id: uuid.UUID, payload: TeamNoteCreate, session: SessionDep, user: AdminUserDep
+) -> TeamNoteRead:
+    """Admin-gated like every other write on a colleague's roster entry — a
+    member's capacity/time-off notes are visible to the whole tenant (any
+    TenantUserDep can list them) but only an admin adds one."""
+    member = await _get_member(session, user.tenant_id, profile_id)
+    row = TeamNote(
+        tenant_id=user.tenant_id,
+        profile_id=member.id,
+        author_id=user.profile.id,
+        author_name=user.profile.full_name or user.profile.email,
+        body=payload.body,
+    )
+    session.add(row)
+    await session.flush()
+    return TeamNoteRead.model_validate(row)
+
+
+@router.delete("/{profile_id}/notes/{note_id}", response_model=Ok)
+async def delete_team_note(
+    profile_id: uuid.UUID, note_id: uuid.UUID, session: SessionDep, user: AdminUserDep
+) -> Ok:
+    row = await session.scalar(
+        select(TeamNote).where(
+            TeamNote.id == note_id,
+            TeamNote.profile_id == profile_id,
+            TeamNote.tenant_id == user.tenant_id,
+        )
+    )
+    ensure_found(row, "Note")
+    await session.delete(row)
+    return Ok(message="Note removed")
 
 
 @router.get("/invitations", response_model=list[InvitationRead])
