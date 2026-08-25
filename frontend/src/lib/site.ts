@@ -223,24 +223,28 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         href: "/admin",
         icon: "shield-check",
         description: "Super-admin: tenants, plans and audit log",
+        superadminOnly: true,
       },
       {
         label: "Reach",
         href: "/admin/reach",
         icon: "line-chart",
         description: "Superadmin: site traffic, search footprint and platform scale",
+        superadminOnly: true,
       },
       {
         label: "Platform settings",
         href: "/admin/settings",
         icon: "shield-check",
         description: "Superadmin: platform email delivery and how the platform is configured",
+        superadminOnly: true,
       },
       {
         label: "Backup & Recovery",
         href: "/admin/backups",
         icon: "hard-drive",
         description: "Superadmin: snapshots, devices, and disaster recovery",
+        superadminOnly: true,
       },
     ],
   },
@@ -256,6 +260,11 @@ export interface DashboardNavItem {
   href: string;
   icon: string;
   description: string;
+  /** Restricted to the platform superadmin role server-side (see
+   * backend/app/deps.py's SuperadminDep). A tenant admin/owner — even one
+   * with `isAdmin` true — cannot open these, so the sidebar must hide them
+   * for anyone but a real `profile.is_superadmin`, not just any admin. */
+  superadminOnly?: boolean;
 }
 
 export const DASHBOARD_NAV: { group: string; items: DashboardNavItem[] }[] = [

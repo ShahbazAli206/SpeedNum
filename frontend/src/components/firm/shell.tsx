@@ -117,6 +117,26 @@ function FirmShellInner({ children }: { children: ReactNode }) {
   const overview = useMemo(() => getFirmOverview(), []);
   const current = FIRM_NAV_FLAT.find((item) => pathname.startsWith(item.href));
 
+  // Admin console / Reach / Platform settings / Backup & Recovery are
+  // enforced server-side to the platform superadmin role (SuperadminDep) —
+  // a tenant owner/admin (isAdmin true) gets a 403 EmptyState if they click
+  // through. Hide the links themselves rather than let a firm admin discover
+  // that the hard way. `portalRoleLabel` is "Super Admin" only for a real
+  // `profile.is_superadmin`, whether or not they're impersonating a tenant.
+  const isSuperadmin = session.portalRoleLabel === "Super Admin";
+  const visibleNav = useMemo(
+    () =>
+      FIRM_NAV.map((group) => ({
+        ...group,
+        items: group.items.filter((item) => !item.superadminOnly || isSuperadmin),
+      })).filter((group) => group.items.length > 0),
+    [isSuperadmin],
+  );
+  const visibleNavFlat = useMemo(
+    () => visibleNav.flatMap((group) => group.items.map((item) => ({ ...item, group: group.group }))),
+    [visibleNav],
+  );
+
   const badgeFor = (href: string): number => {
     switch (href) {
       case "/deadlines":
@@ -203,7 +223,7 @@ function FirmShellInner({ children }: { children: ReactNode }) {
       </div>
 
       <nav className="scroll-thin flex-1 overflow-y-auto px-3 py-4" aria-label="Practice">
-        {FIRM_NAV.map((group) => (
+        {visibleNav.map((group) => (
           <div key={group.group} className="mb-5 last:mb-0">
             {collapsed ? (
               <div className="mx-auto mb-2 h-px w-6 bg-line" aria-hidden />
@@ -447,7 +467,7 @@ function FirmShellInner({ children }: { children: ReactNode }) {
       </div>
 
       {paletteOpen ? (
-        <CommandPalette onClose={() => setPaletteOpen(false)} items={FIRM_NAV_FLAT} />
+        <CommandPalette onClose={() => setPaletteOpen(false)} items={visibleNavFlat} />
       ) : null}
 
       {/* Staff arrive here on a temporary password too — from the credentials

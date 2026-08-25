@@ -204,6 +204,7 @@ export function UsersClient({
         must_change_password: form.requirePasswordChange,
         source: form.role === "client" ? "client" : "team",
         source_id: form.role === "client" ? form.clientId : "",
+        is_superadmin: false,
       };
       setUsers((current) => [...current, created]);
       toast.info(
@@ -267,16 +268,27 @@ export function UsersClient({
       key: "role",
       header: "Role",
       cell: (row) => (
-        <span
-          className={cn(
-            "inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize",
-            ROLE_TONE[row.role],
-          )}
-        >
-          {row.role}
+        <span className="inline-flex flex-wrap items-center gap-1.5">
+          <span
+            className={cn(
+              "inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize",
+              ROLE_TONE[row.role],
+            )}
+          >
+            {row.role}
+          </span>
+          {/* `role` is just this login's firm-internal role and stays
+              "owner"/"admin" either way — a platform superadmin needs its
+              own badge or it's indistinguishable from an ordinary admin. */}
+          {row.is_superadmin ? (
+            <span className="inline-flex rounded-full bg-brand px-2 py-0.5 text-[11px] font-semibold text-white">
+              Super Admin
+            </span>
+          ) : null}
         </span>
       ),
       sortValue: (row) => row.role,
+      exportValue: (row) => (row.is_superadmin ? `${row.role} (Super Admin)` : row.role),
     },
     {
       key: "created",

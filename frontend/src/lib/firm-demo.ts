@@ -808,6 +808,9 @@ export interface TeamRow extends TeamMember {
    * signed in yet. Absent on demo rows, which have no credentials at all.
    */
   must_change_password?: boolean;
+  /** Platform superadmin — distinct from `role`, which stays "owner"/"admin"
+   *  either way. Absent on demo rows, which never model a superadmin. */
+  is_superadmin?: boolean;
 }
 
 export function getTeam(): TeamRow[] {
@@ -968,6 +971,9 @@ export interface PlatformUser {
   source: "team" | "client";
   /** id of the underlying team member or client this account belongs to. */
   source_id: string;
+  /** Platform superadmin — distinct from `role`, which is just this login's
+   *  firm-internal role and stays "owner"/"admin" either way. */
+  is_superadmin: boolean;
 }
 
 function slug(value: string): string {
@@ -994,6 +1000,7 @@ export function getPlatformUsers(): PlatformUser[] {
     must_change_password: member.status === "inactive",
     source: "team",
     source_id: member.id,
+    is_superadmin: false,
   }));
 
   const clientUsers: PlatformUser[] = CLIENTS.filter((client) => client.portal_enabled).map(
@@ -1013,6 +1020,7 @@ export function getPlatformUsers(): PlatformUser[] {
         must_change_password: neverSignedIn || pendingPasswordChange,
         source: "client",
         source_id: client.id,
+        is_superadmin: false,
       };
     },
   );

@@ -242,5 +242,6 @@ export function toTeamRow(member: TeamMember): TeamRow {
     // detail page computes it from the tasks it already has.
     estimated_hours: 0,
     must_change_password: member.must_change_password,
+    is_superadmin: member.is_superadmin,
   };
 }

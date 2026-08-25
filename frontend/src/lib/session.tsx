@@ -145,7 +145,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const value = useMemo<SessionValue>(() => {
     const profile = me?.profile ?? null;
     const displayName = profile?.full_name || profile?.email || FIRM.signedInAs.name;
-    const displayTitle = profile?.title || (isLive ? roleLabel(profile?.role) : FIRM.signedInAs.title);
+    const displayTitle = profile?.title || (isLive ? roleLabel(profile) : FIRM.signedInAs.title);
     // Demo mode has to show a *representative* unread count, not zero. The
     // badge and its blink are a behaviour the reviewer needs to see, and a
     // deployment without a backend yet (Vercel up, API not) would otherwise
@@ -185,8 +185,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 
-function roleLabel(role: string | undefined): string {
-  switch (role) {
+/**
+ * Shown under the person's name when they have no job title set. Checked
+ * ahead of the firm-internal owner/admin/viewer role for the same reason
+ * `portalRoleLabelOf` below does: a platform superadmin's `role` column is
+ * still just "owner" or "admin" of their own tenant, so without this check
+ * this fell back to "Administrator" for a superadmin exactly like it would
+ * for an ordinary firm admin — the two are indistinguishable here otherwise.
+ */
+function roleLabel(profile: Me["profile"] | null | undefined): string {
+  if (profile?.is_superadmin) return "Super Admin";
+  switch (profile?.role) {
     case "owner":
       return "Owner";
     case "admin":

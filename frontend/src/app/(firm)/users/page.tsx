@@ -26,6 +26,7 @@ function toRow(account: PlatformAccount): PlatformUser {
     must_change_password: account.must_change_password,
     source: account.source,
     source_id: account.client_id ?? account.id,
+    is_superadmin: account.is_superadmin,
   };
 }
 
