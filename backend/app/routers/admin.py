@@ -192,11 +192,20 @@ async def get_tenant(
 
 
 # --- create ------------------------------------------------------------------
-@router.post("/tenants", response_model=TenantProvisionResult, status_code=status.HTTP_201_CREATED)
-async def create_tenant(
-    payload: TenantAdminCreate, session: SessionDep, user: SuperadminDep, request: Request
+async def provision_tenant(
+    session: SessionDep,
+    payload: TenantAdminCreate,
+    *,
+    actor_id: uuid.UUID,
+    actor_email: str,
+    ip_address: str | None,
 ) -> dict[str, Any]:
-    """Provision a new firm and its first admin login in one step."""
+    """Provision a new firm and its first admin login in one step.
+
+    Shared by the single-tenant POST /admin/tenants route below and the
+    superadmin bulk tenant importer (routers/imports.py) — creating a firm
+    from a spreadsheet row is the same operation, just called in a loop.
+    """
     name = payload.name.strip()
 
     if payload.slug:
@@ -239,7 +248,7 @@ async def create_tenant(
             full_name=payload.admin_name.strip() or admin_email.split("@")[0],
             role="owner",
             send_welcome=payload.send_email,
-            reply_to=user.profile.email,
+            reply_to=actor_email,
         )
     except AccountError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
@@ -247,13 +256,13 @@ async def create_tenant(
     await audit.record(
         session,
         tenant_id=tenant.id,
-        actor_id=user.profile.id,
-        actor_email=user.profile.email,
+        actor_id=actor_id,
+        actor_email=actor_email,
         action="created",
         entity="tenant",
         entity_id=tenant.id,
         summary=f"Provisioned firm {tenant.name} with admin {admin_email}",
-        ip_address=client_ip(request),
+        ip_address=ip_address,
     )
 
     detail = await _detail(session, tenant)
@@ -274,6 +283,19 @@ async def create_tenant(
             ),
         },
     }
+
+
+@router.post("/tenants", response_model=TenantProvisionResult, status_code=status.HTTP_201_CREATED)
+async def create_tenant(
+    payload: TenantAdminCreate, session: SessionDep, user: SuperadminDep, request: Request
+) -> dict[str, Any]:
+    return await provision_tenant(
+        session,
+        payload,
+        actor_id=user.profile.id,
+        actor_email=user.profile.email,
+        ip_address=client_ip(request),
+    )
 
 
 # --- edit / suspend ----------------------------------------------------------

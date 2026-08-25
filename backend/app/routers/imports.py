@@ -16,22 +16,26 @@ import re
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from sqlalchemy import select
 
-from ..deps import AdminUserDep, SessionDep, TenantUserDep
-from ..models import Client, Profile
+from ..deps import AdminUserDep, SessionDep, SuperadminDep, TenantUserDep, client_ip
+from ..models import Client, Profile, Service, Tenant
 from ..schemas import (
     ImportCommitRequest,
     ImportPreview,
     ImportPreviewRow,
     ImportResult,
+    TenantAdminCreate,
+    TenantImportOutcome,
+    TenantImportResult,
     UserImportResult,
     UserImportRow,
 )
 from ..services import accounts, audit
 from ..services.accounts import AccountError
 from ..services.rate_limit import rate_limit_by_tenant
+from .admin import provision_tenant
 
 router = APIRouter(prefix="/import", tags=["import"])
 
@@ -45,6 +49,13 @@ MAX_USER_COMMIT_ROWS = 200
 # can itself create up to MAX_USER_COMMIT_ROWS logins, so the *number of
 # commit calls* needs a tighter cap than the number of individual creations.
 _bulk_user_import_rate_limit = rate_limit_by_tenant("import-users-commit", limit=5, window_seconds=3600)
+
+# Each row provisions an entire firm (tenant + admin login + welcome email),
+# so the cap is far tighter than clients/users. No rate_limit_by_tenant here:
+# it requires TenantUserDep, which 409s a superadmin with no tenant of their
+# own — the SuperadminDep gate below is already the narrowest role on the
+# platform, so a hard row cap is the only guard needed.
+MAX_TENANT_COMMIT_ROWS = 25
 
 FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "code": ("client code", "code", "client id", "client no", "account", "account number"),
@@ -603,3 +614,374 @@ async def commit_users(
         accounts=outcomes,
         errors=errors[:25],
     )
+
+
+# -----------------------------------------------------------------------------
+# Services — the catalogue a firm assigns to clients
+# -----------------------------------------------------------------------------
+SERVICE_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "code": ("code", "service code", "short code"),
+    "name": ("name", "service", "service name"),
+    "description": ("description", "notes", "details"),
+    "category": ("category", "group"),
+    "frequency": ("frequency", "cadence"),
+    "default_price": ("default price", "price", "fee", "fees"),
+    "lead_time_days": ("lead time", "lead time days", "lead time (days)"),
+    # The due rule is a JSON shape in the DB; a spreadsheet only ever wants
+    # the common case — "N months after the fiscal year end" — so that's the
+    # one column exposed here. The other rule shape (a fixed calendar date)
+    # stays edit-only in the UI, same as it already is.
+    "months_after_period_end": (
+        "months after period end", "due months", "months after year end", "months",
+    ),
+    "is_active": ("active", "is active", "status"),
+}
+
+FREQUENCY_MAP = {
+    "monthly": "monthly",
+    "quarterly": "quarterly",
+    "semi annual": "semi_annual", "semi-annual": "semi_annual", "biannual": "semi_annual",
+    "annual": "annual", "annually": "annual", "yearly": "annual",
+    "one time": "one_time", "one-time": "one_time", "once": "one_time", "single": "one_time",
+}
+
+
+def detect_service_mapping(columns: list[str]) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    taken: set[str] = set()
+    for column in columns:
+        key = _normalise(column)
+        for field, aliases in SERVICE_FIELD_ALIASES.items():
+            if field in taken:
+                continue
+            if key == field or key == field.replace("_", " ") or key in aliases:
+                mapping[column] = field
+                taken.add(field)
+                break
+    return mapping
+
+
+def parse_service_row(raw: dict[str, Any], mapping: dict[str, str]) -> tuple[dict[str, Any], list[str]]:
+    data: dict[str, Any] = {
+        "category": "General",
+        "frequency": "annual",
+        "default_price": 0.0,
+        "lead_time_days": 30,
+        "is_active": True,
+    }
+    errors: list[str] = []
+    months_after: int | None = None
+
+    for column, field in mapping.items():
+        value = raw.get(column)
+        text = "" if value is None else str(value).strip()
+        if not text:
+            continue
+
+        if field == "code":
+            data["code"] = text.upper()
+        elif field == "default_price":
+            number = _to_float(text)
+            if number is None:
+                errors.append(f"'{text}' is not a valid price")
+            else:
+                data["default_price"] = number
+        elif field == "lead_time_days":
+            number = _to_float(text)
+            if number is None:
+                errors.append(f"'{text}' is not a number for lead time")
+            else:
+                data["lead_time_days"] = int(number)
+        elif field == "frequency":
+            resolved = FREQUENCY_MAP.get(text.lower().replace("_", " "))
+            if resolved is None:
+                errors.append(f"'{text}' is not a frequency we recognise — defaulting to annual")
+            else:
+                data["frequency"] = resolved
+        elif field == "months_after_period_end":
+            number = _to_float(text)
+            if number is None:
+                errors.append(f"'{text}' is not a number of months")
+            else:
+                months_after = int(number)
+        elif field == "is_active":
+            data["is_active"] = text.lower() not in ("no", "false", "0", "inactive", "n")
+        else:
+            data[field] = text
+
+    data["due_rule"] = {
+        "type": "offset_from_period_end",
+        "months": months_after if months_after is not None else 6,
+        "period_basis": "fiscal",
+    }
+
+    if not data.get("code"):
+        errors.append("A service code is required")
+    if not data.get("name"):
+        errors.append("A service name is required")
+
+    return data, errors
+
+
+@router.post("/services/preview", response_model=ImportPreview)
+async def preview_services(
+    session: SessionDep, user: TenantUserDep, file: UploadFile = File(...)
+) -> ImportPreview:
+    columns, records = await _read_table(file)
+    mapping = detect_service_mapping(columns)
+    if "code" not in mapping.values() or "name" not in mapping.values():
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "No 'Code' and 'Name' columns were recognised. Rename columns to 'Code' and 'Name' and try again.",
+        )
+
+    rows: list[ImportPreviewRow] = []
+    valid = 0
+    seen_codes: set[str] = set()
+    for index, record in enumerate(records[:MAX_PREVIEW_ROWS], start=2):
+        data, errors = parse_service_row(record, mapping)
+        code = str(data.get("code", ""))
+        if code:
+            if code in seen_codes:
+                errors.append("This code is duplicated earlier in the file")
+            seen_codes.add(code)
+        if not errors:
+            valid += 1
+        rows.append(ImportPreviewRow(row=index, data=data, errors=errors))
+
+    return ImportPreview(
+        columns=columns,
+        detected_mapping=mapping,
+        rows=rows,
+        total_rows=len(records),
+        valid_rows=valid,
+    )
+
+
+@router.post("/services/commit", response_model=ImportResult)
+async def commit_services(
+    payload: ImportCommitRequest, session: SessionDep, user: TenantUserDep
+) -> ImportResult:
+    created = updated = failed = 0
+    errors: list[str] = []
+    allowed = {column.name for column in Service.__table__.columns}
+
+    for index, row in enumerate(payload.rows, start=1):
+        data = {k: v for k, v in row.items() if k in allowed and k not in ("id", "tenant_id")}
+        code = str(data.get("code") or "").strip().upper()
+        name = str(data.get("name") or "").strip()
+        if not code or not name:
+            failed += 1
+            errors.append(f"Row {index}: missing code or name")
+            continue
+        data["code"] = code
+        data["name"] = name
+
+        existing = None
+        if payload.update_existing:
+            existing = await session.scalar(
+                select(Service).where(Service.tenant_id == user.tenant_id, Service.code == code)
+            )
+
+        try:
+            # A savepoint keeps one bad row from discarding the whole import.
+            async with session.begin_nested():
+                if existing is not None:
+                    for key, value in data.items():
+                        setattr(existing, key, value)
+                    updated += 1
+                else:
+                    session.add(Service(tenant_id=user.tenant_id, **data))
+                    created += 1
+        except Exception as exc:  # noqa: BLE001 - surface the row that failed
+            if existing is not None:
+                updated -= 1
+            else:
+                created -= 1
+            failed += 1
+            errors.append(f"Row {index} ({code}): {type(exc).__name__}")
+
+    await audit.record(
+        session,
+        tenant_id=user.tenant_id,
+        actor_id=user.profile.id,
+        actor_email=user.profile.email,
+        action="imported",
+        entity="service",
+        summary=f"Imported {created} new and updated {updated} service(s)",
+        metadata={"created": created, "updated": updated, "failed": failed},
+    )
+    return ImportResult(created=created, updated=updated, failed=failed, errors=errors[:25])
+
+
+# -----------------------------------------------------------------------------
+# Tenants — bulk-provisioning firms (superadmin only)
+# -----------------------------------------------------------------------------
+TENANT_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "name": ("firm name", "name", "company", "company name", "tenant name", "client name"),
+    "admin_email": ("admin email", "email", "owner email", "contact email"),
+    "admin_name": ("admin name", "owner name", "contact name"),
+    "slug": ("slug", "subdomain"),
+    "plan": ("plan",),
+    "custom_domain": ("custom domain", "domain", "white label domain"),
+    "max_clients": ("max clients", "client limit", "client cap"),
+    "max_users": ("max users", "user limit", "user cap", "seats"),
+    "is_demo": ("demo", "is demo", "sandbox"),
+}
+
+
+def detect_tenant_mapping(columns: list[str]) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    taken: set[str] = set()
+    for column in columns:
+        key = _normalise(column)
+        for field, aliases in TENANT_FIELD_ALIASES.items():
+            if field in taken:
+                continue
+            if key == field or key == field.replace("_", " ") or key in aliases:
+                mapping[column] = field
+                taken.add(field)
+                break
+    return mapping
+
+
+def parse_tenant_row(raw: dict[str, Any], mapping: dict[str, str]) -> tuple[dict[str, Any], list[str]]:
+    data: dict[str, Any] = {"plan": "trial", "is_demo": False, "send_email": True}
+    errors: list[str] = []
+
+    for column, field in mapping.items():
+        value = raw.get(column)
+        text = "" if value is None else str(value).strip()
+        if not text:
+            continue
+
+        if field == "admin_email":
+            lowered = text.lower()
+            if "@" not in lowered or "." not in lowered.split("@")[-1]:
+                errors.append(f"'{text}' is not a valid email")
+            else:
+                data["admin_email"] = lowered
+        elif field in ("max_clients", "max_users"):
+            number = _to_float(text)
+            if number is None:
+                errors.append(f"'{text}' is not a number for {field.replace('_', ' ')}")
+            else:
+                data[field] = int(number)
+        elif field == "is_demo":
+            data["is_demo"] = text.lower() in ("yes", "true", "1", "demo", "sandbox")
+        elif field == "slug":
+            data["slug"] = text.strip().lower()
+        else:
+            data[field] = text
+
+    if not data.get("name"):
+        errors.append("Firm name is required")
+    if not data.get("admin_email"):
+        errors.append("Admin email is required")
+
+    return data, errors
+
+
+@router.post("/tenants/preview", response_model=ImportPreview)
+async def preview_tenants(
+    session: SessionDep, user: SuperadminDep, file: UploadFile = File(...)
+) -> ImportPreview:
+    columns, records = await _read_table(file)
+    mapping = detect_tenant_mapping(columns)
+    if "name" not in mapping.values() or "admin_email" not in mapping.values():
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "No 'Firm name' and 'Admin email' columns were recognised. Rename columns and try again.",
+        )
+
+    existing_slugs = {row.lower() for row in (await session.scalars(select(Tenant.slug))).all()}
+
+    rows: list[ImportPreviewRow] = []
+    valid = 0
+    seen_emails: set[str] = set()
+    for index, record in enumerate(records[:MAX_PREVIEW_ROWS], start=2):
+        data, errors = parse_tenant_row(record, mapping)
+        slug = str(data.get("slug", "")).strip().lower()
+        if slug and slug in existing_slugs:
+            errors.append(f"The slug '{slug}' is already taken")
+        email = str(data.get("admin_email", ""))
+        if email:
+            if email in seen_emails:
+                errors.append("This admin email is duplicated earlier in the file")
+            seen_emails.add(email)
+        if not errors:
+            valid += 1
+        rows.append(ImportPreviewRow(row=index, data=data, errors=errors))
+
+    return ImportPreview(
+        columns=columns,
+        detected_mapping=mapping,
+        rows=rows,
+        total_rows=len(records),
+        valid_rows=valid,
+    )
+
+
+@router.post("/tenants/commit", response_model=TenantImportResult)
+async def commit_tenants(
+    rows: list[TenantAdminCreate], session: SessionDep, user: SuperadminDep, request: Request
+) -> TenantImportResult:
+    """Provision one firm per row. Each row's failure is independent — a
+    taken slug or a bad email on row 3 doesn't stop rows 1, 2 and 4 landing,
+    the same reasoning as commit_users below."""
+    if len(rows) > MAX_TENANT_COMMIT_ROWS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Import at most {MAX_TENANT_COMMIT_ROWS} firms at a time — split the file.",
+        )
+
+    outcomes: list[TenantImportOutcome] = []
+    created = failed = emailed = 0
+    errors: list[str] = []
+    ip = client_ip(request)
+
+    for index, row in enumerate(rows, start=1):
+        try:
+            async with session.begin_nested():
+                result = await provision_tenant(
+                    session,
+                    row,
+                    actor_id=user.profile.id,
+                    actor_email=user.profile.email,
+                    ip_address=ip,
+                )
+        except HTTPException as exc:
+            failed += 1
+            errors.append(f"Row {index} ({row.name}): {exc.detail}")
+            outcomes.append(
+                TenantImportOutcome(
+                    name=row.name, admin_email=str(row.admin_email), created=False, error=str(exc.detail)
+                )
+            )
+            continue
+        except Exception as exc:  # noqa: BLE001 - surface the row that failed
+            failed += 1
+            errors.append(f"Row {index} ({row.name}): {type(exc).__name__}")
+            outcomes.append(
+                TenantImportOutcome(
+                    name=row.name, admin_email=str(row.admin_email), created=False, error=type(exc).__name__
+                )
+            )
+            continue
+
+        created += 1
+        admin = result["admin"]
+        if admin["email_sent"]:
+            emailed += 1
+        outcomes.append(
+            TenantImportOutcome(
+                name=row.name,
+                slug=result["tenant"]["slug"] if isinstance(result["tenant"], dict) else None,
+                admin_email=admin["email"],
+                created=True,
+                temp_password=admin["temp_password"],
+                email_sent=admin["email_sent"],
+            )
+        )
+
+    return TenantImportResult(created=created, failed=failed, emailed=emailed, tenants=outcomes, errors=errors[:25])

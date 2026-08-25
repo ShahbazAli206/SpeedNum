@@ -32,10 +32,11 @@ import {
   Trash2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { KpiTile } from "@/components/charts";
 import { DashboardHeader, KpiRow } from "@/components/dashboard/page-shell";
+import { ExportMenu } from "@/components/dashboard/export-menu";
 import { useToast } from "@/components/toast";
 import {
   Alert,
@@ -52,6 +53,7 @@ import {
 import { del, patch, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { formatMoney, titleCase } from "@/lib/format";
+import { useSpreadsheetExport } from "@/lib/spreadsheet-export";
 import type { Frequency, Service } from "@/lib/types";
 
 export interface ServiceRow {
@@ -205,6 +207,27 @@ export function ServicesClient({
     services: services.filter((service) => service.category === category),
   }));
 
+  const exportColumns = useMemo(
+    () => [
+      { header: "Code", value: (row: ServiceRow) => row.code },
+      { header: "Name", value: (row: ServiceRow) => row.name },
+      { header: "Category", value: (row: ServiceRow) => row.category },
+      { header: "Cadence", value: (row: ServiceRow) => titleCase(row.frequency) },
+      { header: "Due rule", value: (row: ServiceRow) => row.due_rule_label },
+      { header: "Lead time (days)", value: (row: ServiceRow) => row.lead_time_days },
+      { header: "Default price", value: (row: ServiceRow) => row.default_price },
+      { header: "Client assignments", value: (row: ServiceRow) => row.client_count },
+      { header: "Annual value", value: (row: ServiceRow) => row.annual_value },
+      { header: "Active", value: (row: ServiceRow) => (row.is_active ? "Yes" : "No") },
+    ],
+    [],
+  );
+  const { exportCsv, exportXlsx, exportPdf, exporting } = useSpreadsheetExport(
+    services,
+    exportColumns,
+    "speednum-services",
+  );
+
   const set = <K extends keyof FormValues>(key: K, value: FormValues[K]) =>
     setForm((current) => ({ ...current, [key]: value }));
 
@@ -312,9 +335,17 @@ export function ServicesClient({
         title="Services catalogue"
         subtitle="Typed services with code, cadence and price — the definition that drives deadlines, projects and letters"
         actions={
-          <Button icon={<Plus className="size-4" />} onClick={openAdd}>
-            Add service
-          </Button>
+          <>
+            <ExportMenu
+              exportCsv={exportCsv}
+              exportXlsx={exportXlsx}
+              exportPdf={exportPdf}
+              exporting={exporting}
+            />
+            <Button icon={<Plus className="size-4" />} onClick={openAdd}>
+              Add service
+            </Button>
+          </>
         }
       />
 

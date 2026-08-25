@@ -26,7 +26,7 @@ import { UrgentDeadlineBanner } from "@/components/dashboard/urgent-deadline-ban
 import { Icon } from "@/components/icon";
 import { Logo } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Menu, Skeleton } from "@/components/ui";
+import { Badge, Menu, Skeleton, type Tone } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { getFirmOverview } from "@/lib/firm-demo";
 import { SessionProvider, useSession } from "@/lib/session";
@@ -35,6 +35,16 @@ import { FIRM_NAV, FIRM_NAV_FLAT } from "@/lib/site";
 import { FirmBrandingProvider, useBranding } from "./branding";
 
 const COLLAPSE_KEY = "speednum-firm-collapsed";
+
+// Owner and admin both read as "Admin" here — the distinction that matters at
+// a glance in the rail is platform superadmin vs. ordinary firm staff vs. a
+// client login, not the firm-internal owner/admin split.
+const ROLE_TONE: Record<string, Tone> = {
+  "Super Admin": "brand",
+  Admin: "info",
+  Accountant: "neutral",
+  Client: "success",
+};
 
 /**
  * Chrome for the staff-facing app.
@@ -152,6 +162,24 @@ function FirmShellInner({ children }: { children: ReactNode }) {
           <X className="size-5" />
         </button>
       </div>
+
+      {/* Role chip: which portal this login belongs to. Owner and admin share
+          the same shell as a platform superadmin and as accountant staff, and
+          only one of those four can actually reach /admin — without this, the
+          only way to find out was to click through and hit "Superadmin access
+          required". */}
+      {!session.isLoading ? (
+        <div
+          className={cn(
+            "border-b border-line py-2",
+            collapsed ? "flex justify-center" : "px-4",
+          )}
+        >
+          <Badge tone={ROLE_TONE[session.portalRoleLabel] ?? "neutral"} className={collapsed ? "px-1.5" : undefined}>
+            {collapsed ? session.portalRoleLabel[0] : session.portalRoleLabel}
+          </Badge>
+        </div>
+      ) : null}
 
       <div className={cn("border-b border-line", collapsed ? "px-3 py-3" : "px-3 py-3")}>
         {collapsed ? (

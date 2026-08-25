@@ -22,9 +22,11 @@
  */
 
 import {
+  Building2,
   CircleCheck,
   Download,
   KeyRound,
+  Tag,
   TriangleAlert,
   Upload,
   UserPlus,
@@ -38,9 +40,10 @@ import { useToast } from "@/components/toast";
 import { Alert, Button, Checkbox } from "@/components/ui";
 import { ApiError, api, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import type { ImportPreview, ImportResult, UserImportResult } from "@/lib/types";
+import { useSession } from "@/lib/session";
+import type { ImportPreview, ImportResult, TenantImportResult, UserImportResult } from "@/lib/types";
 
-type Mode = "clients" | "users";
+type Mode = "clients" | "users" | "services" | "tenants";
 
 interface ColumnSpec {
   column: string;
@@ -82,6 +85,36 @@ const USER_COLUMNS: ColumnSpec[] = [
   },
 ];
 
+/** Mirrors `detect_service_mapping` in backend/app/routers/imports.py. */
+const SERVICE_COLUMNS: ColumnSpec[] = [
+  { column: "code", required: true, note: "Short, unique — e.g. T2" },
+  { column: "name", required: true, note: "Shown on the catalogue and engagement letters" },
+  { column: "category", required: false, note: "Defaults to General" },
+  { column: "frequency", required: false, note: "monthly | quarterly | semi_annual | annual | one_time" },
+  { column: "default_price", required: false, note: "Numeric, no currency symbol" },
+  { column: "lead_time_days", required: false, note: "How early work should start before the due date" },
+  {
+    column: "months_after_period_end",
+    required: false,
+    note: "Drives the due date — months after the fiscal year end",
+  },
+  { column: "description", required: false, note: "Shown on engagement letters" },
+  { column: "is_active", required: false, note: "Yes/No — defaults to Yes" },
+];
+
+/** Mirrors `detect_tenant_mapping` in backend/app/routers/imports.py — superadmin only. */
+const TENANT_COLUMNS: ColumnSpec[] = [
+  { column: "name", required: true, note: "The firm's name" },
+  { column: "admin_email", required: true, note: "The first admin's sign-in address" },
+  { column: "admin_name", required: false, note: "" },
+  { column: "slug", required: false, note: "Blank auto-generates from the name" },
+  { column: "plan", required: false, note: "trial | starter | growth | pro | enterprise" },
+  { column: "custom_domain", required: false, note: "White-label domain, optional" },
+  { column: "max_clients", required: false, note: "Blank = unlimited" },
+  { column: "max_users", required: false, note: "Blank = unlimited" },
+  { column: "is_demo", required: false, note: "Yes/No — defaults to No" },
+];
+
 const CLIENT_EXAMPLE = [
   "Lakeview Dental Corp.",
   "Lakeview Dental",
@@ -99,7 +132,31 @@ const CLIENT_EXAMPLE = [
 
 const USER_EXAMPLE = ["jane@harrisoncpa.ca", "Jane Doe", "member", "Senior Accountant", "+1 416 555 0142", ""];
 
-const MODES: { value: Mode; label: string; icon: React.ReactNode; blurb: string }[] = [
+const SERVICE_EXAMPLE = [
+  "T2",
+  "Corporate tax return",
+  "Tax",
+  "annual",
+  "1200",
+  "30",
+  "6",
+  "Preparation and filing of the T2 corporate income tax return.",
+  "Yes",
+];
+
+const TENANT_EXAMPLE = [
+  "Lakeview Dental Corp.",
+  "admin@lakeview.ca",
+  "Priya Shah",
+  "lakeview-dental",
+  "trial",
+  "",
+  "",
+  "",
+  "No",
+];
+
+const MODES: { value: Mode; label: string; icon: React.ReactNode; blurb: string; superadminOnly?: boolean }[] = [
   {
     value: "clients",
     label: "Clients",
@@ -112,6 +169,19 @@ const MODES: { value: Mode; label: string; icon: React.ReactNode; blurb: string 
     icon: <UserPlus className="size-4" />,
     blurb: "Create logins and email each person their credentials.",
   },
+  {
+    value: "services",
+    label: "Services",
+    icon: <Tag className="size-4" />,
+    blurb: "Add or update the services catalogue in bulk.",
+  },
+  {
+    value: "tenants",
+    label: "Firms",
+    icon: <Building2 className="size-4" />,
+    blurb: "Provision several firms and their first admin login at once.",
+    superadminOnly: true,
+  },
 ];
 
 function reason(error: unknown, fallback: string) {
@@ -120,6 +190,9 @@ function reason(error: unknown, fallback: string) {
 
 export function ImportClient() {
   const toast = useToast();
+  const session = useSession();
+  const isSuperadmin = session.me?.profile?.is_superadmin ?? false;
+  const visibleModes = MODES.filter((option) => !option.superadminOnly || isSuperadmin);
 
   const [mode, setMode] = useState<Mode>("clients");
   const [file, setFile] = useState<File | null>(null);
@@ -131,8 +204,14 @@ export function ImportClient() {
   const [failure, setFailure] = useState<string | null>(null);
   const [clientResult, setClientResult] = useState<ImportResult | null>(null);
   const [userResult, setUserResult] = useState<UserImportResult | null>(null);
+  const [serviceResult, setServiceResult] = useState<ImportResult | null>(null);
+  const [tenantResult, setTenantResult] = useState<TenantImportResult | null>(null);
 
-  const columns = mode === "clients" ? CLIENT_COLUMNS : USER_COLUMNS;
+  const columns =
+    mode === "clients" ? CLIENT_COLUMNS
+    : mode === "users" ? USER_COLUMNS
+    : mode === "services" ? SERVICE_COLUMNS
+    : TENANT_COLUMNS;
 
   const validRows = preview?.rows.filter((row) => row.errors.length === 0) ?? [];
   const invalidRows = preview?.rows.filter((row) => row.errors.length > 0) ?? [];
@@ -146,6 +225,8 @@ export function ImportClient() {
     setFailure(null);
     setClientResult(null);
     setUserResult(null);
+    setServiceResult(null);
+    setTenantResult(null);
   };
 
   const upload = async (picked: File) => {
@@ -154,6 +235,8 @@ export function ImportClient() {
     setFailure(null);
     setClientResult(null);
     setUserResult(null);
+    setServiceResult(null);
+    setTenantResult(null);
     setBusy(true);
 
     const body = new FormData();
@@ -181,18 +264,19 @@ export function ImportClient() {
     setFailure(null);
 
     try {
-      if (mode === "clients") {
-        const result = await post<ImportResult>("/import/clients/commit", {
+      if (mode === "clients" || mode === "services") {
+        const result = await post<ImportResult>(`/import/${mode}/commit`, {
           mapping: preview.detected_mapping,
           rows: validRows.map((row) => row.data),
           update_existing: updateExisting,
         });
-        setClientResult(result);
+        if (mode === "clients") setClientResult(result);
+        else setServiceResult(result);
         toast.success(
-          `${result.created + result.updated} client${result.created + result.updated === 1 ? "" : "s"} imported`,
+          `${result.created + result.updated} ${mode === "clients" ? "client" : "service"}${result.created + result.updated === 1 ? "" : "s"} imported`,
           `${result.created} created, ${result.updated} updated, ${result.failed} failed.`,
         );
-      } else {
+      } else if (mode === "users") {
         const result = await post<UserImportResult>(
           `/import/users/commit?send_email=${sendEmail}`,
           validRows.map((row) => row.data),
@@ -200,6 +284,18 @@ export function ImportClient() {
         setUserResult(result);
         toast.success(
           `${result.created} account${result.created === 1 ? "" : "s"} created`,
+          result.emailed > 0
+            ? `${result.emailed} credential email${result.emailed === 1 ? "" : "s"} sent.`
+            : "Email delivery isn't configured — copy the passwords below.",
+        );
+      } else {
+        const result = await post<TenantImportResult>(
+          "/import/tenants/commit",
+          validRows.map((row) => ({ ...row.data, send_email: sendEmail })),
+        );
+        setTenantResult(result);
+        toast.success(
+          `${result.created} firm${result.created === 1 ? "" : "s"} created`,
           result.emailed > 0
             ? `${result.emailed} credential email${result.emailed === 1 ? "" : "s"} sent.`
             : "Email delivery isn't configured — copy the passwords below.",
@@ -226,11 +322,19 @@ export function ImportClient() {
             variant="secondary"
             icon={<Download className="size-4" />}
             onClick={() => {
-              downloadTemplate(
-                mode === "clients" ? "speednum-client-import" : "speednum-user-import",
-                columns.map((column) => column.column),
-                mode === "clients" ? CLIENT_EXAMPLE : USER_EXAMPLE,
-              );
+              const stem = {
+                clients: "speednum-client-import",
+                users: "speednum-user-import",
+                services: "speednum-service-import",
+                tenants: "speednum-firm-import",
+              }[mode];
+              const example = {
+                clients: CLIENT_EXAMPLE,
+                users: USER_EXAMPLE,
+                services: SERVICE_EXAMPLE,
+                tenants: TENANT_EXAMPLE,
+              }[mode];
+              downloadTemplate(stem, columns.map((column) => column.column), example);
               toast.success("Template downloaded", "Fill it in, then upload it here.");
             }}
           >
@@ -241,7 +345,7 @@ export function ImportClient() {
 
       {/* Which importer */}
       <div className="mb-5 inline-flex rounded-lg border border-line bg-surface p-0.5">
-        {MODES.map((option) => (
+        {visibleModes.map((option) => (
           <button
             key={option.value}
             type="button"
@@ -261,7 +365,7 @@ export function ImportClient() {
       </div>
 
       <p className="mb-5 text-[13.5px] text-muted">
-        {MODES.find((option) => option.value === mode)?.blurb}
+        {visibleModes.find((option) => option.value === mode)?.blurb}
       </p>
 
       <div className="grid gap-5 lg:grid-cols-[1.35fr_1fr]">
@@ -317,10 +421,16 @@ export function ImportClient() {
                     <tr className="text-left text-muted">
                       <th className="px-3 py-2 font-semibold">Row</th>
                       <th className="px-3 py-2 font-semibold">
-                        {mode === "clients" ? "Legal name" : "Email"}
+                        {mode === "clients" ? "Legal name"
+                          : mode === "users" ? "Email"
+                          : mode === "services" ? "Code"
+                          : "Firm name"}
                       </th>
                       <th className="px-3 py-2 font-semibold">
-                        {mode === "clients" ? "Province" : "Name"}
+                        {mode === "clients" ? "Province"
+                          : mode === "users" ? "Name"
+                          : mode === "services" ? "Name"
+                          : "Admin email"}
                       </th>
                       <th className="px-3 py-2 font-semibold">Status</th>
                     </tr>
@@ -329,10 +439,16 @@ export function ImportClient() {
                     {preview.rows.map((row) => {
                       const data = row.data as Record<string, unknown>;
                       const primary = String(
-                        (mode === "clients" ? data.legal_name : data.email) ?? "—",
+                        (mode === "clients" ? data.legal_name
+                          : mode === "users" ? data.email
+                          : mode === "services" ? data.code
+                          : data.name) ?? "—",
                       );
                       const secondary = String(
-                        (mode === "clients" ? data.province : data.full_name) ?? "—",
+                        (mode === "clients" ? data.province
+                          : mode === "users" ? data.full_name
+                          : mode === "services" ? data.name
+                          : data.admin_email) ?? "—",
                       );
                       return (
                         <tr key={row.row} className="border-t border-line align-top">
@@ -365,6 +481,18 @@ export function ImportClient() {
                     checked={updateExisting}
                     onChange={(event) => setUpdateExisting(event.target.checked)}
                   />
+                ) : mode === "services" ? (
+                  <Checkbox
+                    label="Update existing services when the code matches"
+                    checked={updateExisting}
+                    onChange={(event) => setUpdateExisting(event.target.checked)}
+                  />
+                ) : mode === "tenants" ? (
+                  <Checkbox
+                    label="Email each firm's admin their credentials"
+                    checked={sendEmail}
+                    onChange={(event) => setSendEmail(event.target.checked)}
+                  />
                 ) : (
                   <Checkbox
                     label="Email each person their credentials"
@@ -396,6 +524,91 @@ export function ImportClient() {
                 <Alert tone="warn" title="Some rows did not land" className="mt-4">
                   <ul className="list-disc space-y-0.5 pl-4">
                     {clientResult.errors.map((error) => (
+                      <li key={error}>{error}</li>
+                    ))}
+                  </ul>
+                </Alert>
+              ) : null}
+            </Step>
+          ) : null}
+
+          {serviceResult ? (
+            <Step number={3} title="Imported" description="The services catalogue has been updated.">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Stat label="Created" value={serviceResult.created} tone="success" />
+                <Stat label="Updated" value={serviceResult.updated} tone="neutral" />
+                <Stat label="Failed" value={serviceResult.failed} tone="danger" />
+              </div>
+              {serviceResult.errors.length > 0 ? (
+                <Alert tone="warn" title="Some rows did not land" className="mt-4">
+                  <ul className="list-disc space-y-0.5 pl-4">
+                    {serviceResult.errors.map((error) => (
+                      <li key={error}>{error}</li>
+                    ))}
+                  </ul>
+                </Alert>
+              ) : null}
+            </Step>
+          ) : null}
+
+          {tenantResult ? (
+            <Step
+              number={3}
+              title="Firms created"
+              description="Each password below is shown once — it is never stored in plaintext."
+            >
+              <div className="mb-4 grid gap-3 sm:grid-cols-3">
+                <Stat label="Created" value={tenantResult.created} tone="success" />
+                <Stat label="Emailed" value={tenantResult.emailed} tone="neutral" />
+                <Stat label="Failed" value={tenantResult.failed} tone="danger" />
+              </div>
+
+              <div className="scroll-thin max-h-96 overflow-auto rounded-lg border border-line">
+                <table className="w-full text-[12.5px]">
+                  <thead className="sticky top-0 bg-surface-2">
+                    <tr className="text-left text-muted">
+                      <th className="px-3 py-2 font-semibold">Firm</th>
+                      <th className="px-3 py-2 font-semibold">Temporary password</th>
+                      <th className="px-3 py-2 font-semibold">Email</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tenantResult.tenants.map((firm, index) => (
+                      <tr key={`${firm.admin_email}-${index}`} className="border-t border-line">
+                        <td className="px-3 py-2">
+                          <span className="block text-ink">{firm.name}</span>
+                          <span className="block text-[11.5px] text-muted">{firm.admin_email}</span>
+                        </td>
+                        <td className="px-3 py-2">
+                          {firm.temp_password ? (
+                            <code className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[12px] text-ink">
+                              {firm.temp_password}
+                            </code>
+                          ) : (
+                            <span className="text-danger">{firm.error ?? "Not created"}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {firm.email_sent ? (
+                            <span className="inline-flex items-center gap-1 text-success">
+                              <CircleCheck className="size-3.5" /> Sent
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-warn">
+                              <KeyRound className="size-3.5" /> Share manually
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {tenantResult.errors.length > 0 ? (
+                <Alert tone="warn" title="Some rows did not land" className="mt-4">
+                  <ul className="list-disc space-y-0.5 pl-4">
+                    {tenantResult.errors.map((error) => (
                       <li key={error}>{error}</li>
                     ))}
                   </ul>

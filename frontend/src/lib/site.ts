@@ -125,6 +125,12 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         description: "The client book — records, contacts and services",
       },
       {
+        label: "Messages",
+        href: "/messages",
+        icon: "message-square",
+        description: "Questions and complaints clients send from the portal",
+      },
+      {
         label: "Task Master",
         href: "/workflows",
         icon: "kanban",
@@ -313,6 +319,17 @@ export const DASHBOARD_NAV: { group: string; items: DashboardNavItem[] }[] = [
         href: "/dashboard/documents",
         icon: "folder",
         description: "Invoices, receipts, tax forms and contracts",
+      },
+    ],
+  },
+  {
+    group: "Support",
+    items: [
+      {
+        label: "Messages",
+        href: "/dashboard/messages",
+        icon: "message-square",
+        description: "Send your accountant a question or a complaint",
       },
     ],
   },

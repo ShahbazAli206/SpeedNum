@@ -42,6 +42,7 @@ import type {
   ClientExpenseTotals,
   ClientInvoice,
   ClientInvoiceTotals,
+  ClientMessage,
   ClientPayRun,
   ClientServiceLink,
   PayrollTotals as LivePayrollTotals,
@@ -266,6 +267,17 @@ export async function fetchLiveDocumentTotals(): Promise<DocumentTotals | null> 
   const totals = await apiServer<LiveDocumentTotals>("/client-portal/documents/totals");
   if (!totals) return null;
   return { count: totals.count, bytes: totals.bytes, shared: totals.shared };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Messages                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/** No demo.ts equivalent exists — a client's real conversation with its firm
+ * has no meaningful stand-in data, so this is an empty list until the backend
+ * is reachable, same treatment as fetchLiveClientServices below. */
+export async function fetchLiveClientMessages(): Promise<ClientMessage[] | null> {
+  return apiServer<ClientMessage[]>("/client-portal/messages");
 }
 
 /* -------------------------------------------------------------------------- */

@@ -593,6 +593,39 @@ class ClientTaxObligation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class ClientMessage(Base):
+    """A free-text message from the client portal to the firm — a question, a
+    complaint, anything outside the structured books (invoices, expenses,
+    payroll, taxes, documents). Flat and one-way on purpose: no threads, no
+    reply chain, no status workflow. Mirrored into Notification on insert
+    (see routers/client_messages.py) so it surfaces in the bell like anything
+    else, rather than being a second, silent inbox.
+    """
+
+    __tablename__ = "client_messages"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False
+    )
+    sender_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL")
+    )
+    sender_name: Mapped[str] = mapped_column(Text, nullable=False)
+    is_from_client: Mapped[bool] = mapped_column(Boolean, default=True)
+    subject: Mapped[str | None] = mapped_column(Text)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    read_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Notification(Base):
     __tablename__ = "notifications"
 

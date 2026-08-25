@@ -156,6 +156,7 @@ window.speednum.onUpdateStatus((status) => {
     } else {
       notesEl.classList.add("hidden");
     }
+    document.getElementById("updateAvailableError").classList.add("hidden");
     showUpdateView(updateAvailableView);
   } else if (status.state === "downloading") {
     const pct = Math.round(status.progress?.percent || 0);
@@ -168,7 +169,14 @@ window.speednum.onUpdateStatus((status) => {
   } else if (status.state === "error") {
     // Never block the app over a failed/offline update check — log only.
     appendLog(`[updater] ${status.message}`);
-    if (!updateReadyView.classList.contains("hidden") || !updateDownloadingView.classList.contains("hidden")) {
+    // A failed "Update Now" click (download-update error) needs to say so
+    // right in the modal that's still open — appendLog alone is invisible
+    // here, since #log lives inside the dashboard view, hidden pre-login.
+    if (!updateModal.classList.contains("hidden") && !updateAvailableView.classList.contains("hidden")) {
+      const errEl = document.getElementById("updateAvailableError");
+      errEl.textContent = `Couldn't download the update: ${status.message}`;
+      errEl.classList.remove("hidden");
+    } else if (!updateReadyView.classList.contains("hidden") || !updateDownloadingView.classList.contains("hidden")) {
       hideUpdateModal();
     }
   }

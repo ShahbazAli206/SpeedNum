@@ -20,6 +20,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { KpiTile } from "@/components/charts";
+import { ExportMenu } from "@/components/dashboard/export-menu";
 import { KpiRow } from "@/components/dashboard/page-shell";
 import {
   Alert,
@@ -47,6 +48,7 @@ import { cn } from "@/lib/cn";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { ApiError } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
+import { useSpreadsheetExport } from "@/lib/spreadsheet-export";
 
 interface PlatformStats {
   tenants: number;
@@ -118,6 +120,39 @@ export function AdminClient() {
       );
     });
   }, [tenants.data, query, statusFilter]);
+
+  const tenantExportColumns = useMemo(
+    () => [
+      { header: "Firm", value: (row: TenantSummary) => row.name },
+      { header: "Slug", value: (row: TenantSummary) => row.slug },
+      { header: "Custom domain", value: (row: TenantSummary) => row.custom_domain ?? "" },
+      { header: "Admin email", value: (row: TenantSummary) => row.admin_email ?? "" },
+      { header: "Plan", value: (row: TenantSummary) => row.plan },
+      { header: "Status", value: (row: TenantSummary) => (row.is_active ? "Active" : "Suspended") },
+      { header: "Demo", value: (row: TenantSummary) => (row.is_demo ? "Yes" : "No") },
+      { header: "Clients", value: (row: TenantSummary) => row.clients },
+      { header: "Max clients", value: (row: TenantSummary) => cap(row.max_clients) },
+      { header: "Users", value: (row: TenantSummary) => row.users },
+      { header: "Max users", value: (row: TenantSummary) => cap(row.max_users) },
+      { header: "Signed letters", value: (row: TenantSummary) => row.signed_letters },
+      { header: "Created", value: (row: TenantSummary) => row.created_at ?? "" },
+    ],
+    [],
+  );
+  const tenantExport = useSpreadsheetExport(filtered, tenantExportColumns, "speednum-tenants");
+
+  const auditExportColumns = useMemo(
+    () => [
+      { header: "Timestamp", value: (row: PlatformAuditEntry) => row.created_at },
+      { header: "Actor", value: (row: PlatformAuditEntry) => row.actor_email ?? "System" },
+      { header: "Action", value: (row: PlatformAuditEntry) => row.action },
+      { header: "Entity", value: (row: PlatformAuditEntry) => row.entity },
+      { header: "Firm", value: (row: PlatformAuditEntry) => row.tenant_name ?? "" },
+      { header: "Summary", value: (row: PlatformAuditEntry) => row.summary ?? "" },
+    ],
+    [],
+  );
+  const auditExport = useSpreadsheetExport(audit.data ?? [], auditExportColumns, "speednum-audit-log");
 
   if (forbidden) {
     return (
@@ -225,6 +260,12 @@ export function AdminClient() {
               <option value="active">Active</option>
               <option value="suspended">Suspended</option>
             </NativeSelect>
+            <ExportMenu
+              exportCsv={tenantExport.exportCsv}
+              exportXlsx={tenantExport.exportXlsx}
+              exportPdf={tenantExport.exportPdf}
+              exporting={tenantExport.exporting}
+            />
             <Button size="sm" icon={<Plus className="size-4" />} onClick={() => setCreating(true)}>
               New tenant
             </Button>
@@ -344,11 +385,19 @@ export function AdminClient() {
       </section>
 
       <section className="mt-6 rounded-xl border border-line bg-surface shadow-[var(--shadow-card)]">
-        <div className="border-b border-line px-5 py-4">
-          <h2 className="text-[15px] font-semibold text-ink">Audit log</h2>
-          <p className="mt-0.5 text-[13px] text-muted">
-            Append-only, across every tenant — including every superadmin action here
-          </p>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
+          <div>
+            <h2 className="text-[15px] font-semibold text-ink">Audit log</h2>
+            <p className="mt-0.5 text-[13px] text-muted">
+              Append-only, across every tenant — including every superadmin action here
+            </p>
+          </div>
+          <ExportMenu
+            exportCsv={auditExport.exportCsv}
+            exportXlsx={auditExport.exportXlsx}
+            exportPdf={auditExport.exportPdf}
+            exporting={auditExport.exporting}
+          />
         </div>
         {audit.isLoading ? (
           <LoadingBlock label="Loading audit log…" />

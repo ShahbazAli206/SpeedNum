@@ -51,6 +51,11 @@ export interface SessionValue {
   isAdmin: boolean;
   /** True when a platform superadmin is viewing this firm via impersonation. */
   isImpersonating: boolean;
+  /** Which portal this login belongs to, for the role chip in the rail —
+   *  distinct from `displayTitle`, which prefers the person's job title over
+   *  their role. Superadmin outranks everything else since an owner account
+   *  can also carry `is_superadmin`. */
+  portalRoleLabel: string;
   /** Re-read /auth/me and the reminder counts now — call after an action that
    *  changes either (marking notifications read, acknowledging a reminder). */
   refresh: () => void;
@@ -168,6 +173,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         ? profile.role === "owner" || profile.role === "admin" || profile.is_superadmin
         : true,
       isImpersonating: isLive ? (me?.is_impersonating ?? false) : false,
+      portalRoleLabel: isLive ? portalRoleLabelOf(profile) : "Admin",
       refresh: () => void load(),
       setUnread: (next) =>
         setUnreadOverride((current) =>
@@ -192,6 +198,17 @@ function roleLabel(role: string | undefined): string {
   }
 }
 
+/** Superadmin outranks the firm role (an owner account can also carry
+ *  `is_superadmin`); a portal login is `Client` regardless of its `role`
+ *  value, since client accounts share the same role column as staff. */
+function portalRoleLabelOf(profile: Me["profile"] | null): string {
+  if (!profile) return "Admin";
+  if (profile.is_superadmin) return "Super Admin";
+  if (profile.client_id) return "Client";
+  if (profile.role === "owner" || profile.role === "admin") return "Admin";
+  return "Accountant";
+}
+
 /**
  * Read the session. Safe outside a provider — returns the demo defaults rather
  * than throwing, so a component can be dropped onto a marketing page without
@@ -213,6 +230,7 @@ export function useSession(): SessionValue {
     isFirmStaff: true,
     isAdmin: true,
     isImpersonating: false,
+    portalRoleLabel: "Admin",
     refresh: () => {},
     setUnread: () => {},
   };

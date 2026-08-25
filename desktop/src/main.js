@@ -167,8 +167,15 @@ if (!gotSingleInstanceLock) {
     // Also needed on Windows even with electron-builder's package.json
     // `protocols` config (which registers the handler at install time) —
     // this call keeps registration correct for an unpackaged dev run too.
-    if (process.defaultApp && process.argv.length >= 2) {
-      app.setAsDefaultProtocolClient(DEEP_LINK_PROTOCOL, process.execPath, [path.resolve(process.argv[1])]);
+    //
+    // Uses app.getAppPath() rather than process.argv[1]: argv's app-path slot
+    // isn't reliably at index 1 (e.g. `electron --remote-debugging-port=9502 .`
+    // puts a CLI flag there instead), and registering that flag as the fixed
+    // launch argument silently corrupts the OS-level protocol handler — every
+    // future speednum:// click then launches electron.exe against a bogus
+    // path and fails, until the registry entry is manually corrected.
+    if (process.defaultApp) {
+      app.setAsDefaultProtocolClient(DEEP_LINK_PROTOCOL, process.execPath, [app.getAppPath()]);
     } else {
       app.setAsDefaultProtocolClient(DEEP_LINK_PROTOCOL);
     }

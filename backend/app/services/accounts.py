@@ -27,8 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..models import Client, ClientService, Deadline, Profile, Service, Tenant
-from . import local_auth
-from .email import portal_welcome_html, send_email, sender_name, staff_welcome_html
+from . import audit, local_auth
+from .email import deliver, portal_welcome_html, sender_name, staff_welcome_html
 from .supabase_admin import SupabaseAdminError
 from .supabase_admin import create_auth_user as _supabase_create_auth_user
 from .supabase_admin import delete_auth_user as _supabase_delete_auth_user
@@ -369,7 +369,7 @@ async def _send_welcome(
             contact_name = owner.full_name if owner else None
         magic_token = await _magic_link_token(session, profile)
         services, deadlines = await _client_engagement_summary(session, profile.client_id)
-        return await send_email(
+        result = await deliver(
             to=profile.email,
             subject=f"Welcome to {tenant.name} — your client portal is ready",
             html=portal_welcome_html(
@@ -392,12 +392,26 @@ async def _send_welcome(
             reply_to=reply_to,
             from_name=sender_name(tenant.name, tenant.email_from_name),
         )
+        # Only an actually-configured transport failing is news — "none"
+        # means email was never set up, which the UI already handles by
+        # showing the temporary password on screen, not something to alert on
+        # every single account this tenant ever creates.
+        if not result and result.provider != "none":
+            await audit.notify(
+                session,
+                tenant_id=tenant.id,
+                type="email_failed",
+                title=f"Portal invite email failed — {client_name}",
+                body=f"Could not reach {profile.email}: {result.error or 'delivery failed.'}",
+                link=f"/clients/{profile.client_id}",
+            )
+        return result.ok
 
     # Staff get a magic link too. `staff_welcome_html` has always accepted one;
     # it just was never passed, so an accountant had to type the temporary
     # password by hand while a client got one-click access.
     staff_token = await _magic_link_token(session, profile)
-    return await send_email(
+    result = await deliver(
         to=profile.email,
         subject=f"Your {tenant.name} practice account is ready",
         html=staff_welcome_html(
@@ -417,3 +431,13 @@ async def _send_welcome(
         reply_to=reply_to,
         from_name=sender_name(tenant.name, tenant.email_from_name),
     )
+    if not result and result.provider != "none":
+        await audit.notify(
+            session,
+            tenant_id=tenant.id,
+            type="email_failed",
+            title=f"Welcome email failed — {profile.full_name or profile.email}",
+            body=f"Could not reach {profile.email}: {result.error or 'delivery failed.'}",
+            link=f"/team/{profile.id}",
+        )
+    return result.ok

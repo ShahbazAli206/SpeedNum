@@ -1203,6 +1203,24 @@ class UserImportResult(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
+class TenantImportOutcome(BaseModel):
+    name: str
+    slug: str | None = None
+    admin_email: str
+    created: bool
+    temp_password: str | None = None
+    email_sent: bool = False
+    error: str | None = None
+
+
+class TenantImportResult(BaseModel):
+    created: int
+    failed: int
+    emailed: int
+    tenants: list[TenantImportOutcome] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
 # --- Client-portal books (invoices, expenses, payroll, taxes, documents) ------
 # The client's own bookkeeping, shown on /dashboard/*. Distinct from the firm's
 # side (engagement_letters, Client.annual_fee) and from DeadlineRead (the firm's
@@ -1309,6 +1327,28 @@ class ClientExpenseRead(ORMModel):
 class CategoryTotal(BaseModel):
     label: str
     value: float
+
+
+# --- Client-portal messages -----------------------------------------------------
+class ClientMessageCreate(BaseModel):
+    subject: str | None = Field(default=None, max_length=200)
+    body: str = Field(min_length=1, max_length=5000)
+
+
+class ClientMessageRead(ORMModel):
+    id: uuid.UUID
+    client_id: uuid.UUID
+    client_name: str | None = None
+    sender_name: str
+    is_from_client: bool
+    subject: str | None = None
+    body: str
+    is_read: bool
+    created_at: datetime | None = None
+
+
+class ClientMessageCounts(BaseModel):
+    unread: int = 0
 
 
 class ClientExpenseTotals(BaseModel):

@@ -1,23 +1,12 @@
 "use client";
 
-import {
-  ArrowDown,
-  ArrowUp,
-  ChevronDown,
-  ChevronsUpDown,
-  Download,
-  FileStack,
-  FileText,
-  Search,
-  Sheet,
-} from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronsUpDown, Search } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
-import { useToast } from "@/components/toast";
-import { EmptyState, Menu, Pagination, Select } from "@/components/ui";
+import { ExportMenu } from "@/components/dashboard/export-menu";
+import { EmptyState, Pagination, Select } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { formatDateTime } from "@/lib/format";
-import { useSession } from "@/lib/session";
+import { useSpreadsheetExport } from "@/lib/spreadsheet-export";
 
 export interface Column<T> {
   key: string;
@@ -75,8 +64,6 @@ export function DataTable<T extends { id: string }>({
   /** Enables the CSV download button; used as the file name stem. */
   exportName?: string;
 }) {
-  const toast = useToast();
-  const session = useSession();
   const [query, setQuery] = useState("");
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
   const [sort, setSort] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
@@ -127,175 +114,21 @@ export function DataTable<T extends { id: string }>({
     });
   };
 
-  // Outside-click and Escape used to be hand-rolled here; `Menu` owns both now.
-  const [exporting, setExporting] = useState(false);
-
-  // Spreadsheet formula injection: Excel/Sheets treat a cell whose first
-  // character is one of these as a formula, even in files we generate
-  // ourselves from plain data. Prefixing with a quote forces literal text —
-  // the standard OWASP CSV-injection mitigation.
-  const sanitizeForSpreadsheet = (value: string) =>
-    /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
-
   // Read exportValue (falling back to sortValue) so the file carries raw
-  // values rather than the rendered React nodes. `sanitize` is off for PDF —
-  // it isn't a spreadsheet, so there's nothing to neutralize and the leading
-  // quote would just show up as stray punctuation.
-  const exportRows = (sanitize: boolean) => {
-    const header = columns.map((column) => column.header);
-    const body = filtered.map((row) =>
-      columns.map((column) => {
-        const value = column.exportValue ? column.exportValue(row) : column.sortValue ? column.sortValue(row) : "";
-        const text = String(value);
-        return sanitize ? sanitizeForSpreadsheet(text) : text;
-      }),
-    );
-    return { header, body };
-  };
-
-  const exportCsv = () => {
-    const { header, body } = exportRows(true);
-    const csv = [header, ...body]
-      .map((line) => line.map((cell) => `"${cell.replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-
-    // A leading UTF-8 BOM so Excel on Windows doesn't mis-render accented
-    // or non-Latin characters when the file is opened directly.
-    const blob = new Blob(["﻿", csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${exportName}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-    toast.success("Export ready", `${filtered.length} rows downloaded as CSV.`);
-  };
-
-  const exportXlsx = async () => {
-    setExporting(true);
-    try {
-      const { Workbook } = await import("exceljs");
-      const { header, body } = exportRows(true);
-      const workbook = new Workbook();
-      const sheet = workbook.addWorksheet("Export");
-      sheet.addRow(header).font = { bold: true };
-      for (const line of body) sheet.addRow(line);
-      sheet.columns.forEach((column) => {
-        column.width = 18;
-      });
-
-      const buffer = await workbook.xlsx.writeBuffer();
-      const blob = new Blob([buffer], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${exportName}.xlsx`;
-      link.click();
-      URL.revokeObjectURL(url);
-      toast.success("Export ready", `${filtered.length} rows downloaded as Excel.`);
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const exportPdf = async () => {
-    setExporting(true);
-    try {
-      const { Document, Page, View, Text, StyleSheet, Font, pdf } = await import(
-        "@react-pdf/renderer"
-      );
-      // Table cells hold long unbroken tokens (emails, URLs) that don't fit a
-      // flex-width cell — unlike prose, where letter-pdf.tsx's `[word]` (never
-      // split) is the right call, here an unsplittable long word overflows
-      // into the next cell instead of wrapping. Split only long tokens into
-      // characters so the layout engine can break them; short words are
-      // unaffected.
-      Font.registerHyphenationCallback((word) => (word.length > 20 ? word.split("") : [word]));
-
-      const { header, body } = exportRows(false);
-      const title = (exportName ?? "export")
-        .replace(/^speednum-/, "")
-        .replace(/[-_]+/g, " ")
-        .replace(/\b\w/g, (letter) => letter.toUpperCase());
-      const tenantName = session.me?.tenant?.name ?? null;
-      const generated = `Generated ${formatDateTime(new Date().toISOString())}`;
-
-      const styles = StyleSheet.create({
-        page: { padding: 28, fontSize: 8, fontFamily: "Helvetica", color: "#1e293b" },
-        headerRow: {
-          flexDirection: "row",
-          justifyContent: "space-between",
-          alignItems: "flex-end",
-          borderBottomWidth: 1,
-          borderBottomColor: "#cdd6e2",
-          paddingBottom: 8,
-          marginBottom: 8,
-        },
-        titleBlock: { flexDirection: "column" },
-        title: { fontSize: 13, fontFamily: "Helvetica-Bold" },
-        tenant: { fontSize: 9, color: "#64748b", marginTop: 2 },
-        meta: { fontSize: 8, color: "#94a3b8" },
-        tHeadRow: {
-          flexDirection: "row",
-          backgroundColor: "#f1f5f9",
-          borderBottomWidth: 1,
-          borderBottomColor: "#cdd6e2",
-          paddingVertical: 4,
-        },
-        tRow: {
-          flexDirection: "row",
-          borderBottomWidth: 0.5,
-          borderBottomColor: "#e4e9f0",
-          paddingVertical: 3,
-        },
-        cell: { flex: 1, paddingHorizontal: 3 },
-        headCell: { flex: 1, paddingHorizontal: 3, fontFamily: "Helvetica-Bold", color: "#475569" },
-      });
-
-      const PdfDocument = (
-        <Document title={title}>
-          <Page size="A4" orientation="landscape" style={styles.page} wrap>
-            <View style={styles.headerRow} fixed>
-              <View style={styles.titleBlock}>
-                <Text style={styles.title}>{title}</Text>
-                {tenantName ? <Text style={styles.tenant}>{tenantName}</Text> : null}
-              </View>
-              <Text style={styles.meta}>{generated}</Text>
-            </View>
-            <View style={styles.tHeadRow} fixed>
-              {header.map((cell, index) => (
-                <Text key={index} style={styles.headCell}>
-                  {cell}
-                </Text>
-              ))}
-            </View>
-            {body.map((row, rowIndex) => (
-              <View key={rowIndex} style={styles.tRow} wrap={false}>
-                {row.map((cell, cellIndex) => (
-                  <Text key={cellIndex} style={styles.cell}>
-                    {cell}
-                  </Text>
-                ))}
-              </View>
-            ))}
-          </Page>
-        </Document>
-      );
-
-      const blob = await pdf(PdfDocument).toBlob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${exportName}.pdf`;
-      link.click();
-      URL.revokeObjectURL(url);
-      toast.success("Export ready", `${filtered.length} rows downloaded as PDF.`);
-    } finally {
-      setExporting(false);
-    }
-  };
+  // values rather than the rendered React nodes.
+  const { exportCsv, exportXlsx, exportPdf, exporting } = useSpreadsheetExport(
+    filtered,
+    useMemo(
+      () =>
+        columns.map((column) => ({
+          header: column.header,
+          value: (row: T) =>
+            column.exportValue ? column.exportValue(row) : column.sortValue ? column.sortValue(row) : "",
+        })),
+      [columns],
+    ),
+    exportName ?? "export",
+  );
 
   return (
     <div>
@@ -337,40 +170,11 @@ export function DataTable<T extends { id: string }>({
         ))}
 
         {exportName ? (
-          <Menu
-            label="Export rows"
-            minWidth={200}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-[13px] font-medium text-muted transition hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-60"
-            trigger={
-              <>
-                <Download className="size-3.5" />
-                Export
-                <ChevronDown className="size-3.5" />
-              </>
-            }
-            items={[
-              {
-                label: "CSV",
-                description: "Opens in any spreadsheet",
-                icon: <FileText className="size-3.5" />,
-                disabled: exporting,
-                onSelect: exportCsv,
-              },
-              {
-                label: "Excel",
-                description: "Formatted .xlsx workbook",
-                icon: <Sheet className="size-3.5" />,
-                disabled: exporting,
-                onSelect: () => void exportXlsx(),
-              },
-              {
-                label: "PDF",
-                description: "Printable table, all rows",
-                icon: <FileStack className="size-3.5" />,
-                disabled: exporting,
-                onSelect: () => void exportPdf(),
-              },
-            ]}
+          <ExportMenu
+            exportCsv={exportCsv}
+            exportXlsx={exportXlsx}
+            exportPdf={exportPdf}
+            exporting={exporting}
           />
         ) : null}
       </div>

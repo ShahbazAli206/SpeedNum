@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 
 import { Icon } from "@/components/icon";
 import { Logo } from "@/components/logo";
-import { Skeleton } from "@/components/ui";
+import { Badge, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { DEMO_ACCOUNT } from "@/lib/demo";
 import { useSession } from "@/lib/session";
@@ -28,8 +28,9 @@ export function Sidebar({
   const pathname = usePathname();
   const session = useSession();
   // The client portal has no branding provider of its own — the firm's logo
-  // rides in on the same /auth/me call the identity chip already uses.
+  // and name ride in on the same /auth/me call the identity chip already uses.
   const logoUrl = session.isLive ? session.me?.tenant?.logo_url : null;
+  const firmName = session.isLive ? session.me?.tenant?.name : null;
 
   // Real identity when signed in; the demo account only stands in when no API
   // is reachable, so a live client never sees someone else's name in the rail.
@@ -59,7 +60,7 @@ export function Sidebar({
             logoUrl={logoUrl}
           />
         ) : (
-          <Logo href="/dashboard" size={30} sublabel="CLIENT" logoUrl={logoUrl} />
+          <Logo href="/dashboard" size={30} sublabel={firmName ?? "CLIENT PORTAL"} logoUrl={logoUrl} />
         )}
         <button
           type="button"
@@ -70,6 +71,18 @@ export function Sidebar({
           <X className="size-5" />
         </button>
       </div>
+
+      {/* Role chip: the client portal only ever serves a client login, but
+          this stays data-driven off the session (rather than a hardcoded
+          "CLIENT" string) so it can never disagree with the firm shell's
+          equivalent chip if a profile is ever misrouted between the two. */}
+      {!session.isLoading ? (
+        <div className={cn("border-b border-line py-2", collapsed ? "flex justify-center" : "px-4")}>
+          <Badge tone="success" className={collapsed ? "px-1.5" : undefined}>
+            {collapsed ? session.portalRoleLabel[0] : session.portalRoleLabel}
+          </Badge>
+        </div>
+      ) : null}
 
       <nav className="scroll-thin flex-1 overflow-y-auto px-3 py-4" aria-label="Portal">
         {DASHBOARD_NAV.map((group) => (

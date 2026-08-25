@@ -21,8 +21,12 @@ from app.routers.imports import (
     _parse_year_end,
     _to_float,
     detect_mapping,
+    detect_service_mapping,
+    detect_tenant_mapping,
     detect_user_mapping,
     parse_row,
+    parse_service_row,
+    parse_tenant_row,
     parse_user_row,
 )
 
@@ -223,3 +227,89 @@ def test_unrecognised_role_is_reported_and_defaults_to_the_least_privilege_it_ca
     )
     assert data["role"] == "member"
     assert any("not a role we recognise" in error for error in errors)
+
+
+# --- service rows ---------------------------------------------------------------
+def test_detect_service_mapping_matches_human_headers():
+    mapping = detect_service_mapping(["Service Code", "Service Name", "Cadence", "Fee"])
+    assert mapping["Service Code"] == "code"
+    assert mapping["Service Name"] == "name"
+    assert mapping["Cadence"] == "frequency"
+    assert mapping["Fee"] == "default_price"
+
+
+def test_parse_service_row_happy_path():
+    data, errors = parse_service_row(
+        {"Code": "t2", "Name": "Corporate tax return", "Frequency": "Annual", "Price": "$1,200"},
+        {"Code": "code", "Name": "name", "Frequency": "frequency", "Price": "default_price"},
+    )
+    assert errors == []
+    assert data["code"] == "T2"
+    assert data["frequency"] == "annual"
+    assert data["default_price"] == 1200.0
+    # Defaults to the offset-from-period-end rule when no months column is given.
+    assert data["due_rule"] == {"type": "offset_from_period_end", "months": 6, "period_basis": "fiscal"}
+
+
+def test_parse_service_row_requires_code_and_name():
+    _, errors = parse_service_row({"Name": ""}, {"Name": "name"})
+    assert any("code is required" in error for error in errors)
+    assert any("name is required" in error for error in errors)
+
+
+def test_parse_service_row_reads_months_after_period_end():
+    data, _ = parse_service_row(
+        {"Code": "T1", "Name": "Personal return", "Months": "3"},
+        {"Code": "code", "Name": "name", "Months": "months_after_period_end"},
+    )
+    assert data["due_rule"]["months"] == 3
+
+
+def test_parse_service_row_flags_unrecognised_frequency_but_still_defaults():
+    data, errors = parse_service_row(
+        {"Code": "X", "Name": "Y", "Frequency": "biweekly"},
+        {"Code": "code", "Name": "name", "Frequency": "frequency"},
+    )
+    assert data["frequency"] == "annual"
+    assert any("not a frequency we recognise" in error for error in errors)
+
+
+def test_parse_service_row_reads_is_active():
+    data, _ = parse_service_row(
+        {"Code": "X", "Name": "Y", "Active": "No"},
+        {"Code": "code", "Name": "name", "Active": "is_active"},
+    )
+    assert data["is_active"] is False
+
+
+# --- tenant rows ------------------------------------------------------------------
+def test_detect_tenant_mapping_matches_human_headers():
+    mapping = detect_tenant_mapping(["Firm Name", "Admin Email", "Max Users"])
+    assert mapping["Firm Name"] == "name"
+    assert mapping["Admin Email"] == "admin_email"
+    assert mapping["Max Users"] == "max_users"
+
+
+def test_parse_tenant_row_happy_path():
+    data, errors = parse_tenant_row(
+        {"Name": "Lakeview Dental Corp.", "Email": "Admin@Lakeview.CA", "Max Users": "5"},
+        {"Name": "name", "Email": "admin_email", "Max Users": "max_users"},
+    )
+    assert errors == []
+    assert data["name"] == "Lakeview Dental Corp."
+    assert data["admin_email"] == "admin@lakeview.ca"
+    assert data["max_users"] == 5
+
+
+def test_parse_tenant_row_requires_name_and_admin_email():
+    _, errors = parse_tenant_row({"Name": ""}, {"Name": "name"})
+    assert any("Firm name is required" in error for error in errors)
+    assert any("Admin email is required" in error for error in errors)
+
+
+def test_parse_tenant_row_rejects_a_bad_email_rather_than_importing_it():
+    data, errors = parse_tenant_row(
+        {"Name": "X", "Email": "not-an-email"}, {"Name": "name", "Email": "admin_email"}
+    )
+    assert "admin_email" not in data
+    assert any("not a valid email" in error for error in errors)

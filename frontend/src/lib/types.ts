@@ -447,6 +447,24 @@ export interface UserImportResult {
   errors: string[];
 }
 
+export interface TenantImportOutcome {
+  name: string;
+  slug: string | null;
+  admin_email: string;
+  created: boolean;
+  temp_password: string | null;
+  email_sent: boolean;
+  error: string | null;
+}
+
+export interface TenantImportResult {
+  created: number;
+  failed: number;
+  emailed: number;
+  tenants: TenantImportOutcome[];
+  errors: string[];
+}
+
 export interface CustomField {
   id: string;
   entity: CustomEntity;
@@ -588,6 +606,21 @@ export interface ClientExpense {
 export interface CategoryTotal {
   label: string;
   value: number;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Client-portal messages — GET/POST /client-portal/messages.                  */
+/* -------------------------------------------------------------------------- */
+export interface ClientMessage {
+  id: string;
+  client_id: string;
+  client_name: string | null;
+  sender_name: string;
+  is_from_client: boolean;
+  subject: string | null;
+  body: string;
+  is_read: boolean;
+  created_at: string;
 }
 
 export interface ClientExpenseTotals {
