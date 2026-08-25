@@ -2,6 +2,20 @@
 
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
+const fs = require("fs");
+
+// TEMPORARY diagnostic — pins down why the update modal appears in a dev
+// launch despite every checkForUpdates() call site being gated behind
+// app.isPackaged. Remove once the live behavior is understood.
+const DEBUG_LOG = path.join(__dirname, "..", "debug.log");
+function debugLog(msg) {
+  try {
+    fs.appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] ${msg}\n`);
+  } catch {
+    // best-effort only
+  }
+}
+debugLog(`module load: argv=${JSON.stringify(process.argv)} defaultApp=${process.defaultApp}`);
 
 const backupClient = require("./backup-client");
 const { runSync, scheduleSync } = require("./sync");
@@ -66,6 +80,8 @@ function handleDeepLink(rawUrl) {
   // still only ever as an exact match against the allow-list below.
   const command = (parsed.hostname || parsed.pathname.replace(/^\/+/, "")).toLowerCase();
 
+  debugLog(`handleDeepLink: rawUrl=${rawUrl} command=${command} isPackaged=${app.isPackaged} hasUpdater=${!!updater}`);
+
   if (command !== "check-update" && command !== "version") return;
 
   if (mainWindow) {
@@ -75,6 +91,7 @@ function handleDeepLink(rawUrl) {
   }
 
   if (!app.isPackaged || !updater) return; // same unpackaged-build caveat as the startup check below
+  debugLog("handleDeepLink: calling updater.checkForUpdates({manual:true})");
   updater.checkForUpdates({ manual: true });
 }
 
@@ -155,6 +172,7 @@ if (!gotSingleInstanceLock) {
   app.quit();
 } else {
   app.on("second-instance", (_event, argv) => {
+    debugLog(`second-instance: argv=${JSON.stringify(argv)}`);
     const link = argv.find((arg) => arg.startsWith(`${DEEP_LINK_PROTOCOL}://`));
     if (link) handleDeepLink(link);
     else if (mainWindow) {
@@ -164,6 +182,10 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(() => {
+    debugLog(
+      `whenReady: isPackaged=${app.isPackaged} defaultApp=${process.defaultApp} ` +
+        `appPath=${app.getAppPath()} argv=${JSON.stringify(process.argv)}`,
+    );
     // Also needed on Windows even with electron-builder's package.json
     // `protocols` config (which registers the handler at install time) —
     // this call keeps registration correct for an unpackaged dev run too.
@@ -184,14 +206,19 @@ if (!gotSingleInstanceLock) {
     createWindow();
 
     updater = setupAutoUpdater({
-      onStatus: (status) => mainWindow?.webContents.send("speednum:updateStatus", status),
+      onStatus: (status) => {
+        debugLog(`updateStatus: ${JSON.stringify(status)}`);
+        mainWindow?.webContents.send("speednum:updateStatus", status);
+      },
     });
 
     // A packaged app only — electron-updater has no installed-app metadata to
     // compare against when run unpackaged (`npm start`), and errors on every
     // check in that mode. Real update checks are exercised against a real
     // packaged build in this session's own verification, not `npm start`.
+    debugLog(`startup update-check gate: isPackaged=${app.isPackaged}`);
     if (app.isPackaged) {
+      debugLog("startup: calling updater.checkForUpdates() + scheduling interval");
       updater.checkForUpdates();
       stopUpdateChecks = setInterval(() => updater.checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
     }
@@ -201,6 +228,7 @@ if (!gotSingleInstanceLock) {
     // above, just checked here for the app's *own* launch rather than a
     // second instance's.
     const coldStartLink = process.argv.find((arg) => arg.startsWith(`${DEEP_LINK_PROTOCOL}://`));
+    debugLog(`coldStartLink=${coldStartLink ?? "(none)"}`);
     if (coldStartLink) handleDeepLink(coldStartLink);
 
     app.on("activate", () => {
