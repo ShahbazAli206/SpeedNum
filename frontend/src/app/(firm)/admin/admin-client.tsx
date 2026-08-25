@@ -14,6 +14,7 @@ import {
   Plus,
   Signature,
   Trash2,
+  Upload,
   Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -26,6 +27,7 @@ import {
   Alert,
   Badge,
   Button,
+  ButtonLink,
   Checkbox,
   EmptyState,
   Field,
@@ -266,6 +268,14 @@ export function AdminClient() {
               exportPdf={tenantExport.exportPdf}
               exporting={tenantExport.exporting}
             />
+            <ButtonLink
+              href="/import?mode=tenants"
+              variant="secondary"
+              size="sm"
+              icon={<Upload className="size-4" />}
+            >
+              Import
+            </ButtonLink>
             <Button size="sm" icon={<Plus className="size-4" />} onClick={() => setCreating(true)}>
               New tenant
             </Button>

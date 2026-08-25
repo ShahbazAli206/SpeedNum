@@ -7,6 +7,7 @@ import {
   Pencil,
   Trash2,
   TriangleAlert,
+  Upload,
   UserPlus,
   Users,
   Wallet,
@@ -19,7 +20,7 @@ import { CredentialsModal } from "@/components/dashboard/credentials-modal";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { DashboardHeader } from "@/components/dashboard/page-shell";
 import { useToast } from "@/components/toast";
-import { Alert, Button, Modal } from "@/components/ui";
+import { Alert, Button, ButtonLink, Modal } from "@/components/ui";
 import { ApiError, del, patch, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { TODAY, type TeamRow, type TeamStatus } from "@/lib/firm-demo";
@@ -369,9 +370,14 @@ export function TeamClient({
         title="Accountants"
         subtitle="Your internal team of CPAs serving your clients."
         actions={
-          <Button icon={<UserPlus className="size-4" />} onClick={openAdd}>
-            Add accountant
-          </Button>
+          <>
+            <ButtonLink href="/import?mode=users" variant="secondary" icon={<Upload className="size-4" />}>
+              Import
+            </ButtonLink>
+            <Button icon={<UserPlus className="size-4" />} onClick={openAdd}>
+              Add accountant
+            </Button>
+          </>
         }
       />
 

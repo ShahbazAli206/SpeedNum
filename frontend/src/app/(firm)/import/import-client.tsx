@@ -32,6 +32,7 @@ import {
   UserPlus,
   Users,
 } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { DashboardHeader } from "@/components/dashboard/page-shell";
@@ -194,7 +195,17 @@ export function ImportClient() {
   const isSuperadmin = session.me?.profile?.is_superadmin ?? false;
   const visibleModes = MODES.filter((option) => !option.superadminOnly || isSuperadmin);
 
-  const [mode, setMode] = useState<Mode>("clients");
+  // Lets a page's own "Import" button land the operator on the right tab
+  // (e.g. the Accountants page links to /import?mode=users) instead of
+  // always opening on Clients and making them hunt for the right one.
+  // Access control is enforced server-side (SuperadminDep on the tenant
+  // importer), so an invalid or unauthorized value just falls back to
+  // Clients rather than needing to be checked here.
+  const requestedMode = useSearchParams().get("mode");
+  const initialMode = MODES.some((option) => option.value === requestedMode)
+    ? (requestedMode as Mode)
+    : "clients";
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [busy, setBusy] = useState(false);

@@ -30,6 +30,7 @@ import {
   Repeat,
   Tag,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -41,6 +42,7 @@ import { useToast } from "@/components/toast";
 import {
   Alert,
   Button,
+  ButtonLink,
   Checkbox,
   Field,
   Input,
@@ -342,6 +344,9 @@ export function ServicesClient({
               exportPdf={exportPdf}
               exporting={exporting}
             />
+            <ButtonLink href="/import?mode=services" variant="secondary" icon={<Upload className="size-4" />}>
+              Import
+            </ButtonLink>
             <Button icon={<Plus className="size-4" />} onClick={openAdd}>
               Add service
             </Button>

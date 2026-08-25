@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   Trash2,
   TriangleAlert,
+  Upload,
   UserPlus,
   UserRound,
   Users,
@@ -21,7 +22,7 @@ import { CredentialsModal } from "@/components/dashboard/credentials-modal";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { DashboardHeader } from "@/components/dashboard/page-shell";
 import { useToast } from "@/components/toast";
-import { Button, Checkbox, Field, Input, Menu, Modal, Select } from "@/components/ui";
+import { Button, ButtonLink, Checkbox, Field, Input, Menu, Modal, Select } from "@/components/ui";
 import { del, patch, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { TODAY, type PlatformRole, type PlatformUser } from "@/lib/firm-demo";
@@ -339,9 +340,14 @@ export function UsersClient({
         title="Users"
         subtitle="Create and manage SpeedNum platform accounts."
         actions={
-          <Button icon={<UserPlus className="size-4" />} onClick={openAdd}>
-            Add user
-          </Button>
+          <>
+            <ButtonLink href="/import?mode=users" variant="secondary" icon={<Upload className="size-4" />}>
+              Import
+            </ButtonLink>
+            <Button icon={<UserPlus className="size-4" />} onClick={openAdd}>
+              Add user
+            </Button>
+          </>
         }
       />
 
