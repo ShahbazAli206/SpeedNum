@@ -107,8 +107,11 @@ export default async function ClientDetailPage({
   searchParams,
 }: PageProps<"/clients/[id]">) {
   const { id } = await params;
-  const { tab } = await searchParams;
+  const { tab, edit } = await searchParams;
   const initialTab = TAB_IDS.find((candidate) => candidate === tab) as TabId | undefined;
+  // The clients list's pencil icon deep-links here with ?edit=1 so editing
+  // doesn't need a second click once the detail page has loaded.
+  const openEditOnLoad = edit === "1";
 
   const live = await loadLive(id);
   if (live) {
@@ -124,6 +127,7 @@ export default async function ClientDetailPage({
         customFields={live.customFields}
         team={live.team}
         initialTab={initialTab}
+        openEditOnLoad={openEditOnLoad}
         isLive
       />
     );
@@ -155,6 +159,7 @@ export default async function ClientDetailPage({
       customFields={customFields}
       team={team}
       initialTab={initialTab}
+      openEditOnLoad={openEditOnLoad}
       isLive={false}
     />
   );

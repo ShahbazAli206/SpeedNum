@@ -44,6 +44,14 @@ def test_detect_mapping_matches_human_headers():
     assert mapping["Primary Contact Email"] == "email"
 
 
+def test_detect_mapping_recognises_mrr_plan_owner_and_bare_business():
+    mapping = detect_mapping(["Business", "Plan", "MRR", "Accountant"])
+    assert mapping["Business"] == "business_name"
+    assert mapping["Plan"] == "plan"
+    assert mapping["MRR"] == "mrr"
+    assert mapping["Accountant"] == "owner"
+
+
 def test_detect_mapping_ignores_unknown_columns():
     mapping = detect_mapping(["Legal Name", "Favourite Colour"])
     assert "Favourite Colour" not in mapping
@@ -163,6 +171,60 @@ def test_parse_row_normalises_status_and_type():
     )
     assert data["status"] == "prospect"
     assert data["client_type"] == "corporation"
+
+
+def test_parse_row_converts_mrr_to_annual_fee():
+    data, errors = parse_row(
+        {"Legal Name": "X", "MRR": "250"},
+        {"Legal Name": "legal_name", "MRR": "mrr"},
+    )
+    assert errors == []
+    assert data["annual_fee"] == 3000.0
+    assert "mrr" not in data
+
+
+def test_parse_row_folds_plan_into_tags_alongside_an_explicit_tags_column():
+    # Plan and Tags can appear in either order in the file — neither should
+    # clobber the other regardless of which column comes first.
+    data, _ = parse_row(
+        {"Legal Name": "X", "Plan": "Growth", "Tags": "VIP"},
+        {"Legal Name": "legal_name", "Plan": "plan", "Tags": "tags"},
+    )
+    assert set(data["tags"]) == {"Growth", "VIP"}
+
+
+def test_parse_row_resolves_owner_by_name():
+    data, errors = parse_row(
+        {"Legal Name": "X", "Accountant": "Amzad Amiri"},
+        {"Legal Name": "legal_name", "Accountant": "owner"},
+        {"amzad amiri": "22222222-2222-2222-2222-222222222222"},
+    )
+    assert errors == []
+    assert data["owner_id"] == "22222222-2222-2222-2222-222222222222"
+
+
+def test_parse_row_flags_an_unmatched_owner_rather_than_importing_it_wrong():
+    data, errors = parse_row(
+        {"Legal Name": "X", "Accountant": "Someone Else"},
+        {"Legal Name": "legal_name", "Accountant": "owner"},
+        {"amzad amiri": "22222222-2222-2222-2222-222222222222"},
+    )
+    assert "owner_id" not in data
+    assert any("No accountant matches" in error for error in errors)
+
+
+def test_parse_row_keeps_unrecognised_columns_as_custom_fields():
+    data, errors = parse_row(
+        {"Legal Name": "X", "Alberta Corp. No.": "2022405969"},
+        {"Legal Name": "legal_name"},
+    )
+    assert errors == []
+    assert data["custom"] == {"Alberta Corp. No.": "2022405969"}
+
+
+def test_parse_row_omits_custom_when_every_column_is_recognised():
+    data, _ = parse_row({"Legal Name": "X"}, {"Legal Name": "legal_name"})
+    assert "custom" not in data
 
 
 # --- user rows ----------------------------------------------------------------

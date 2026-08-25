@@ -36,6 +36,7 @@ from ..services import accounts, audit
 from ..services.accounts import AccountError
 from ..services.rate_limit import rate_limit_by_tenant
 from .admin import provision_tenant
+from .clients import MIN_ANNUAL_FEE
 
 router = APIRouter(prefix="/import", tags=["import"])
 
@@ -60,7 +61,7 @@ MAX_TENANT_COMMIT_ROWS = 25
 FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "code": ("client code", "code", "client id", "client no", "account", "account number"),
     "legal_name": ("legal name", "client name", "name", "company", "company name", "legal"),
-    "business_name": ("operating name", "trade name", "business name", "dba"),
+    "business_name": ("operating name", "trade name", "business name", "dba", "business"),
     "client_type": ("type", "entity type", "client type"),
     "status": ("status", "client status"),
     # "primary contact email/phone" is what the downloadable template calls
@@ -85,6 +86,16 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "year_end_month": ("year end month", "fye month"),
     "year_end_day": ("year end day", "fye day"),
     "annual_fee": ("annual fee", "fee", "fees", "billing", "annual billing"),
+    # Firms often export the monthly figure rather than the annual one the
+    # database stores — converted to annual_fee (×12) in parse_row.
+    "mrr": ("mrr", "monthly recurring revenue", "monthly fee", "monthly billing", "recurring revenue"),
+    # Not a real column (see new-client-client.tsx) — the plan lives in
+    # `tags`, so this just gets folded in there.
+    "plan": ("plan", "package", "tier"),
+    # Resolved to owner_id by matching against the tenant's team roster
+    # (parse_row / _team_lookup below); a name with no match just leaves the
+    # client unassigned rather than rejecting the row.
+    "owner": ("owner", "accountant", "manager", "assigned to", "accountant / manager", "assigned accountant"),
     "notes": ("notes", "comments", "remarks"),
     "tags": ("tags", "labels", "groups"),
 }
@@ -171,9 +182,17 @@ def _to_float(raw: str) -> float | None:
         return None
 
 
-def parse_row(raw: dict[str, Any], mapping: dict[str, str]) -> tuple[dict[str, Any], list[str]]:
+def parse_row(
+    raw: dict[str, Any],
+    mapping: dict[str, str],
+    owners_by_name: dict[str, str] | None = None,
+) -> tuple[dict[str, Any], list[str]]:
     data: dict[str, Any] = {}
     errors: list[str] = []
+    # `tags` and `plan` both write here rather than straight into `data`, since
+    # either can appear alone or together and one must not clobber the other
+    # depending on which column happens to come first in the file.
+    tags: list[str] = []
 
     for column, field in mapping.items():
         value = raw.get(column)
@@ -199,12 +218,29 @@ def parse_row(raw: dict[str, Any], mapping: dict[str, str]) -> tuple[dict[str, A
                 errors.append(f"'{text}' is not a valid fee")
             else:
                 data[field] = number
+        elif field == "mrr":
+            number = _to_float(text)
+            if number is None:
+                errors.append(f"'{text}' is not a valid MRR")
+            else:
+                # The database only stores the annual figure (see
+                # new-client-client.tsx's own "Annual fee ($)" field) — the
+                # client list then derives the monthly figure back out of it.
+                data["annual_fee"] = round(number * 12, 2)
+        elif field == "plan":
+            tags.append(text)
+        elif field == "owner":
+            resolved = (owners_by_name or {}).get(text.lower())
+            if resolved is None:
+                errors.append(f"No accountant matches '{text}' — leave this blank to import unassigned")
+            else:
+                data["owner_id"] = resolved
         elif field == "client_type":
             data[field] = CLIENT_TYPE_MAP.get(text.lower(), "corporation")
         elif field == "status":
             data[field] = STATUS_MAP.get(text.lower(), "active")
         elif field == "tags":
-            data[field] = [tag.strip() for tag in re.split(r"[,;|]", text) if tag.strip()]
+            tags.extend(tag.strip() for tag in re.split(r"[,;|]", text) if tag.strip())
         elif field == "email":
             if "@" not in text:
                 errors.append(f"'{text}' is not a valid email")
@@ -212,6 +248,24 @@ def parse_row(raw: dict[str, Any], mapping: dict[str, str]) -> tuple[dict[str, A
                 data[field] = text.lower()
         else:
             data[field] = text
+
+    if tags:
+        data["tags"] = tags
+
+    # A column the alias table doesn't recognise at all isn't dropped — it
+    # lands in `custom`, the same free-form field the Add Client page's
+    # "Additional information" section writes to, so a firm's own spreadsheet
+    # quirks (a provincial corporation number, an internal code, ...) survive
+    # the import instead of being silently discarded.
+    custom: dict[str, str] = {}
+    for column, value in raw.items():
+        if column in mapping:
+            continue
+        text = "" if value is None else str(value).strip()
+        if text:
+            custom[column] = text
+    if custom:
+        data["custom"] = custom
 
     if not data.get("legal_name"):
         errors.append("Legal name is required")
@@ -295,10 +349,12 @@ async def preview_clients(
             "No client-name column was recognised. Rename a column to 'Legal Name' and try again.",
         )
 
+    owners_by_name = await _team_lookup(session, user.tenant_id)
+
     rows: list[ImportPreviewRow] = []
     valid = 0
     for index, record in enumerate(records[:MAX_PREVIEW_ROWS], start=2):
-        data, errors = parse_row(record, mapping)
+        data, errors = parse_row(record, mapping, owners_by_name)
         if not errors:
             valid += 1
         rows.append(ImportPreviewRow(row=index, data=data, errors=errors))
@@ -326,6 +382,12 @@ async def commit_clients(
         if not legal_name:
             failed += 1
             errors.append(f"Row {index}: missing legal name")
+            continue
+
+        fee = data.get("annual_fee")
+        if fee is not None and 0 < fee < MIN_ANNUAL_FEE:
+            failed += 1
+            errors.append(f"Row {index} ({legal_name}): annual fee must be at least ${MIN_ANNUAL_FEE}, or 0")
             continue
 
         existing = None
@@ -478,6 +540,19 @@ async def _client_lookup(session: SessionDep, tenant_id: Any) -> dict[str, str]:
             if label:
                 lookup[str(label).strip().lower()] = str(client_id)
     return lookup
+
+
+async def _team_lookup(session: SessionDep, tenant_id: Any) -> dict[str, str]:
+    """Every firm-staff full name, for resolving a client import's
+    accountant/owner column to `owner_id`."""
+    rows = (
+        await session.execute(
+            select(Profile.id, Profile.full_name).where(
+                Profile.tenant_id == tenant_id, Profile.client_id.is_(None)
+            )
+        )
+    ).all()
+    return {str(full_name).strip().lower(): str(profile_id) for profile_id, full_name in rows if full_name}
 
 
 @router.post("/users/preview", response_model=ImportPreview)

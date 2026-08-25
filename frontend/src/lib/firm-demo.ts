@@ -764,6 +764,21 @@ export interface ClientRow extends Client {
    * email" has been used. Demo clients treat "portal enabled" as "invited
    * the day they joined", since there is no separate invite record here. */
   portal_invited_at: string | null;
+  /** True once a client-portal login has actually authenticated — unlike
+   *  `portal_enabled`, which just means an invite was sent. A client stays
+   *  "Pending" in the UI until this flips, regardless of `status`. */
+  portal_signed_in: boolean;
+}
+
+/**
+ * A client invited to the portal but who has never actually signed in yet —
+ * shown as "Pending" in place of `status` (and excluded from "Active
+ * clients") until they do, regardless of what status was picked when they
+ * were added. Doesn't apply to a client never invited to the portal at all —
+ * `status` is the only signal there.
+ */
+export function isPortalPending(client: Pick<ClientRow, "portal_enabled" | "portal_signed_in">): boolean {
+  return client.portal_enabled && !client.portal_signed_in;
 }
 
 export function getClients(): ClientRow[] {
@@ -786,6 +801,13 @@ export function getClients(): ClientRow[] {
       service_count: client.service_ids.length,
       monthly_fee: Math.round(client.annual_fee / 12),
       portal_invited_at: client.portal_enabled ? client.joined : null,
+      // Same illustrative edge case getPlatformUsers() uses for "never signed
+      // in": c18's portal invite has never been opened. c17's temp password
+      // was never rotated, but they did sign in once to get that far, so it
+      // stays true there — matching the backend's own definition (any
+      // authenticated request sets last_seen_at, whether or not the forced
+      // password change that follows was ever completed).
+      portal_signed_in: client.portal_enabled && client.id !== "c18",
     };
   });
 }

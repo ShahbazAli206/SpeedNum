@@ -2,6 +2,9 @@
 
 import {
   Banknote,
+  Download,
+  Eye,
+  Pencil,
   Plus,
   Rows3,
   Settings,
@@ -17,13 +20,15 @@ import { useState } from "react";
 import { KpiTile } from "@/components/charts";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { DashboardHeader, KpiRow } from "@/components/dashboard/page-shell";
+import { downloadTemplate } from "@/components/dashboard/spreadsheet-drop";
 import { useConfirm } from "@/components/confirm";
 import { useToast } from "@/components/toast";
 import { Button, ButtonLink, Modal, Select, toOptions } from "@/components/ui";
 import { ApiError, del, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import type { ClientRow } from "@/lib/firm-demo";
+import { isPortalPending, type ClientRow } from "@/lib/firm-demo";
 import { formatDate, formatMoney } from "@/lib/format";
+import { CLIENT_COLUMNS, CLIENT_EXAMPLE } from "@/lib/import-templates";
 import { useSession } from "@/lib/session";
 import type { Client } from "@/lib/types";
 
@@ -63,6 +68,7 @@ const STATUS_TONE: Record<string, string> = {
   prospect: "bg-warn-soft text-warn",
   inactive: "bg-surface-2 text-muted",
   archived: "bg-surface-2 text-muted",
+  pending: "bg-warn-soft text-warn",
 };
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -111,7 +117,7 @@ export function ClientsClient({
     }
   };
 
-  const active = clients.filter((client) => client.status === "active");
+  const active = clients.filter((client) => client.status === "active" && !isPortalPending(client));
   const recurring = clients.reduce((total, client) => total + client.annual_fee, 0);
   const withOverdue = clients.filter((client) => client.overdue_deadlines > 0).length;
 
@@ -207,38 +213,65 @@ export function ClientsClient({
       key: "status",
       header: "Status",
       align: "right",
-      cell: (row) => (
-        <span
-          className={cn(
-            "inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize",
-            STATUS_TONE[row.status],
-          )}
-        >
-          {row.status}
-        </span>
-      ),
-      sortValue: (row) => row.status,
+      cell: (row) => {
+        const pending = isPortalPending(row);
+        return (
+          <span
+            className={cn(
+              "inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize",
+              pending ? STATUS_TONE.pending : STATUS_TONE[row.status],
+            )}
+            title={pending ? "Invited to the portal but hasn't signed in yet" : undefined}
+          >
+            {pending ? "Pending" : row.status}
+          </span>
+        );
+      },
+      sortValue: (row) => (isPortalPending(row) ? "pending" : row.status),
+      exportValue: (row) => (isPortalPending(row) ? "pending (invited, not yet signed in)" : row.status),
     },
   ];
 
-  if (isLive && session.isAdmin) {
+  if (isLive) {
     columns.push({
       key: "actions",
       header: "",
       align: "right",
       cell: (row) => (
-        <button
-          type="button"
-          disabled={deletingId === row.id}
-          onClick={(event) => {
-            event.stopPropagation();
-            void deleteClient(row);
-          }}
-          aria-label={`Delete ${row.business_name}`}
-          className="rounded-lg p-1.5 text-muted transition hover:bg-danger-soft hover:text-danger disabled:opacity-50"
-        >
-          <Trash2 className="size-4" />
-        </button>
+        <span className="inline-flex items-center justify-end gap-1">
+          <Link
+            href={`/clients/${row.id}`}
+            onClick={(event) => event.stopPropagation()}
+            aria-label={`View ${row.business_name}`}
+            className="rounded-lg p-1.5 text-muted transition hover:bg-surface-2 hover:text-ink"
+          >
+            <Eye className="size-4" />
+          </Link>
+          {/* Edit is any staff member's call (PATCH /clients/{id} has no
+              admin gate) — only deleting a client is admin-only. */}
+          <Link
+            href={`/clients/${row.id}?edit=1`}
+            onClick={(event) => event.stopPropagation()}
+            aria-label={`Edit ${row.business_name}`}
+            className="rounded-lg p-1.5 text-muted transition hover:bg-surface-2 hover:text-ink"
+          >
+            <Pencil className="size-4" />
+          </Link>
+          {session.isAdmin ? (
+            <button
+              type="button"
+              disabled={deletingId === row.id}
+              onClick={(event) => {
+                event.stopPropagation();
+                void deleteClient(row);
+              }}
+              aria-label={`Delete ${row.business_name}`}
+              className="rounded-lg p-1.5 text-muted transition hover:bg-danger-soft hover:text-danger disabled:opacity-50"
+            >
+              <Trash2 className="size-4" />
+            </button>
+          ) : null}
+        </span>
       ),
     });
   }
@@ -325,6 +358,20 @@ export function ClientsClient({
         subtitle="Manage your clients and their subscriptions"
         actions={
           <>
+            <Button
+              variant="secondary"
+              icon={<Download className="size-4" />}
+              onClick={() => {
+                downloadTemplate(
+                  "speednum-client-import",
+                  CLIENT_COLUMNS.map((column) => column.column),
+                  CLIENT_EXAMPLE,
+                );
+                toast.success("Template downloaded", "Fill it in, then upload it on the Import page.");
+              }}
+            >
+              Template
+            </Button>
             <ButtonLink href="/import" variant="secondary" icon={<UserPlus className="size-4" />}>
               Import
             </ButtonLink>
@@ -392,10 +439,11 @@ export function ClientsClient({
               label: "Statuses",
               options: [
                 { value: "active", label: "Active" },
+                { value: "pending", label: "Pending (portal)" },
                 { value: "prospect", label: "Prospect" },
                 { value: "inactive", label: "Inactive" },
               ],
-              predicate: (row, value) => row.status === value,
+              predicate: (row, value) => (value === "pending" ? isPortalPending(row) : row.status === value),
             },
             {
               label: "Plans",

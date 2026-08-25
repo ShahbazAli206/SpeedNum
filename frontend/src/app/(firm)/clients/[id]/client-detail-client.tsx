@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useConfirm } from "@/components/confirm";
 import { useToast } from "@/components/toast";
@@ -26,15 +26,16 @@ import { Button, Card, CardHeader, Field, Input, LoadingBlock, Modal, Select, Ta
 import { ApiError, del, patch, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { assignClientService } from "@/lib/client-services";
-import type {
-  ClientRow,
-  Contact,
-  CustomField,
-  Deadline,
-  Letter,
-  Service,
-  Task,
-  TeamRow,
+import {
+  isPortalPending,
+  type ClientRow,
+  type Contact,
+  type CustomField,
+  type Deadline,
+  type Letter,
+  type Service,
+  type Task,
+  type TeamRow,
 } from "@/lib/firm-demo";
 import { CredentialsModal } from "@/components/dashboard/credentials-modal";
 import { formatBytes, formatDate, formatMoney, titleCase } from "@/lib/format";
@@ -156,6 +157,7 @@ export function ClientDetailClient({
   customFields,
   team,
   initialTab,
+  openEditOnLoad,
   isLive,
 }: {
   client: ClientRow;
@@ -170,6 +172,9 @@ export function ClientDetailClient({
   /** Lets other pages deep-link straight to a tab, e.g. a task's "Client"
    * link landing on this client's own Tasks tab. */
   initialTab?: TabId;
+  /** From the clients list's pencil icon (?edit=1) — opens the edit modal the
+   * moment this page has loaded, so editing doesn't need a second click. */
+  openEditOnLoad?: boolean;
   /** False for the handful of demo fixture ids that still exist for design
    * reference — every real client (a UUID from the API) is live. Adding a
    * service, task or file only makes sense against a live client; a demo
@@ -219,6 +224,15 @@ export function ClientDetailClient({
     setEditTags(client.tags.join(", "));
     setEditOpen(true);
   };
+
+  useEffect(() => {
+    // One-shot: open the edit modal from the ?edit=1 deep link. Only on
+    // mount — openEdit closes over `client`, which is stable for the
+    // lifetime of this page (a new id is a new page/component instance).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (openEditOnLoad) openEdit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const submitEdit = async () => {
     const trimmed = editBusinessName.trim();
@@ -489,10 +503,13 @@ export function ClientDetailClient({
                 <span
                   className={cn(
                     "rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize",
-                    client.status === "active" ? "bg-success-soft text-success" : "bg-warn-soft text-warn",
+                    !isPortalPending(client) && client.status === "active"
+                      ? "bg-success-soft text-success"
+                      : "bg-warn-soft text-warn",
                   )}
+                  title={isPortalPending(client) ? "Invited to the portal but hasn't signed in yet" : undefined}
                 >
-                  {client.status}
+                  {isPortalPending(client) ? "Pending" : client.status}
                 </span>
                 {client.tags.map((tag) => (
                   <span key={tag} className="rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-ink-soft">
@@ -623,7 +640,10 @@ export function ClientDetailClient({
                 <Meta label="Plan" value={client.plan} />
                 <Meta label="Monthly recurring revenue" value={formatMoney(client.monthly_fee)} />
                 <Meta label="Client since" value={formatDate(client.joined, "long")} />
-                <Meta label="Status" value={titleCase(client.status)} />
+                <Meta
+                  label="Status"
+                  value={isPortalPending(client) ? "Pending (portal)" : titleCase(client.status)}
+                />
               </dl>
             </Card>
 

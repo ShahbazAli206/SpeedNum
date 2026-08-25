@@ -2,7 +2,7 @@
 
 import { CalendarClock, CheckCheck, Kanban, Mail, Signature, Users, Zap } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ComponentType } from "react";
 
 import { DashboardHeader } from "@/components/dashboard/page-shell";
@@ -10,6 +10,7 @@ import { useToast } from "@/components/toast";
 import { Button, EmptyState } from "@/components/ui";
 import { post } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { useSession } from "@/lib/session";
 
 export interface NotificationView {
   id: string;
@@ -52,11 +53,21 @@ export function NotificationsClient({
   isLive: boolean;
 }) {
   const toast = useToast();
+  const session = useSession();
   const [read, setRead] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All");
 
   const isRead = (item: NotificationView) => read[item.id] ?? item.is_read;
   const unread = notifications.filter((item) => !isRead(item)).length;
+
+  // This server-rendered list is the authoritative view — reconcile the
+  // bell/sidebar badge (which only otherwise repolls every 60s) against it
+  // the moment someone actually looks at this page, not just after a mark-read
+  // click. Fixes the badge showing a stale count that was already resolved.
+  useEffect(() => {
+    session.refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const visible = notifications.filter((item) => {
     if (filter === "All") return true;
@@ -68,10 +79,18 @@ export function NotificationsClient({
     const previous = read;
     setRead((current) => ({ ...current, [id]: true }));
     if (!isLive) return;
-    post(`/notifications/${id}/read`).catch((error) => {
-      setRead(previous);
-      toast.error("Could not update that notification", message(error, "Please try again."));
-    });
+    post(`/notifications/${id}/read`)
+      .then(() => {
+        // The bell and the sidebar's Notifications badge read from the
+        // session's own poll, not this page's local `read` state — without
+        // this they keep showing whatever was last unread until the next
+        // 60s cycle, disagreeing with the page the user is looking at.
+        session.refresh();
+      })
+      .catch((error) => {
+        setRead(previous);
+        toast.error("Could not update that notification", message(error, "Please try again."));
+      });
   };
 
   const markAll = () => {
@@ -83,6 +102,7 @@ export function NotificationsClient({
     }
     post("/notifications/read-all")
       .then(() => {
+        session.refresh();
         toast.success("All caught up", `${unread} notification${unread === 1 ? "" : "s"} marked read.`);
       })
       .catch((error) => {

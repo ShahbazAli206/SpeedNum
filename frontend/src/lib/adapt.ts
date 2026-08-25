@@ -77,6 +77,7 @@ export function toClientRow(client: Client): ClientRow {
     service_count: client.service_count,
     monthly_fee: Math.round((client.annual_fee / 12) * 100) / 100,
     portal_invited_at: client.portal_invited_at,
+    portal_signed_in: client.portal_signed_in,
   };
 }
 

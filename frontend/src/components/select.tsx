@@ -867,12 +867,18 @@ export function Menu({
                         onClick={() => run(item)}
                         className={cn(
                           "flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-[13px] transition-colors",
-                          item.disabled && "cursor-not-allowed opacity-45",
-                          item.danger
-                            ? "text-danger hover:bg-danger-soft"
-                            : isActive
-                              ? "bg-surface-2 text-ink"
-                              : "text-ink-soft",
+                          // A disabled item here is only ever the static
+                          // name/email identity header (the only two call
+                          // sites in the app), never a real unavailable
+                          // action — it must stay fully readable, just
+                          // non-interactive, not dimmed like a disabled choice.
+                          item.disabled
+                            ? "cursor-default"
+                            : item.danger
+                              ? "text-danger hover:bg-danger-soft"
+                              : isActive
+                                ? "bg-surface-2 text-ink"
+                                : "text-ink-soft",
                         )}
                       >
                         {item.icon ? (
@@ -881,9 +887,16 @@ export function Menu({
                           </span>
                         ) : null}
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate">{item.label}</span>
+                          <span className={cn("block truncate", item.disabled ? "font-semibold text-ink" : undefined)}>
+                            {item.label}
+                          </span>
                           {item.description ? (
-                            <span className="mt-0.5 block truncate text-[11.5px] text-muted">
+                            <span
+                              className={cn(
+                                "mt-0.5 block truncate text-[11.5px]",
+                                item.disabled ? "text-ink-soft" : "text-muted",
+                              )}
+                            >
                               {item.description}
                             </span>
                           ) : null}
