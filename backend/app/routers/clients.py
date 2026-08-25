@@ -36,6 +36,19 @@ _portal_invite_rate_limit = rate_limit_by_tenant("clients-portal-invite", limit=
 
 OPEN_TASK_STATES = ("todo", "in_progress", "review", "blocked")
 
+# A client with no fee yet (0, e.g. a prospect) is fine; a nonzero fee below
+# this is almost always a typo (missing a digit) rather than an intentional
+# rate, so it's rejected rather than silently stored.
+MIN_ANNUAL_FEE = 50
+
+
+def _check_annual_fee(annual_fee: float | None) -> None:
+    if annual_fee is not None and 0 < annual_fee < MIN_ANNUAL_FEE:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Annual fee must be at least ${MIN_ANNUAL_FEE}, or 0 if none yet.",
+        )
+
 
 async def _aggregates(session: SessionDep, client_ids: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
     if not client_ids:
@@ -151,6 +164,7 @@ async def list_clients(
 async def create_client(
     payload: ClientCreate, session: SessionDep, user: TenantUserDep, request: Request
 ) -> ClientRead:
+    _check_annual_fee(payload.annual_fee)
     row = Client(tenant_id=user.tenant_id, created_by=user.profile.id, **payload.model_dump())
     session.add(row)
     await session.flush()
@@ -189,6 +203,7 @@ async def update_client(
     user: TenantUserDep,
     request: Request,
 ) -> ClientRead:
+    _check_annual_fee(payload.annual_fee)
     row = await session.scalar(
         select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
     )

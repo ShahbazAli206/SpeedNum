@@ -38,6 +38,9 @@ const STATUS_OPTIONS = [
 
 const PLAN_OPTIONS = toOptions(["Starter", "Professional", "Growth"]);
 
+/** Mirrors the same floor enforced server-side in backend/app/routers/clients.py. */
+const MIN_ANNUAL_FEE = 50;
+
 /**
  * The team list is demo rows when the API is unreachable, and those ids are
  * slugs rather than UUIDs — posting one back would 422. Only a real UUID is
@@ -129,6 +132,14 @@ export function NewClientClient({
       // all toast), it left a click on "Create client" looking like it did
       // nothing at all.
       const message = `"${missingRequired.label}" is required.`;
+      setError(message);
+      toast.error("Could not add client", message);
+      return;
+    }
+
+    const fee = Number(annualFee);
+    if (fee > 0 && fee < MIN_ANNUAL_FEE) {
+      const message = `Annual fee must be at least $${MIN_ANNUAL_FEE}, or 0 if none yet.`;
       setError(message);
       toast.error("Could not add client", message);
       return;
@@ -289,11 +300,20 @@ export function NewClientClient({
             <Field label="Plan">
               <Select value={plan} onValueChange={setPlan} options={PLAN_OPTIONS} />
             </Field>
-            <Field label="Annual fee ($)" hint="Shown on the client list as a monthly figure.">
+            <Field
+              label="Annual fee ($)"
+              hint={`Shown on the client list as a monthly figure. Leave at 0, or enter at least $${MIN_ANNUAL_FEE}.`}
+            >
               <Input
                 type="number"
                 min={0}
-                step={100}
+                // "any", not a whole-dollar step: a stepped number input enforces
+                // that constraint at the browser level and silently blocks the
+                // form's submit event for any value that doesn't land on the
+                // step (e.g. step={100} rejected 250) — with no error reaching
+                // this component's code at all. The real minimum is enforced
+                // below and server-side instead, where it can show a message.
+                step="any"
                 value={annualFee}
                 onChange={(event) => setAnnualFee(event.target.value)}
               />
