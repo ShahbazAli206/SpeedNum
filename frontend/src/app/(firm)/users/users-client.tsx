@@ -363,6 +363,22 @@ export function UsersClient({
     );
   }
 
+  // /users is still tenant-scoped — it lists one firm's accounts, not every
+  // firm's. A superadmin who hasn't impersonated a firm yet has no tenant, so
+  // the API 409s and (per apiServer's fallback) this would otherwise silently
+  // render demo rows whose "Remove access" button looks real but does
+  // nothing. Send them to pick a firm first instead.
+  if (!session.isLoading && session.portalRoleLabel === "Super Admin" && !session.me?.tenant) {
+    return (
+      <EmptyState
+        icon={<ShieldCheck className="size-6" />}
+        title="Pick a firm to manage its users"
+        description="Users belongs to one firm's account list. Impersonate a firm from the Admin console, then come back here."
+        action={<ButtonLink href="/admin">Go to Admin console</ButtonLink>}
+      />
+    );
+  }
+
   return (
     <>
       <DashboardHeader
