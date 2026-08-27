@@ -187,6 +187,7 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         href: "/users",
         icon: "users",
         description: "Every platform account — staff and client-portal logins",
+        superadminOnly: true,
       },
       {
         label: "Notifications",

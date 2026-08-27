@@ -42,6 +42,20 @@ OPEN_TASK_STATES = ("todo", "in_progress", "review", "blocked")
 MIN_ANNUAL_FEE = 50
 
 
+def _owner_scope(user: TenantUserDep):
+    """Restricts an 'admin' to the clients assigned to them.
+
+    An owner runs the whole practice and a platform superadmin (including
+    while impersonating a tenant) oversees every firm, so both still see the
+    full book, assigned or not. A plain 'admin', though, should see only
+    their own clients — not another admin's, and not unassigned ones —
+    otherwise every admin login effectively sees the whole firm's book
+    regardless of who a client is actually assigned to."""
+    if user.profile.role == "admin" and not user.profile.is_superadmin:
+        return Client.owner_id == user.profile.id
+    return None
+
+
 def _check_annual_fee(annual_fee: float | None) -> None:
     if annual_fee is not None and 0 < annual_fee < MIN_ANNUAL_FEE:
         raise HTTPException(
@@ -127,6 +141,9 @@ async def list_clients(
     sort: str = Query(default="legal_name"),
 ) -> list[ClientRead]:
     stmt = select(Client).where(Client.tenant_id == user.tenant_id)
+    scope = _owner_scope(user)
+    if scope is not None:
+        stmt = stmt.where(scope)
 
     if search:
         pattern = f"%{search.strip()}%"
@@ -199,9 +216,11 @@ async def create_client(
 
 @router.get("/clients/{client_id}", response_model=ClientRead)
 async def get_client(client_id: uuid.UUID, session: SessionDep, user: TenantUserDep) -> ClientRead:
-    row = await session.scalar(
-        select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
-    )
+    stmt = select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
+    scope = _owner_scope(user)
+    if scope is not None:
+        stmt = stmt.where(scope)
+    row = await session.scalar(stmt)
     ensure_found(row, "Client")
     aggregates = await _aggregates(session, [row.id])
     names = await profile_names(session, user.tenant_id)
@@ -217,9 +236,11 @@ async def update_client(
     request: Request,
 ) -> ClientRead:
     _check_annual_fee(payload.annual_fee)
-    row = await session.scalar(
-        select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
-    )
+    stmt = select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
+    scope = _owner_scope(user)
+    if scope is not None:
+        stmt = stmt.where(scope)
+    row = await session.scalar(stmt)
     ensure_found(row, "Client")
 
     changed = apply_updates(row, payload)
@@ -250,9 +271,11 @@ async def delete_client(
     """Admin-gated: this is a hard delete of the client and everything FK'd to
     it (deadlines, tasks, letters, files) — too destructive to leave open to
     any staff member the way read/update access is."""
-    row = await session.scalar(
-        select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
-    )
+    stmt = select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
+    scope = _owner_scope(user)
+    if scope is not None:
+        stmt = stmt.where(scope)
+    row = await session.scalar(stmt)
     ensure_found(row, "Client")
     name = row.legal_name
     await session.delete(row)
@@ -287,9 +310,11 @@ async def invite_to_portal(
     a magic sign-in link is regenerated too, as the previous one may have
     expired.
     """
-    client = await session.scalar(
-        select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
-    )
+    stmt = select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
+    scope = _owner_scope(user)
+    if scope is not None:
+        stmt = stmt.where(scope)
+    client = await session.scalar(stmt)
     ensure_found(client, "Client")
     if not client.email:
         raise HTTPException(
@@ -359,6 +384,13 @@ async def invite_to_portal(
 async def list_contacts(
     client_id: uuid.UUID, session: SessionDep, user: TenantUserDep
 ) -> list[ContactRead]:
+    client_stmt = select(Client.id).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
+    scope = _owner_scope(user)
+    if scope is not None:
+        client_stmt = client_stmt.where(scope)
+    if await session.scalar(client_stmt) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Client not found")
+
     rows = (
         await session.scalars(
             select(Contact)
@@ -373,9 +405,13 @@ async def list_contacts(
 async def create_contact(
     payload: ContactCreate, session: SessionDep, user: TenantUserDep
 ) -> ContactRead:
-    owner = await session.scalar(
-        select(Client.id).where(Client.id == payload.client_id, Client.tenant_id == user.tenant_id)
+    owner_stmt = select(Client.id).where(
+        Client.id == payload.client_id, Client.tenant_id == user.tenant_id
     )
+    scope = _owner_scope(user)
+    if scope is not None:
+        owner_stmt = owner_stmt.where(scope)
+    owner = await session.scalar(owner_stmt)
     if owner is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Client not found")
 
@@ -432,6 +468,13 @@ async def _demote_other_primaries(session: SessionDep, contact: Contact) -> None
 async def list_client_services(
     client_id: uuid.UUID, session: SessionDep, user: TenantUserDep
 ) -> list[ClientServiceRead]:
+    client_stmt = select(Client.id).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
+    scope = _owner_scope(user)
+    if scope is not None:
+        client_stmt = client_stmt.where(scope)
+    if await session.scalar(client_stmt) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Client not found")
+
     rows = (
         await session.execute(
             select(ClientService, Service)
@@ -464,9 +507,11 @@ async def assign_client_service(
     user: TenantUserDep,
     request: Request,
 ) -> ClientServiceRead:
-    client = await session.scalar(
-        select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
-    )
+    client_stmt = select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
+    scope = _owner_scope(user)
+    if scope is not None:
+        client_stmt = client_stmt.where(scope)
+    client = await session.scalar(client_stmt)
     ensure_found(client, "Client")
     service = await session.scalar(
         select(Service).where(Service.id == payload.service_id, Service.tenant_id == user.tenant_id)

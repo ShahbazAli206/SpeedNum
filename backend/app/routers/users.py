@@ -9,6 +9,12 @@ client-portal login appears here and nowhere else on the firm side.
 Creating and reissuing credentials both go through services/accounts.py, so an
 account made here is indistinguishable from one made on the Accountants page or
 by the bulk importer.
+
+Superadmin-only: a firm's own owner/admin manages staff via /team and
+client-portal logins via /clients/{id}/portal-invite. This router is reserved
+for a platform superadmin viewing (or, while impersonating, acting on) the
+full account list, so an ordinary firm admin never sees other admins,
+superadmins, or the raw platform-account list.
 """
 
 from __future__ import annotations
@@ -18,7 +24,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 
-from ..deps import AdminUserDep, SessionDep, TenantUserDep, client_ip
+from ..deps import SessionDep, SuperadminTenantUserDep, client_ip
 from ..models import Client, Profile
 from ..schemas import (
     CredentialResult,
@@ -57,7 +63,7 @@ def _decorate(row: Profile, client_name: str | None) -> PlatformUserRead:
 @router.get("", response_model=list[PlatformUserRead])
 async def list_users(
     session: SessionDep,
-    user: TenantUserDep,
+    user: SuperadminTenantUserDep,
     source: str | None = Query(default=None, description="team | client"),
     role: str | None = None,
     active_only: bool = False,
@@ -89,7 +95,7 @@ async def list_users(
     dependencies=[Depends(_account_creation_rate_limit)],
 )
 async def create_user(
-    payload: PlatformUserCreate, session: SessionDep, user: AdminUserDep, request: Request
+    payload: PlatformUserCreate, session: SessionDep, user: SuperadminTenantUserDep, request: Request
 ) -> CredentialResult:
     """Create a login and email its credentials.
 
@@ -143,7 +149,7 @@ async def create_user(
     )
 
 
-async def _load(session: SessionDep, user: AdminUserDep, profile_id: uuid.UUID) -> Profile:
+async def _load(session: SessionDep, user: SuperadminTenantUserDep, profile_id: uuid.UUID) -> Profile:
     row = await session.scalar(
         select(Profile).where(Profile.id == profile_id, Profile.tenant_id == user.tenant_id)
     )
@@ -155,7 +161,7 @@ async def update_user(
     profile_id: uuid.UUID,
     payload: PlatformUserUpdate,
     session: SessionDep,
-    user: AdminUserDep,
+    user: SuperadminTenantUserDep,
     request: Request,
 ) -> PlatformUserRead:
     profile = await _load(session, user, profile_id)
@@ -209,7 +215,7 @@ async def update_user(
     dependencies=[Depends(_account_creation_rate_limit)],
 )
 async def resend_credentials(
-    profile_id: uuid.UUID, session: SessionDep, user: AdminUserDep, request: Request
+    profile_id: uuid.UUID, session: SessionDep, user: SuperadminTenantUserDep, request: Request
 ) -> CredentialResult:
     profile = await _load(session, user, profile_id)
 
@@ -252,7 +258,7 @@ async def resend_credentials(
 async def delete_user(
     profile_id: uuid.UUID,
     session: SessionDep,
-    user: AdminUserDep,
+    user: SuperadminTenantUserDep,
     request: Request,
     revoke_login: bool = True,
 ) -> Ok:

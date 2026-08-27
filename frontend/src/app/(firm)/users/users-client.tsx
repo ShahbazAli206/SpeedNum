@@ -22,11 +22,12 @@ import { CredentialsModal } from "@/components/dashboard/credentials-modal";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { DashboardHeader } from "@/components/dashboard/page-shell";
 import { useToast } from "@/components/toast";
-import { Button, ButtonLink, Checkbox, Field, Input, Menu, Modal, Select } from "@/components/ui";
+import { Button, ButtonLink, Checkbox, EmptyState, Field, Input, Menu, Modal, Select } from "@/components/ui";
 import { del, patch, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { TODAY, type PlatformRole, type PlatformUser } from "@/lib/firm-demo";
 import { formatDate, initials } from "@/lib/format";
+import { useSession } from "@/lib/session";
 import type { CredentialResult } from "@/lib/types";
 
 const ROLE_OPTIONS: { value: PlatformRole; label: string }[] = [
@@ -86,6 +87,7 @@ export function UsersClient({
 }) {
   const toast = useToast();
   const router = useRouter();
+  const session = useSession();
 
   const [users, setUsers] = useState(initialUsers);
   const [modalOpen, setModalOpen] = useState(false);
@@ -345,6 +347,21 @@ export function UsersClient({
       ),
     },
   ];
+
+  // Mirrors the backend: /users is superadmin-only now (see backend/app/
+  // routers/users.py), so a firm's own owner/admin never sees this list of
+  // every platform account — including other admins and superadmins. This
+  // guards a direct visit; the nav link itself is already hidden for them
+  // (lib/site.ts's `superadminOnly`).
+  if (!session.isLoading && session.portalRoleLabel !== "Super Admin") {
+    return (
+      <EmptyState
+        icon={<ShieldCheck className="size-6" />}
+        title="Superadmin access required"
+        description="The platform accounts list is restricted to the platform superadmin role."
+      />
+    );
+  }
 
   return (
     <>

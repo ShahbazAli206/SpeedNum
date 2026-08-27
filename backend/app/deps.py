@@ -207,6 +207,20 @@ async def require_admin(user: TenantUserDep) -> CurrentUser:
 AdminUserDep = Annotated[CurrentUser, Depends(require_admin)]
 
 
+async def require_superadmin_tenant_user(user: TenantUserDep) -> CurrentUser:
+    """Firm-side endpoints that stay superadmin-only even once inside a
+    tenant — e.g. the platform accounts list (/users), which a firm's own
+    owner/admin should not see, only a platform superadmin impersonating the
+    firm. Unlike SuperadminDep this still requires a linked tenant, so it
+    composes with the rest of the tenant-scoped routers."""
+    if not user.profile.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Requires the platform superadmin role.")
+    return user
+
+
+SuperadminTenantUserDep = Annotated[CurrentUser, Depends(require_superadmin_tenant_user)]
+
+
 async def require_superadmin(user: CurrentUserDep) -> CurrentUser:
     if not user.profile.is_superadmin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Requires the platform superadmin role.")
