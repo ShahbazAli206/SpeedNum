@@ -43,7 +43,9 @@ export const CLIENT_COLUMNS: ColumnSpec[] = [
   {
     column: "owner",
     required: false,
-    note: "Accountant/manager's full name — matched against your team roster (also matches 'Accountant')",
+    note:
+      "Accountant/manager's full name — matched against your team roster (also matches 'Accountant'). " +
+      "No match just leaves the client unassigned; the name is kept as a custom field either way.",
   },
 ];
 

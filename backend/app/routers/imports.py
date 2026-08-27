@@ -193,6 +193,13 @@ def parse_row(
     # either can appear alone or together and one must not clobber the other
     # depending on which column happens to come first in the file.
     tags: list[str] = []
+    # A column the alias table doesn't recognise at all isn't dropped — it
+    # lands here, the same free-form field the Add Client page's "Additional
+    # information" section writes to, so a firm's own spreadsheet quirks (a
+    # provincial corporation number, an internal code, an accountant name that
+    # matched nobody, ...) survive the import instead of being silently
+    # discarded or blocking the row outright.
+    custom: dict[str, str] = {}
 
     for column, field in mapping.items():
         value = raw.get(column)
@@ -232,7 +239,13 @@ def parse_row(
         elif field == "owner":
             resolved = (owners_by_name or {}).get(text.lower())
             if resolved is None:
-                errors.append(f"No accountant matches '{text}' — leave this blank to import unassigned")
+                # Not a blocking error, unlike an unmatched client name on the
+                # user importer: that changes which *kind* of account gets
+                # created (portal vs. staff), where this just leaves a client
+                # unassigned — routine before a firm's roster is fully
+                # populated, and easy to fix by hand afterwards. The name is
+                # kept, not discarded, so nothing has to be re-typed later.
+                custom[column] = text
             else:
                 data["owner_id"] = resolved
         elif field == "client_type":
@@ -252,12 +265,6 @@ def parse_row(
     if tags:
         data["tags"] = tags
 
-    # A column the alias table doesn't recognise at all isn't dropped — it
-    # lands in `custom`, the same free-form field the Add Client page's
-    # "Additional information" section writes to, so a firm's own spreadsheet
-    # quirks (a provincial corporation number, an internal code, ...) survive
-    # the import instead of being silently discarded.
-    custom: dict[str, str] = {}
     for column, value in raw.items():
         if column in mapping:
             continue

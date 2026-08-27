@@ -203,14 +203,19 @@ def test_parse_row_resolves_owner_by_name():
     assert data["owner_id"] == "22222222-2222-2222-2222-222222222222"
 
 
-def test_parse_row_flags_an_unmatched_owner_rather_than_importing_it_wrong():
+def test_parse_row_keeps_an_unmatched_owner_as_a_custom_field_rather_than_blocking_the_row():
+    # Unlike an unmatched client name on the user importer (which changes the
+    # *kind* of account created), an unmatched accountant name here just
+    # leaves the client unassigned — routine before a roster is fully
+    # populated, so it must not block the whole row.
     data, errors = parse_row(
         {"Legal Name": "X", "Accountant": "Someone Else"},
         {"Legal Name": "legal_name", "Accountant": "owner"},
         {"amzad amiri": "22222222-2222-2222-2222-222222222222"},
     )
+    assert errors == []
     assert "owner_id" not in data
-    assert any("No accountant matches" in error for error in errors)
+    assert data["custom"] == {"Accountant": "Someone Else"}
 
 
 def test_parse_row_keeps_unrecognised_columns_as_custom_fields():
