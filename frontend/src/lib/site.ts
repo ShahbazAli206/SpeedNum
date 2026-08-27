@@ -181,6 +181,7 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         href: "/team",
         icon: "network",
         description: "Your internal team of CPAs — roster, roles and live workload",
+        hiddenFromAdmin: true,
       },
       {
         label: "Users",
@@ -266,6 +267,12 @@ export interface DashboardNavItem {
    * with `isAdmin` true — cannot open these, so the sidebar must hide them
    * for anyone but a real `profile.is_superadmin`, not just any admin. */
   superadminOnly?: boolean;
+  /** Restricted server-side to the firm's Owner and the platform superadmin
+   * (see backend/app/deps.py's require_team_visible) — a plain `admin` role
+   * is blocked, unlike `superadminOnly` which also blocks the Owner. Keeps
+   * the two policies distinct since /team and /users landed on different
+   * answers for whether Owner keeps access. */
+  hiddenFromAdmin?: boolean;
 }
 
 export const DASHBOARD_NAV: { group: string; items: DashboardNavItem[] }[] = [

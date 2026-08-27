@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
 
 from ..config import settings
-from ..deps import AdminUserDep, CurrentUserDep, SessionDep, TenantUserDep, client_ip
+from ..deps import CurrentUserDep, OwnerOrSuperadminDep, SessionDep, TeamVisibleDep, client_ip
 from ..models import Client, Deadline, Invitation, Profile, Task, TeamNote
 from ..schemas import (
     CredentialResult,
@@ -47,7 +47,7 @@ def _invite_url(token: str) -> str:
 
 
 @router.get("", response_model=list[TeamMemberRead])
-async def list_team(session: SessionDep, user: TenantUserDep) -> list[TeamMemberRead]:
+async def list_team(session: SessionDep, user: TeamVisibleDep) -> list[TeamMemberRead]:
     # client_id is null = firm staff. Client-portal logins share the tenant but
     # belong on /users, not on the accountant roster.
     members = (
@@ -109,7 +109,7 @@ async def list_team(session: SessionDep, user: TenantUserDep) -> list[TeamMember
     dependencies=[Depends(_account_creation_rate_limit)],
 )
 async def create_member(
-    payload: StaffCreate, session: SessionDep, user: AdminUserDep, request: Request
+    payload: StaffCreate, session: SessionDep, user: OwnerOrSuperadminDep, request: Request
 ) -> CredentialResult:
     """Create an accountant's login and email them their credentials.
 
@@ -181,7 +181,7 @@ async def create_member(
     dependencies=[Depends(_account_creation_rate_limit)],
 )
 async def resend_credentials(
-    profile_id: uuid.UUID, session: SessionDep, user: AdminUserDep, request: Request
+    profile_id: uuid.UUID, session: SessionDep, user: OwnerOrSuperadminDep, request: Request
 ) -> CredentialResult:
     """Rotate a staff member's password to a fresh one-time value and re-send it.
 
@@ -238,7 +238,7 @@ async def update_member(
     profile_id: uuid.UUID,
     payload: ProfileUpdate,
     session: SessionDep,
-    user: AdminUserDep,
+    user: OwnerOrSuperadminDep,
     request: Request,
 ) -> TeamMemberRead:
     member = await session.scalar(
@@ -277,7 +277,7 @@ async def update_member(
 async def remove_member(
     profile_id: uuid.UUID,
     session: SessionDep,
-    user: AdminUserDep,
+    user: OwnerOrSuperadminDep,
     request: Request,
     revoke_login: bool = True,
 ) -> Ok:
@@ -355,7 +355,7 @@ async def _get_member(session: SessionDep, tenant_id: uuid.UUID, profile_id: uui
 
 @router.get("/{profile_id}/notes", response_model=list[TeamNoteRead])
 async def list_team_notes(
-    profile_id: uuid.UUID, session: SessionDep, user: TenantUserDep
+    profile_id: uuid.UUID, session: SessionDep, user: TeamVisibleDep
 ) -> list[TeamNoteRead]:
     await _get_member(session, user.tenant_id, profile_id)
     rows = (
@@ -370,11 +370,12 @@ async def list_team_notes(
 
 @router.post("/{profile_id}/notes", response_model=TeamNoteRead, status_code=status.HTTP_201_CREATED)
 async def create_team_note(
-    profile_id: uuid.UUID, payload: TeamNoteCreate, session: SessionDep, user: AdminUserDep
+    profile_id: uuid.UUID, payload: TeamNoteCreate, session: SessionDep, user: OwnerOrSuperadminDep
 ) -> TeamNoteRead:
-    """Admin-gated like every other write on a colleague's roster entry — a
-    member's capacity/time-off notes are visible to the whole tenant (any
-    TenantUserDep can list them) but only an admin adds one."""
+    """Owner/superadmin-gated like every other write on a colleague's roster
+    entry — a member's capacity/time-off notes are readable by anyone the
+    roster itself is visible to (TeamVisibleDep — everyone except a plain
+    admin) but only an owner or superadmin adds one."""
     member = await _get_member(session, user.tenant_id, profile_id)
     row = TeamNote(
         tenant_id=user.tenant_id,
@@ -390,7 +391,7 @@ async def create_team_note(
 
 @router.delete("/{profile_id}/notes/{note_id}", response_model=Ok)
 async def delete_team_note(
-    profile_id: uuid.UUID, note_id: uuid.UUID, session: SessionDep, user: AdminUserDep
+    profile_id: uuid.UUID, note_id: uuid.UUID, session: SessionDep, user: OwnerOrSuperadminDep
 ) -> Ok:
     row = await session.scalar(
         select(TeamNote).where(
@@ -405,7 +406,7 @@ async def delete_team_note(
 
 
 @router.get("/invitations", response_model=list[InvitationRead])
-async def list_invitations(session: SessionDep, user: AdminUserDep) -> list[InvitationRead]:
+async def list_invitations(session: SessionDep, user: OwnerOrSuperadminDep) -> list[InvitationRead]:
     rows = (
         await session.scalars(
             select(Invitation)
@@ -423,7 +424,7 @@ async def list_invitations(session: SessionDep, user: AdminUserDep) -> list[Invi
     dependencies=[Depends(_account_creation_rate_limit)],
 )
 async def invite_member(
-    payload: InvitationCreate, session: SessionDep, user: AdminUserDep, request: Request
+    payload: InvitationCreate, session: SessionDep, user: OwnerOrSuperadminDep, request: Request
 ) -> InvitationRead:
     email = str(payload.email).lower()
 
@@ -539,7 +540,7 @@ async def accept_invitation(
 
 @router.delete("/invitations/{invitation_id}", response_model=Ok)
 async def revoke_invitation(
-    invitation_id: uuid.UUID, session: SessionDep, user: AdminUserDep
+    invitation_id: uuid.UUID, session: SessionDep, user: OwnerOrSuperadminDep
 ) -> Ok:
     invitation = await session.scalar(
         select(Invitation).where(

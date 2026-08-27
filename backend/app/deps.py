@@ -221,6 +221,36 @@ async def require_superadmin_tenant_user(user: TenantUserDep) -> CurrentUser:
 SuperadminTenantUserDep = Annotated[CurrentUser, Depends(require_superadmin_tenant_user)]
 
 
+async def require_team_visible(user: TenantUserDep) -> CurrentUser:
+    """The Accountants roster (/team) hides itself from a plain 'admin' —
+    same 'admin doesn't see colleagues/siblings' policy as clients.py's
+    per-client ownership scoping, just applied to the team roster instead of
+    the client book. The firm's Owner (who runs the practice day to day) and
+    the platform superadmin still see it in full; member/viewer keep their
+    existing read access too, unchanged."""
+    if user.profile.role == "admin" and not user.profile.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Requires an owner or the platform superadmin role.")
+    return user
+
+
+TeamVisibleDep = Annotated[CurrentUser, Depends(require_team_visible)]
+
+
+async def require_owner_or_superadmin(user: TenantUserDep) -> CurrentUser:
+    """Managing the accountant roster (add/edit/remove a colleague, their
+    notes, invitations) is owner/superadmin-only. AdminUserDep (owner OR
+    admin OR superadmin) used to gate these; a plain admin is removed from
+    that set here specifically, since they can no longer even see the roster
+    (require_team_visible above) — leaving their write access in place would
+    just mean unreachable-from-the-UI-but-still-callable endpoints."""
+    if user.profile.role != "owner" and not user.profile.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Requires an owner or the platform superadmin role.")
+    return user
+
+
+OwnerOrSuperadminDep = Annotated[CurrentUser, Depends(require_owner_or_superadmin)]
+
+
 async def require_superadmin(user: CurrentUserDep) -> CurrentUser:
     if not user.profile.is_superadmin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Requires the platform superadmin role.")

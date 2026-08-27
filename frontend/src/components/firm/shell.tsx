@@ -124,13 +124,22 @@ function FirmShellInner({ children }: { children: ReactNode }) {
   // that the hard way. `portalRoleLabel` is "Super Admin" only for a real
   // `profile.is_superadmin`, whether or not they're impersonating a tenant.
   const isSuperadmin = session.portalRoleLabel === "Super Admin";
+  // `portalRoleLabel` collapses owner and admin into the same "Admin" chip
+  // (see lib/session.tsx), so telling them apart for `hiddenFromAdmin` needs
+  // the real role column instead — a plain admin, not an owner who also
+  // happens to read as "Admin" in the rail.
+  const isPlainAdmin = !isSuperadmin && session.me?.profile.role === "admin";
   const visibleNav = useMemo(
     () =>
       FIRM_NAV.map((group) => ({
         ...group,
-        items: group.items.filter((item) => !item.superadminOnly || isSuperadmin),
+        items: group.items.filter((item) => {
+          if (item.superadminOnly && !isSuperadmin) return false;
+          if (item.hiddenFromAdmin && isPlainAdmin) return false;
+          return true;
+        }),
       })).filter((group) => group.items.length > 0),
-    [isSuperadmin],
+    [isSuperadmin, isPlainAdmin],
   );
   const visibleNavFlat = useMemo(
     () => visibleNav.flatMap((group) => group.items.map((item) => ({ ...item, group: group.group }))),

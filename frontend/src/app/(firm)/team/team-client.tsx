@@ -5,6 +5,7 @@ import {
   Eye,
   KeyRound,
   Pencil,
+  ShieldCheck,
   Trash2,
   TriangleAlert,
   Upload,
@@ -20,11 +21,12 @@ import { CredentialsModal } from "@/components/dashboard/credentials-modal";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { DashboardHeader } from "@/components/dashboard/page-shell";
 import { useToast } from "@/components/toast";
-import { Alert, Button, ButtonLink, Modal } from "@/components/ui";
+import { Alert, Button, ButtonLink, EmptyState, Modal } from "@/components/ui";
 import { ApiError, del, patch, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { TODAY, type TeamRow, type TeamStatus } from "@/lib/firm-demo";
 import { initials } from "@/lib/format";
+import { useSession } from "@/lib/session";
 import type { CredentialResult, TeamMember } from "@/lib/types";
 
 import { AccountantModal, type AccountantFormValues } from "./accountant-modal";
@@ -57,6 +59,7 @@ export function TeamClient({
 }) {
   const toast = useToast();
   const router = useRouter();
+  const session = useSession();
 
   const [team, setTeam] = useState(initialTeam);
   const [modalOpen, setModalOpen] = useState(false);
@@ -373,6 +376,23 @@ export function TeamClient({
       ),
     },
   ];
+
+  // Mirrors the backend: /team is hidden from a plain 'admin' now (see
+  // backend/app/deps.py's require_team_visible) — the firm's Owner and the
+  // platform superadmin still see the roster, but an admin only sees their
+  // own assigned clients, not their colleagues' roster entries. This guards
+  // a direct visit; the nav link itself is already hidden for them
+  // (lib/site.ts's `hiddenFromAdmin`).
+  const isPlainAdmin = session.portalRoleLabel !== "Super Admin" && session.me?.profile.role === "admin";
+  if (!session.isLoading && isPlainAdmin) {
+    return (
+      <EmptyState
+        icon={<ShieldCheck className="size-6" />}
+        title="Owner access required"
+        description="The accountant roster is restricted to the firm's owner and the platform superadmin."
+      />
+    );
+  }
 
   return (
     <>
