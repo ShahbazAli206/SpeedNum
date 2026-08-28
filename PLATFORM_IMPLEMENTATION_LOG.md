@@ -261,6 +261,21 @@ cd frontend && npm run dev
 All four planned phases are complete: the roles/permissions engine and its UI (Phase 1, 1a+1b), seats and the provider finance ledger (Phase 2), the cross-tenant accounts console (Phase 3), and a hardening pass closing the two gaps those phases had logged plus a tenant-isolation review (Phase 4).
 
 **Before any of this reaches production data:**
-1. Run `python backend/scripts/migrate.py status` then `apply` — against a disposable copy first — for both `0018_roles_permissions.sql` and `0019_platform_finance.sql`. Neither has ever executed against a real Postgres instance; this whole log's testing was pure-logic unit tests, `tsc`, `eslint`, and full production builds, none of which can catch a SQL typo.
+1. Run `python backend/scripts/migrate.py status` then `apply` — against a disposable copy first — for both `0018_roles_permissions.sql` and `0019_platform_finance.sql`. ~~Neither has ever executed against a real Postgres instance~~ **Done — see "Shipped to production" below.**
 2. Sign in as a real Owner and a real Superadmin and click through: create a custom role, restrict `clients.view_all` on it, confirm a staff member on that role actually sees a narrowed client list; hit a seat limit on purpose and confirm the 402 message is sensible; log an expense and an income entry and confirm the profit math; search the Accounts console across two tenants.
 3. Known remaining gaps, in order of how much they matter: services/tasks action buttons not yet permission-gated in the frontend (cosmetic once a restrictive role exists), no explicit no-email toggle (cosmetic, not required).
+
+---
+
+## Shipped to production
+
+Everything above was built and verified on `migration/portable-production-architecture` / a local test database. This section is what happened when it actually went live.
+
+1. **Merged to `main` and pushed** — fast-forward, no conflicts (`6b28de5..4d306e1`). Vercel tracks `main` for Production, so this alone triggers a production frontend rebuild automatically.
+2. **Backend deployed to the Hostinger VPS** (`test.spidnums.com`, root at `/home/deploy/apps/speednum`) via the project's own documented process — `deploy/deploy.sh`: `git pull --ff-only` on `main`, `docker compose up -d --build`, then polls `/health` from inside the container until it reports `"database":"ok"`. Came back healthy on the first attempt.
+3. **Migrations applied against the real production database** — `docker compose run --rm migrate status` first (confirmed exactly the two expected pending: `0018_roles_permissions`, `0019_platform_finance`, nothing unexpected), then `apply`. Both applied cleanly. This is the real production database an existing tenant is on, not an empty one like the local test — so `0018`'s tenant-backfill loop (seeding starter roles, backfilling `profiles.role_id`) ran against real data for the first time here, not just schema DDL. `migrate status` afterward confirms "Schema is up to date."
+4. **Verified externally**, from outside the VPS entirely: `https://test.spidnums.com/health` → healthy; `GET /api/v1/roles`, `/api/v1/admin/finance/summary`, `/api/v1/admin/accounts` → all `401` (not `404`) with no token, confirming the new routes exist and are correctly auth-gated through Caddy's live reverse proxy, not just reachable container-internally.
+
+**What this means:** the backend running at `test.spidnums.com` right now has every Phase 1–4 change live — roles/permissions, seats, the finance ledger, the cross-tenant accounts console — against its real database. The frontend on Vercel will be live on the same push within a few minutes of it landing on `main` (check the Deployments tab for a **Production**-tagged row on commit `4d306e1`).
+
+**Not done as part of this deploy:** no existing tenant/staff/client was created, edited, or removed on the production database — the migration's own backfill is additive-only (new tables, a new nullable column, default role rows) and touches no existing row's meaning. No production credentials were reset, no email was sent (this VPS's own `EMAIL_PROVIDER` setting is whatever it already was — untouched, unlike the local sandbox where it was deliberately set to `none` for testing).
