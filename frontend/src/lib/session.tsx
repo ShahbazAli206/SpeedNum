@@ -56,6 +56,12 @@ export interface SessionValue {
    *  their role. Superadmin outranks everything else since an owner account
    *  can also carry `is_superadmin`. */
   portalRoleLabel: string;
+  /** Server-resolved permission check (backend/app/permissions.py) — e.g.
+   *  `session.hasPermission("clients.view_all")`. Defaults to true in demo
+   *  mode and while `me` hasn't loaded yet, matching `isAdmin`'s default
+   *  above: a page never breaks or flashes "denied" before the real answer
+   *  arrives, it just shows the fuller demo view until then. */
+  hasPermission: (key: string) => boolean;
   /** Re-read /auth/me and the reminder counts now — call after an action that
    *  changes either (marking notifications read, acknowledging a reminder). */
   refresh: () => void;
@@ -174,6 +180,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         : true,
       isImpersonating: isLive ? (me?.is_impersonating ?? false) : false,
       portalRoleLabel: isLive ? portalRoleLabelOf(profile) : "Admin",
+      hasPermission: (key) => (isLive ? (me?.permissions?.[key] ?? false) : true),
       refresh: () => void load(),
       setUnread: (next) =>
         setUnreadOverride((current) =>
@@ -240,6 +247,7 @@ export function useSession(): SessionValue {
     isAdmin: true,
     isImpersonating: false,
     portalRoleLabel: "Admin",
+    hasPermission: () => true,
     refresh: () => {},
     setUnread: () => {},
   };

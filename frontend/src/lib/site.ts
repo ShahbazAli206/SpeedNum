@@ -184,6 +184,13 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         hiddenFromAdmin: true,
       },
       {
+        label: "Roles & Permissions",
+        href: "/team/roles",
+        icon: "shield-check",
+        description: "Define staff role types and what each one can see or do",
+        ownerOnly: true,
+      },
+      {
         label: "Users",
         href: "/users",
         icon: "users",
@@ -228,6 +235,13 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         superadminOnly: true,
       },
       {
+        label: "Accounts",
+        href: "/admin/accounts",
+        icon: "users",
+        description: "Superadmin: search and act on any account, across every tenant",
+        superadminOnly: true,
+      },
+      {
         label: "Reach",
         href: "/admin/reach",
         icon: "line-chart",
@@ -246,6 +260,13 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         href: "/admin/backups",
         icon: "hard-drive",
         description: "Superadmin: snapshots, devices, and disaster recovery",
+        superadminOnly: true,
+      },
+      {
+        label: "Finance",
+        href: "/admin/finance",
+        icon: "wallet",
+        description: "Superadmin: income from tenants, operating expenses, and profit",
         superadminOnly: true,
       },
     ],
@@ -273,6 +294,12 @@ export interface DashboardNavItem {
    * the two policies distinct since /team and /users landed on different
    * answers for whether Owner keeps access. */
   hiddenFromAdmin?: boolean;
+  /** Restricted server-side to the firm's Owner and the platform superadmin
+   * (see backend/app/deps.py's require_owner_or_superadmin, the same gate
+   * app/routers/roles.py uses) — stricter than hiddenFromAdmin, which still
+   * lets Member/Viewer through. Deciding what a role can see or do is an
+   * Owner-level action, so Member/Viewer are hidden here too. */
+  ownerOnly?: boolean;
 }
 
 export const DASHBOARD_NAV: { group: string; items: DashboardNavItem[] }[] = [

@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SpeedNum — Multi-Company Platform Plan</title>
+<style>
+  :root{
+    --bg:#f5f6f9; --panel:#ffffff; --panel-2:#fbfbfd; --border:#e1e4ea; --text:#1a1e27; --muted:#5c6474;
+    --code-bg:#eef0f5; --code-text:#3a4152;
+    --c-super:#2c4bd6; --c-super-bg:#e9edfd; --c-super-bd:#b9c4f7;
+    --c-owner:#0e8a4b; --c-owner-bg:#e6f7ee; --c-owner-bd:#a9e3c4;
+    --c-admin:#c07a10; --c-admin-bg:#fdf3e2; --c-admin-bd:#f2d59b;
+    --c-client:#7a3fc2; --c-client-bg:#f3ecfc; --c-client-bd:#d9c3f4;
+    --c-note-bg:#fff6e0; --c-note-bd:#f0c14b; --c-note-text:#6b4c02;
+    --c-good-bg:#e7f7ee; --c-good-bd:#a9e3c4; --c-good-text:#0e6b3c;
+    --c-build-bg:#fdeceb; --c-build-bd:#f2b3ac; --c-build-text:#a3382c;
+    --c-decision-bg:#eef1fd; --c-decision-bd:#c3cbf5; --c-decision-text:#2c3f9e;
+    --shadow: 0 1px 2px rgba(20,24,34,0.05), 0 4px 14px rgba(20,24,34,0.04);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f1117; --panel:#171a23; --panel-2:#12141c; --border:#2a2e3b; --text:#e7e9ee; --muted:#9aa2b4;
+      --code-bg:#1d2029; --code-text:#c9cfdc;
+      --c-super:#8ea3ff; --c-super-bg:#1c2242; --c-super-bd:#3b4380;
+      --c-owner:#5fd394; --c-owner-bg:#122a1f; --c-owner-bd:#2e6248;
+      --c-admin:#f0b23e; --c-admin-bg:#2c2410; --c-admin-bd:#6b551e;
+      --c-client:#c39bf2; --c-client-bg:#241a35; --c-client-bd:#523a73;
+      --c-note-bg:#2b230c; --c-note-bd:#7a5c14; --c-note-text:#eec96a;
+      --c-good-bg:#0f2419; --c-good-bd:#2e6248; --c-good-text:#6fe0a2;
+      --c-build-bg:#2b1715; --c-build-bd:#7a3a34; --c-build-text:#f0938a;
+      --c-decision-bg:#181c30; --c-decision-bd:#3b4380; --c-decision-text:#a9b4f5;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 18px rgba(0,0,0,0.35);
+    }
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.55;}
+  .wrap{max-width:1240px;margin:0 auto;padding:32px 24px 96px;}
+  header.top{margin-bottom:28px;}
+  header.top h1{font-size:1.9rem;margin:0 0 6px;letter-spacing:-0.02em;}
+  header.top p{color:var(--muted);margin:0;max-width:860px;font-size:0.98rem;}
+  nav.toc{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0 8px;}
+  nav.toc a{font-size:0.82rem;padding:6px 12px;border-radius:999px;background:var(--panel);border:1px solid var(--border);color:var(--text);text-decoration:none;box-shadow:var(--shadow);}
+  nav.toc a:hover{border-color:var(--c-super);}
+  section{margin-top:52px;scroll-margin-top:20px;}
+  section h2{font-size:1.3rem;margin:0 0 6px;display:flex;align-items:baseline;gap:10px;}
+  section h2 .idx{color:var(--muted);font-weight:600;font-size:0.95rem;}
+  section > .lede{color:var(--muted);margin:0 0 20px;max-width:900px;font-size:0.94rem;}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:20px;}
+  code{background:var(--code-bg);color:var(--code-text);padding:1px 6px;border-radius:5px;font-size:0.85em;font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace;}
+
+  /* TL;DR strip */
+  .tldr{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:18px;}
+  .stat-card{border-radius:12px;border:1px solid var(--border);background:var(--panel);padding:16px;box-shadow:var(--shadow);}
+  .stat-card .num{font-size:1.6rem;font-weight:700;}
+  .stat-card .lbl{color:var(--muted);font-size:0.8rem;margin-top:2px;}
+  .stat-card.good .num{color:var(--c-good-text);}
+  .stat-card.build .num{color:var(--c-build-text);}
+
+  /* gap table */
+  table.gap{width:100%;border-collapse:collapse;font-size:0.85rem;}
+  table.gap th, table.gap td{border:1px solid var(--border);padding:10px 12px;text-align:left;vertical-align:top;}
+  table.gap th{background:var(--panel-2);font-size:0.74rem;text-transform:uppercase;letter-spacing:0.03em;color:var(--muted);}
+  table.gap tr:nth-child(even) td{background:var(--panel-2);}
+  .pill{display:inline-block;font-size:0.68rem;font-weight:700;letter-spacing:0.03em;text-transform:uppercase;padding:3px 9px;border-radius:999px;white-space:nowrap;}
+  .pill.good{background:var(--c-good-bg);color:var(--c-good-text);border:1px solid var(--c-good-bd);}
+  .pill.partial{background:var(--c-note-bg);color:var(--c-note-text);border:1px solid var(--c-note-bd);}
+  .pill.build{background:var(--c-build-bg);color:var(--c-build-text);border:1px solid var(--c-build-bd);}
+
+  /* decision points */
+  .decision{background:var(--c-decision-bg);border:1px solid var(--c-decision-bd);color:var(--c-decision-text);border-radius:12px;padding:14px 16px;margin-bottom:12px;font-size:0.87rem;}
+  .decision strong.q{display:block;color:var(--text);font-size:0.92rem;margin-bottom:6px;}
+  .decision .opt{margin:4px 0 0 0;padding-left:16px;}
+
+  .callout{margin-top:16px;background:var(--c-note-bg);border:1px solid var(--c-note-bd);color:var(--c-note-text);border-radius:12px;padding:14px 16px;font-size:0.87rem;}
+  .callout strong{display:block;margin-bottom:4px;font-size:0.82rem;text-transform:uppercase;letter-spacing:0.03em;}
+
+  /* flow diagram reuse */
+  .flow-row{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;margin-top:4px;}
+  .flow-box{flex:1 1 190px;min-width:170px;border-radius:12px;border:1px solid var(--border);background:var(--panel-2);padding:12px 14px;font-size:0.83rem;box-shadow:var(--shadow);}
+  .flow-box strong{display:block;font-size:0.88rem;margin-bottom:4px;}
+  .flow-box p{margin:0;color:var(--muted);font-size:0.79rem;}
+  .flow-box ul{margin:6px 0 0;padding-left:16px;color:var(--muted);font-size:0.78rem;}
+  .flow-arrow{display:flex;align-items:center;justify-content:center;min-width:44px;color:var(--muted);font-size:1.3rem;flex:0 0 auto;position:relative;}
+  .flow-arrow .lbl{position:absolute;top:-19px;left:50%;transform:translateX(-50%);font-size:0.65rem;color:var(--muted);white-space:nowrap;}
+  .flow-box.new{border-color:var(--c-super-bd);background:var(--c-super-bg);}
+  .flow-box.new strong{color:var(--c-super);}
+  .flow-box.existing{border-color:var(--c-owner-bd);background:var(--c-owner-bg);}
+  .flow-box.existing strong{color:var(--c-owner);}
+
+  /* phase cards */
+  .phase{border-radius:14px;border:1px solid var(--border);background:var(--panel);box-shadow:var(--shadow);padding:18px 20px;margin-bottom:16px;}
+  .phase-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:8px;}
+  .phase-head h3{margin:0;font-size:1.05rem;}
+  .effort{font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.03em;padding:4px 10px;border-radius:999px;}
+  .effort.small{background:var(--c-good-bg);color:var(--c-good-text);border:1px solid var(--c-good-bd);}
+  .effort.medium{background:var(--c-note-bg);color:var(--c-note-text);border:1px solid var(--c-note-bd);}
+  .effort.large{background:var(--c-build-bg);color:var(--c-build-text);border:1px solid var(--c-build-bd);}
+  .phase p.why{color:var(--muted);font-size:0.85rem;margin:0 0 12px;}
+  .phase .cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+  @media (max-width:720px){.phase .cols{grid-template-columns:1fr;}}
+  .phase h4{margin:0 0 6px;font-size:0.78rem;text-transform:uppercase;letter-spacing:0.03em;color:var(--muted);}
+  .phase ul{margin:0;padding-left:18px;font-size:0.85rem;}
+  .phase ul li{margin-bottom:4px;}
+  .file-count{font-size:0.78rem;color:var(--muted);margin-top:10px;}
+
+  footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--border);color:var(--muted);font-size:0.78rem;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>SpeedNum → Multi-Company Platform: Gap Analysis &amp; Build Plan</h1>
+    <p>Your scenario asks for two things layered on top of what exists: (1) a <strong>provider (platform-owner) console</strong> with seats, cross-tenant account management and internal profit/expense tracking, and (2) letting each <strong>company owner define their own staff role types and per-role access</strong> instead of the current fixed 4 roles. This is a planning document only — nothing below has been implemented.</p>
+    <nav class="toc">
+      <a href="#tldr">TL;DR</a>
+      <a href="#gaps">1. Requirement × current state</a>
+      <a href="#decisions">2. Decisions needed from you</a>
+      <a href="#datamodel">3. New data model</a>
+      <a href="#phases">4. Phased build plan</a>
+      <a href="#risk">5. Risk &amp; migration notes</a>
+    </nav>
+  </header>
+
+  <section id="tldr">
+    <div class="tldr">
+      <div class="stat-card good"><div class="num">4</div><div class="lbl">requirements already fully or mostly built (isolation, branding, owner→staff reset, superadmin→owner reset)</div></div>
+      <div class="stat-card build"><div class="num">2</div><div class="lbl">requirements that are genuinely greenfield (finance/billing ledger, real seat enforcement)</div></div>
+      <div class="stat-card build"><div class="num">1</div><div class="lbl">big structural change (fixed 4-role enum → per-company custom roles + granular permissions) — this drives most of the effort</div></div>
+      <div class="stat-card"><div class="num">~5–8 wks</div><div class="lbl">rough solo-dev-equivalent effort across all 4 phases, dominated by the roles/permissions rework</div></div>
+    </div>
+  </section>
+
+  <section id="gaps">
+    <h2><span class="idx">1</span> Requirement by requirement — what exists vs. what's new</h2>
+    <p class="lede">Pulled directly from the current codebase (branch <code>migration/portable-production-architecture</code>). "Exists" items need no build; "Partial" need extension; "Build" is greenfield.</p>
+    <div class="panel">
+      <table class="gap">
+        <thead><tr><th style="width:22%">Requirement</th><th style="width:9%">Status</th><th>Current state</th><th>What's needed</th></tr></thead>
+        <tbody>
+          <tr><td>Seat allocation (owners buy N seats for staff+clients)</td><td><span class="pill partial">Partial</span></td><td><code>Tenant.seats</code> (int) and <code>Tenant.settings.max_users/max_clients</code> already exist as editable numbers on the superadmin tenant-edit screen, but they're soft/display-only — not enforced when staff or clients are created.</td><td>Real-time usage counter + hard enforcement at creation time (403 past the cap); decide seat pool model (see §2).</td></tr>
+          <tr><td>View all owners/admins/clients contact info across companies</td><td><span class="pill partial">Partial</span></td><td>Superadmin console (<code>/admin</code>) lists tenants and can drill into one tenant's detail. To see that tenant's staff/clients today, superadmin must <em>impersonate</em> the tenant first, then use normal <code>/team</code>/<code>/clients</code>/<code>/users</code> pages.</td><td>A true cross-tenant directory: search/filter people by name/email/tenant/role without impersonating first. New backend endpoint(s) + one new frontend page.</td></tr>
+          <tr><td>Restrict / allow / update credentials of any owner/admin/client, any company</td><td><span class="pill partial">Partial</span></td><td>Superadmin can already reissue the tenant's admin/owner credentials directly (<code>/admin/tenants/{id}/resend-invite</code>) and any profile's credentials while impersonating (<code>/users/{id}/resend-credentials</code>).</td><td>Extend those write actions to work by <code>tenant_id</code> directly (no impersonation prerequisite) for the unified console; confirm/add a per-profile suspend flag if one doesn't already exist.</td></tr>
+          <tr><td>Superadmin resets an owner's password with no recovery email, one-time, forced change on next login</td><td><span class="pill good">Exists</span></td><td><code>/admin/tenants/{id}/resend-invite</code> → <code>accounts.reissue()</code> sets a new temp password + <code>must_change_password=true</code>. No recovery email required — superadmin triggers it directly.</td><td>Nothing structural. Optional: explicit "don't attempt email, just show me the password" toggle for clarity.</td></tr>
+          <tr><td>Company owner resets their own staff's password, no restriction</td><td><span class="pill good">Exists</span></td><td><code>/team/{id}/resend-credentials</code>, gated to Owner or Superadmin only — exactly matches "only the owner can reset their company's staff." Plain Admin/Member/Viewer cannot reset others.</td><td>Nothing. Already matches the scenario.</td></tr>
+          <tr><td>Staff/owner resets a client's portal password</td><td><span class="pill good">Exists</span></td><td><code>/clients/{id}/portal-invite</code> reissues the client-portal login's credentials.</td><td>Nothing.</td></tr>
+          <tr><td>Provider profit/expense/income dashboard</td><td><span class="pill build">Build</span></td><td>No billing, payment, or internal-expense code exists anywhere (confirmed: zero references to Stripe or any processor). <code>Tenant.plan</code> is just a text label.</td><td>New expense ledger, new income/subscription ledger, computed profit view, new admin page. Greenfield — see §3/§4.</td></tr>
+          <tr><td>Owner defines custom staff role types (Admin, Clerk Admin, Manager, Accountant, User, …) with granular per-role access</td><td><span class="pill build">Build</span></td><td>Roles are a fixed 4-value Postgres enum (<code>owner/admin/member/viewer</code>), checked via ad-hoc string comparisons in ~8 backend files and ~8 frontend files. No permissions table, no "can this role see X" concept beyond one hardcoded rule for plain <code>admin</code>.</td><td>New roles/permissions data model + a shared permission-check layer + an owner-facing "Roles &amp; Permissions" UI. Largest single piece of work — see §3/§4.</td></tr>
+          <tr><td>Owner controls whether a staff role sees clients not assigned to them, and services of assigned clients</td><td><span class="pill partial">Partial</span></td><td>A version of this exists today (<code>_owner_scope</code> in <code>clients.py</code>) but it's hardcoded to "if role==admin, restrict to owner_id" — not owner-configurable, and it's <strong>inconsistently applied</strong>: it guards <code>/clients/*</code> but not <code>/client-services</code> or <code>/tasks</code>, so a restricted admin can still see every client's service assignments and tasks through those two surfaces.</td><td>Fold into the new permission system so scoping is (a) configurable per role, not hardcoded to one role name, and (b) applied consistently across clients, client-services, and tasks.</td></tr>
+          <tr><td>Client creation, staff creation, client↔staff assignment restricted to the company owner only</td><td><span class="pill partial">Partial</span></td><td>Staff creation is already Owner/Superadmin-only. Client creation and service/task assignment are currently open to <em>any</em> firm staff, not owner-only.</td><td>Either tighten the default permission set so "create client" / "assign client to staff" is owner-only by default, or (recommended) make it a togglable permission per role so the owner decides — matches the "owner can restrict/allow" language in your scenario better than a hardcoded lockdown.</td></tr>
+          <tr><td>One company can never see another company's data</td><td><span class="pill good">Exists</span></td><td>Core architecture is already tenant-scoped throughout (<code>tenant_id</code> on every table, <code>TenantUserDep</code>/<code>_validate_task_references</code> cross-tenant checks).</td><td>No new build — but every new table/endpoint added for phases below must follow the same pattern; worth a dedicated audit pass after §4 Phase 1–2 land.</td></tr>
+          <tr><td>Per-company logo, colors, portal settings</td><td><span class="pill good">Exists</span></td><td>Mature white-label system already in place: <code>Tenant.logo_url</code>, <code>brand_color</code>, <code>accent_color</code>, <code>custom_domain</code>, <code>email_from_name</code>, font/tagline in <code>Tenant.settings</code>, live-applied via <code>FirmBrandingProvider</code> on every page.</td><td>Nothing needed unless you want more (e.g. dark-mode logo variant, per-role email templates).</td></tr>
+          <tr><td>Client portal (separate dashboard for clients)</td><td><span class="pill good">Exists</span></td><td>Already built and in production use.</td><td>No change beyond inheriting whatever the owner sets via the new permission system for "is this client-facing feature visible."</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="decisions">
+    <h2><span class="idx">2</span> Decisions only you can make</h2>
+    <p class="lede">These change the shape of the build. I've picked the lower-effort default in each case — flag if you want the other branch.</p>
+    <div class="panel">
+      <div class="decision">
+        <strong class="q">Are seats one shared pool (staff + clients together) or two separate pools?</strong>
+        Your wording says "seats for staff… and clients," which could mean either. A single pool ("20 seats total, use them however") is simpler to build and explain; two pools ("10 staff seats + 50 client seats") matches how most accounting-practice tools price it, since clients vastly outnumber staff. <span class="opt">Default assumed below: two separate pools (staff seats, client seats) — it maps more naturally onto how you'd actually price this.</span>
+      </div>
+      <div class="decision">
+        <strong class="q">Fully free-form custom roles, or a fixed richer set of built-in roles with configurable permissions?</strong>
+        Free-form (owner types any role name, e.g. "Junior Bookkeeper") needs a role-designer UI, name-collision handling, and more validation. A fixed set — Owner, Admin, Manager, Clerk Admin, Accountant, User, Viewer — covers every role you named in the scenario and only needs a permission-toggle UI, not a role-builder. <span class="opt">Default assumed below: fixed built-in role set with per-role permission toggles. Free-form naming can be layered on later without redoing the underlying permission engine.</span>
+      </div>
+      <div class="decision">
+        <strong class="q">Real payment collection (Stripe et al.) now, or manual bookkeeping first?</strong>
+        No payment processor exists in the codebase today. Wiring one up is its own project (PCI scope, webhooks, invoicing, dunning). A manual ledger — superadmin logs "Acme Corp paid $499 on Aug 1" and logs expenses like hosting/dev cost — gets you the profit dashboard immediately with a fraction of the effort. <span class="opt">Default assumed below: manual income/expense ledger first (Phase 2); real payment processing is a distinct, later project if you want self-serve billing.</span>
+      </div>
+      <div class="decision">
+        <strong class="q">Should client creation / client-to-staff assignment become owner-only by default, or owner-configurable?</strong>
+        Your scenario says both things in different places ("only the owner can assign clients" and "owner can restrict/allow access"). <span class="opt">Default assumed below: configurable per role, defaulting to "staff can create clients" preserved for Member/Viewer/Accountant-type roles but off for a fresh custom role — so the owner explicitly grants it rather than it being hardcoded either way.</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="datamodel">
+    <h2><span class="idx">3</span> New data model</h2>
+    <p class="lede">Green boxes are new tables/columns. Existing tables are shown only where they connect.</p>
+    <div class="panel">
+      <h4 style="margin:0 0 10px;font-size:0.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.03em;">Roles &amp; permissions</h4>
+      <div class="flow-row">
+        <div class="flow-box existing"><strong>Tenant</strong><p>existing table</p></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box new"><strong>roles</strong><p>new — one row per built-in or custom role</p><ul><li>id, tenant_id (null = system default)</li><li>name, is_system</li></ul></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box new"><strong>role_permissions</strong><p>new — join table, owner-editable</p><ul><li>role_id, permission_key</li><li>allowed (bool)</li></ul></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box new"><strong>permissions</strong><p>new — fixed system catalogue, seeded once</p><ul><li>clients.view_all / view_assigned</li><li>clients.manage, services.manage</li><li>staff.manage, tasks.manage, billing.view…</li></ul></div>
+      </div>
+      <div class="flow-row" style="margin-top:14px;">
+        <div class="flow-box existing"><strong>profiles</strong><p>existing table — currently has <code>role</code> enum</p></div>
+        <div class="flow-arrow">→<span class="lbl">gains</span></div>
+        <div class="flow-box new"><strong>profiles.role_id</strong><p>new FK to <code>roles</code>, replacing free use of the old enum for non-owner staff (owner/superadmin stay boolean-flag-driven at the top of the hierarchy)</p></div>
+      </div>
+
+      <h4 style="margin:26px 0 10px;font-size:0.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.03em;">Provider finance</h4>
+      <div class="flow-row">
+        <div class="flow-box new"><strong>platform_expenses</strong><p>new — your operating costs</p><ul><li>category (hosting/domains/dev/other)</li><li>vendor, amount, currency, date</li><li>is_recurring, notes</li></ul></div>
+        <div class="flow-arrow"></div>
+        <div class="flow-box new"><strong>platform_income</strong><p>new — money in from tenants</p><ul><li>tenant_id, amount, date</li><li>method (manual/stripe later)</li><li>note</li></ul></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box new"><strong>Profit view</strong><p>computed, not stored</p><p style="margin-top:6px;"><code>profit = Σ platform_income − Σ platform_expenses</code>, filterable by date range</p></div>
+      </div>
+
+      <h4 style="margin:26px 0 10px;font-size:0.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.03em;">Seats</h4>
+      <div class="flow-row">
+        <div class="flow-box existing"><strong>Tenant.seats</strong><p>existing int — repurposed as "purchased staff seats"</p></div>
+        <div class="flow-arrow">+</div>
+        <div class="flow-box new"><strong>Tenant.settings.client_seats</strong><p>new key in the existing JSONB settings column — no migration needed for this half</p></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box new"><strong>Usage check</strong><p>computed at staff/client creation: count active profiles/clients for the tenant, compare to seats, 403 if over</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="phases">
+    <h2><span class="idx">4</span> Phased build plan</h2>
+    <p class="lede">Phase 1 comes first because seat enforcement, finance visibility, and client-assignment restrictions are all easiest to bolt onto the new permission layer rather than the old scattered role checks.</p>
+
+    <div class="phase">
+      <div class="phase-head"><h3>Phase 1 — Roles &amp; permissions engine</h3><span class="effort large">Large · 2–4 weeks</span></div>
+      <p class="why">Foundation everything else in the scenario sits on top of: custom role types, owner-configurable visibility, consistent client-assignment scoping, owner-only vs. staff-allowed actions.</p>
+      <div class="cols">
+        <div>
+          <h4>Backend</h4>
+          <ul>
+            <li>Migration: <code>roles</code>, <code>permissions</code>, <code>role_permissions</code> tables; seed the fixed permission catalogue; seed built-in roles (Owner, Admin, Manager, Clerk Admin, Accountant, User, Viewer) with sensible default grants</li>
+            <li>Add <code>profiles.role_id</code>, backfill from the existing 4-value enum, keep the enum column temporarily for the owner/superadmin distinction</li>
+            <li>New shared dependency in <code>deps.py</code>: <code>require_permission("clients.manage")</code> style checks, replacing scattered role-string comparisons</li>
+            <li>Refactor the ~8 files with ad-hoc role checks (<code>admin.py</code>, <code>imports.py</code>, <code>task_attachments.py</code>, <code>clients.py</code>, <code>team.py</code>, <code>users.py</code>, <code>accounts.py</code>, <code>local_auth.py</code>) to use it</li>
+            <li>Make the client-ownership scoping (today only in <code>clients.py</code>) reusable and apply it to <code>client-services</code> and <code>tasks</code> routers too — closes the gap flagged in §1</li>
+            <li>New endpoints: CRUD for a tenant's roles, GET permission catalogue, PATCH role_permissions</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Frontend</h4>
+          <ul>
+            <li>New "Roles &amp; Permissions" page under Owner settings — list built-in roles, toggle permissions per role</li>
+            <li>Role picker on the staff-creation/edit form (<code>accountant-modal.tsx</code>) switches from the fixed 4-option dropdown to the tenant's role list</li>
+            <li>Shared <code>usePermissions()</code> hook (new) replacing ad-hoc <code>role === "admin"</code> checks across the ~8 files that do it today (<code>users-client.tsx</code>, <code>team-client.tsx</code>, <code>accountant-modal.tsx</code>, <code>clients-client.tsx</code>, <code>shell.tsx</code>, <code>session.tsx</code>, etc.)</li>
+            <li>Nav/section visibility driven by permission flags instead of hardcoded role name comparisons</li>
+          </ul>
+        </div>
+      </div>
+      <div class="file-count">≈ 1 migration · ~9 backend files · ~9 frontend files · 2 new pages</div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-head"><h3>Phase 2 — Seats &amp; provider finance</h3><span class="effort medium">Medium · 1–2 weeks</span></div>
+      <p class="why">Turns the existing decorative <code>seats</code>/<code>plan</code> fields into real enforcement, and gives you the profit/expense visibility you described — independent of Phase 1, but the "who's allowed to see the finance page" check is cleaner once permissions exist.</p>
+      <div class="cols">
+        <div>
+          <h4>Backend</h4>
+          <ul>
+            <li>Migration: <code>platform_expenses</code>, <code>platform_income</code> tables; add <code>client_seats</code> key to <code>Tenant.settings</code></li>
+            <li>Enforcement check on staff-invite and client-create endpoints: count active usage vs. seat cap, 403 with a clear message when exceeded</li>
+            <li>New <code>platform_finance.py</code> router: CRUD for expenses/income, a summary endpoint (income − expenses, by month/category)</li>
+            <li>Extend tenant edit endpoint so superadmin sets purchased seats when a company buys more</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Frontend</h4>
+          <ul>
+            <li>New superadmin "Finance" page: expense list/entry form, income list/entry form, profit summary chart</li>
+            <li>Seat usage indicator on the tenant detail page ("14/20 staff seats, 340/500 client seats") and a lighter version on the owner's own Team page</li>
+            <li>Friendly "seat limit reached, contact your provider" message when a staff/client creation is blocked</li>
+          </ul>
+        </div>
+      </div>
+      <div class="file-count">≈ 1 migration · ~5 backend files · ~5 frontend files · 1 new page</div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-head"><h3>Phase 3 — Unified cross-tenant accounts console</h3><span class="effort medium">Small–Medium · 3–7 days</span></div>
+      <p class="why">Right now, seeing or editing a specific tenant's people means impersonating that tenant first. This phase adds direct-by-ID operations so the provider dashboard behaves like one console instead of "switch into each company one at a time."</p>
+      <div class="cols">
+        <div>
+          <h4>Backend</h4>
+          <ul>
+            <li>New search endpoint: accounts across all tenants, filterable by name/email/role/tenant, without requiring impersonation</li>
+            <li>Extend credential-reset/suspend actions to accept an explicit <code>tenant_id</code> + <code>profile_id</code> instead of relying on the impersonation-derived tenant context</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Frontend</h4>
+          <ul>
+            <li>New "Accounts" directory page in the superadmin console: searchable table of every owner/admin/staff/client across all companies, with inline suspend/reset actions</li>
+          </ul>
+        </div>
+      </div>
+      <div class="file-count">≈ no migration · ~3 backend files · ~3 frontend files · 1 new page</div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-head"><h3>Phase 4 — Hardening</h3><span class="effort small">Small · 2–4 days</span></div>
+      <p class="why">Cleanup and a safety pass once the new surfaces exist.</p>
+      <div class="cols">
+        <div>
+          <h4>Backend</h4>
+          <ul>
+            <li>Tenant-isolation audit of every new table/endpoint from Phases 1–3 (confirm <code>tenant_id</code> scoping, confirm cross-tenant references are rejected the way tasks already do)</li>
+            <li>Optional: explicit no-email flag on the reissue endpoints, for UI clarity</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Frontend</h4>
+          <ul>
+            <li>Remove any leftover hardcoded role checks the Phase 1 refactor missed</li>
+          </ul>
+        </div>
+      </div>
+      <div class="file-count">audit pass, no fixed file count</div>
+    </div>
+  </section>
+
+  <section id="risk">
+    <h2><span class="idx">5</span> Risk &amp; migration notes</h2>
+    <div class="panel">
+      <div class="callout"><strong>Enum → table migration</strong>The <code>role</code> column is a native Postgres enum type today, referenced directly by type in <code>models.py</code>/<code>schemas.py</code>. Moving to a <code>role_id</code> FK means a backfill migration (map each existing owner/admin/member/viewer value to the matching seeded built-in role row) that must run before the old enum column is ever dropped — plan for a transition period where both columns exist, not a single atomic cutover.</div>
+      <div class="callout" style="margin-top:12px;"><strong>Owner/superadmin stay special</strong>Recommend keeping <code>role="owner"</code> and <code>is_superadmin</code> as they are (not folded into the new permissions table) — they're structural (only an Owner can manage billing/roles/seats for their own company; only a superadmin operates across companies), not something an Owner should be able to accidentally reconfigure into a limited role for themselves.</div>
+      <div class="callout" style="margin-top:12px;"><strong>Don't let seat enforcement break existing tenants</strong>Every current tenant already has staff/clients created under the old soft-cap system. Before turning enforcement on, backfill each tenant's <code>seats</code>/<code>client_seats</code> to at least their current usage, or the first Phase 2 deploy will lock existing companies out of creating anything new.</div>
+      <div class="callout" style="margin-top:12px;"><strong>Sequencing</strong>Phase 1 is the one worth doing first and fully, even though it's the largest — Phases 2 and 3 both want "does this staff member have billing.view / accounts.manage permission" checks, and building those against the old ad-hoc role strings just means redoing the check a second time once Phase 1 lands.</div>
+    </div>
+  </section>
+
+  <footer>
+    Planning document only — no code changes have been made. Estimates are rough (solo experienced full-stack dev, no QA/deploy buffer) and assume the "default" branch of each decision in §2.
+  </footer>
+
+</div>
+</body>
+</html>

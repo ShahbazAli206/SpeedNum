@@ -15,17 +15,17 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { CredentialsModal } from "@/components/dashboard/credentials-modal";
 import { useToast } from "@/components/toast";
 import { Button, Modal, Select, Textarea } from "@/components/ui";
-import { ApiError, del, patch, post } from "@/lib/api";
+import { ApiError, del, get, patch, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { daysFromToday, TODAY } from "@/lib/firm-demo";
 import type { ClientRow, Task, TeamNote, TeamRow, TeamStatus } from "@/lib/firm-demo";
 import { dueLabel, formatDate, initials, pluralise, titleCase } from "@/lib/format";
-import type { CredentialResult, TaskStatus, TeamNoteApi } from "@/lib/types";
+import type { CredentialResult, RoleRow, TaskStatus, TeamNoteApi } from "@/lib/types";
 
 import { AccountantModal, type AccountantFormValues } from "../accountant-modal";
 
@@ -94,6 +94,17 @@ export function TeamMemberClient({
 
   const [granting, setGranting] = useState(false);
   const [credentials, setCredentials] = useState<CredentialResult | null>(null);
+
+  const [roles, setRoles] = useState<RoleRow[]>([]);
+  // Same OwnerOrSuperadminDep gate as team-client.tsx's identical fetch — a
+  // member/viewer's 403 here just means the custom-role picker in the edit
+  // modal below doesn't render for them.
+  useEffect(() => {
+    if (!isLive) return;
+    get<RoleRow[]>("/roles")
+      .then(setRoles)
+      .catch(() => setRoles([]));
+  }, [isLive]);
 
   const [assignedClientIds, setAssignedClientIds] = useState(
     () => new Set(allClients.filter((client) => client.owner_id === member.id).map((client) => client.id)),
@@ -302,6 +313,7 @@ export function TeamMemberClient({
           title: values.title,
           phone: values.phone || null,
           role: values.role,
+          role_id: values.roleId,
           is_active: values.status !== "inactive",
         });
       } catch (error) {
@@ -324,6 +336,7 @@ export function TeamMemberClient({
       is_active: values.status !== "inactive",
       email: values.email || current.email,
       phone: values.phone || null,
+      role_id: values.roleId,
       role: values.role,
     }));
     toast.success(`${values.fullName} updated`, "Changes saved to their roster entry.");
@@ -653,6 +666,7 @@ export function TeamMemberClient({
         onClose={() => setEditOpen(false)}
         pending={saving}
         isLive={isLive}
+        roles={roles}
         initial={{
           fullName: profile.full_name,
           title: profile.title,
@@ -660,6 +674,7 @@ export function TeamMemberClient({
           email: profile.email,
           phone: profile.phone ?? "",
           role: profile.role,
+          roleId: profile.role_id ?? null,
           sendCredentials: false,
         }}
         onSubmit={(values) => void submitEdit(values)}

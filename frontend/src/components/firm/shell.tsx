@@ -129,6 +129,11 @@ function FirmShellInner({ children }: { children: ReactNode }) {
   // the real role column instead — a plain admin, not an owner who also
   // happens to read as "Admin" in the rail.
   const isPlainAdmin = !isSuperadmin && session.me?.profile.role === "admin";
+  // Same real-role check as isPlainAdmin above, for the opposite question:
+  // require_owner_or_superadmin lets Owner and superadmin through and blocks
+  // everyone else, including Member/Viewer (unlike hiddenFromAdmin, which
+  // only blocks a plain admin).
+  const isOwner = isSuperadmin || session.me?.profile.role === "owner";
   const visibleNav = useMemo(
     () =>
       FIRM_NAV.map((group) => ({
@@ -136,10 +141,11 @@ function FirmShellInner({ children }: { children: ReactNode }) {
         items: group.items.filter((item) => {
           if (item.superadminOnly && !isSuperadmin) return false;
           if (item.hiddenFromAdmin && isPlainAdmin) return false;
+          if (item.ownerOnly && !isOwner) return false;
           return true;
         }),
       })).filter((group) => group.items.length > 0),
-    [isSuperadmin, isPlainAdmin],
+    [isSuperadmin, isPlainAdmin, isOwner],
   );
   const visibleNavFlat = useMemo(
     () => visibleNav.flatMap((group) => group.items.map((item) => ({ ...item, group: group.group }))),

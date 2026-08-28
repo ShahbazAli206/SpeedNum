@@ -14,7 +14,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { KpiTile } from "@/components/charts";
 import { CredentialsModal } from "@/components/dashboard/credentials-modal";
@@ -22,12 +22,12 @@ import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { DashboardHeader } from "@/components/dashboard/page-shell";
 import { useToast } from "@/components/toast";
 import { Alert, Button, ButtonLink, EmptyState, Modal } from "@/components/ui";
-import { ApiError, del, patch, post } from "@/lib/api";
+import { ApiError, del, get, patch, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { TODAY, type TeamRow, type TeamStatus } from "@/lib/firm-demo";
 import { initials } from "@/lib/format";
 import { useSession } from "@/lib/session";
-import type { CredentialResult, TeamMember } from "@/lib/types";
+import type { CredentialResult, RoleRow, SeatUsage, TeamMember } from "@/lib/types";
 
 import { AccountantModal, type AccountantFormValues } from "./accountant-modal";
 
@@ -67,6 +67,28 @@ export function TeamClient({
   const [pending, setPending] = useState(false);
   const [credentials, setCredentials] = useState<CredentialResult | null>(null);
   const [removing, setRemoving] = useState<TeamRow | null>(null);
+  const [roles, setRoles] = useState<RoleRow[]>([]);
+  const [seats, setSeats] = useState<SeatUsage | null>(null);
+
+  // Owner/superadmin-gated on the API (OwnerOrSuperadminDep, same as this
+  // page's own write actions) — a member/viewer's 403 here is expected and
+  // just means the custom-role picker in the modal doesn't render for them.
+  useEffect(() => {
+    if (!isLive) return;
+    get<RoleRow[]>("/roles")
+      .then(setRoles)
+      .catch(() => setRoles([]));
+  }, [isLive]);
+
+  // Any firm staff can reach GET /settings/seats (see backend/app/seats.py) —
+  // shown here rather than gated further, since a seat-limit 402 can happen
+  // to any staff member trying to invite/create, not only the owner.
+  useEffect(() => {
+    if (!isLive) return;
+    get<SeatUsage>("/settings/seats")
+      .then(setSeats)
+      .catch(() => setSeats(null));
+  }, [isLive]);
 
   const active = team.filter((member) => member.status === "active");
   const away = team.filter((member) => member.status === "away");
@@ -116,6 +138,7 @@ export function TeamClient({
       email: values.email || member.email,
       phone: values.phone || null,
       role: values.role,
+      role_id: values.roleId,
     };
 
     if (isLive) {
@@ -126,6 +149,7 @@ export function TeamClient({
           title: values.title,
           phone: values.phone || null,
           role: values.role,
+          role_id: values.roleId,
           is_active: values.status !== "inactive",
         });
       } catch (error) {
@@ -177,6 +201,7 @@ export function TeamClient({
         email: values.email,
         full_name: values.fullName,
         role: values.role,
+        role_id: values.roleId,
         title: values.title,
         phone: values.phone || null,
         send_email: values.sendCredentials,
@@ -454,6 +479,35 @@ export function TeamClient({
         />
       </div>
 
+      {seats && (seats.staff_seats !== null || seats.client_seats !== null) ? (
+        <div className="mt-4 flex flex-wrap gap-3 text-[13px]">
+          {seats.staff_seats !== null ? (
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 font-medium",
+                seats.staff_used >= seats.staff_seats
+                  ? "border-danger/30 bg-danger-soft text-danger"
+                  : "border-line bg-surface-2 text-ink-soft",
+              )}
+            >
+              {seats.staff_used}/{seats.staff_seats} staff seats used
+            </span>
+          ) : null}
+          {seats.client_seats !== null ? (
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 font-medium",
+                seats.client_used >= seats.client_seats
+                  ? "border-danger/30 bg-danger-soft text-danger"
+                  : "border-line bg-surface-2 text-ink-soft",
+              )}
+            >
+              {seats.client_used}/{seats.client_seats} client seats used
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       <section className="mt-6 rounded-xl border border-line bg-surface shadow-[var(--shadow-card)]">
         <div className="border-b border-line px-5 py-4">
           <h2 className="text-[15px] font-semibold text-ink">Team</h2>
@@ -496,6 +550,7 @@ export function TeamClient({
         onClose={() => setModalOpen(false)}
         pending={pending}
         isLive={isLive}
+        roles={roles}
         initial={
           editing
             ? {
@@ -505,6 +560,7 @@ export function TeamClient({
                 email: editing.email,
                 phone: editing.phone ?? "",
                 role: editing.role,
+                roleId: editing.role_id ?? null,
                 sendCredentials: false,
               }
             : null

@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 
 import { Alert, Button, Checkbox, Field, Input, Modal, Select, toOptions } from "@/components/ui";
 import type { TeamStatus } from "@/lib/firm-demo";
-import type { UserRole } from "@/lib/types";
+import type { RoleRow, UserRole } from "@/lib/types";
 
 const ROLE_TITLES = [
   "Partner",
@@ -41,6 +41,11 @@ export interface AccountantFormValues {
   email: string;
   phone: string;
   role: UserRole;
+  /** Which tenant-defined Role (see /team/roles) grants this member their
+   * actual permissions — separate from `role` above, which stays a legacy
+   * label (see backend/app/permissions.py's fallback for why both exist).
+   * Null keeps the legacy role's built-in behaviour. */
+  roleId: string | null;
   /** Create the login and email the credentials, rather than only adding a row. */
   sendCredentials: boolean;
 }
@@ -53,6 +58,7 @@ export function AccountantModal({
   onSubmit,
   pending = false,
   isLive = false,
+  roles = [],
 }: {
   open: boolean;
   onClose: () => void;
@@ -62,6 +68,10 @@ export function AccountantModal({
   pending?: boolean;
   /** When false the form only edits local state — no account is provisioned. */
   isLive?: boolean;
+  /** This tenant's custom roles (GET /roles) — empty for a firm that hasn't
+   * set any up, or when the caller lacks OwnerOrSuperadminDep to fetch them
+   * (the picker below just doesn't render in that case). */
+  roles?: RoleRow[];
 }) {
   const isEdit = Boolean(initial);
 
@@ -71,6 +81,7 @@ export function AccountantModal({
   const [email, setEmail] = useState(initial?.email ?? "");
   const [phone, setPhone] = useState(initial?.phone ?? "");
   const [role, setRole] = useState<UserRole>(initial?.role ?? "member");
+  const [roleId, setRoleId] = useState<string | null>(initial?.roleId ?? null);
   const [sendCredentials, setSendCredentials] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -88,6 +99,7 @@ export function AccountantModal({
     setEmail(initial?.email ?? "");
     setPhone(initial?.phone ?? "");
     setRole(initial?.role ?? "member");
+    setRoleId(initial?.roleId ?? null);
     setSendCredentials(true);
     setError(null);
   }, [
@@ -98,6 +110,7 @@ export function AccountantModal({
     initial?.email,
     initial?.phone,
     initial?.role,
+    initial?.roleId,
   ]);
 
   const titleOptions = ROLE_TITLES.includes(title) ? ROLE_TITLES : [title, ...ROLE_TITLES];
@@ -122,6 +135,7 @@ export function AccountantModal({
       email: email.trim(),
       phone: phone.trim(),
       role,
+      roleId,
       sendCredentials,
     });
   };
@@ -207,6 +221,25 @@ export function AccountantModal({
                 value={status}
                 onValueChange={(next) => setStatus(next as TeamStatus)}
                 options={STATUS_OPTIONS}
+              />
+            </Field>
+          ) : null}
+          {roles.length > 0 ? (
+            <Field
+              label="Custom role"
+              hint="What this specific role grants — see Roles & Permissions."
+            >
+              <Select
+                value={roleId ?? ""}
+                onValueChange={(next) => setRoleId(next || null)}
+                options={[
+                  { value: "", label: "None — use the access level above" },
+                  ...roles.map((r) => ({
+                    value: r.id,
+                    label: r.name,
+                    description: r.description ?? undefined,
+                  })),
+                ]}
               />
             </Field>
           ) : null}

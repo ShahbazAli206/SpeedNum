@@ -63,6 +63,10 @@ export interface Profile {
   phone: string | null;
   avatar_url: string | null;
   role: UserRole;
+  /** Tenant-defined Role (see PermissionKey/RoleRow below) this profile is
+   * granted through. Null for Owner/superadmin and for any profile not yet
+   * assigned a custom role — see backend/app/permissions.py. */
+  role_id: string | null;
   weekly_capacity: number;
   is_active: boolean;
   is_superadmin: boolean;
@@ -99,6 +103,51 @@ export interface Me {
    *  The firm shell shows the "viewing as superadmin / exit to platform"
    *  banner off this flag. */
   is_impersonating?: boolean;
+  /** This login's fully-resolved permission set (see PermissionKey below),
+   * computed server-side — see backend/app/permissions.py's has_permission.
+   * Owner/superadmin carry every key true. */
+  permissions?: Record<string, boolean>;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Roles & permissions — GET/POST/PATCH/DELETE /roles.                        */
+/* -------------------------------------------------------------------------- */
+
+/** Mirrors backend/app/permissions.PERMISSION_KEYS. Kept as a plain string
+ * union here (not re-derived from the API) so a permission-gated component
+ * still type-checks even before the catalogue has loaded. */
+export type PermissionKey =
+  | "clients.view_all"
+  | "clients.manage"
+  | "clients.delete"
+  | "clients.assign"
+  | "services.manage"
+  | "tasks.view_all"
+  | "tasks.manage";
+
+export interface PermissionInfo {
+  key: PermissionKey;
+  label: string;
+  description: string;
+}
+
+/** GET /settings/seats — see backend/app/seats.py. A null *_seats means
+ * unlimited (no cap set on the tenant). */
+export interface SeatUsage {
+  staff_used: number;
+  staff_seats: number | null;
+  client_used: number;
+  client_seats: number | null;
+}
+
+export interface RoleRow {
+  id: string;
+  tenant_id: string;
+  name: string;
+  description: string | null;
+  permissions: Partial<Record<PermissionKey, boolean>>;
+  member_count: number;
+  created_at: string | null;
 }
 
 export interface Invitation {

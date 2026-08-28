@@ -9,6 +9,7 @@ from sqlalchemy import func, select, text
 
 from ..deps import AdminUserDep, SessionDep, TenantUserDep, client_ip
 from ..models import Client, ClientService, Deadline, Service
+from ..permissions import client_owner_clause, has_permission
 from .deadlines import generate_deadlines
 from ..schemas import (
     ClientServiceCreate,
@@ -55,6 +56,8 @@ async def list_services(
 async def create_service(
     payload: ServiceCreate, session: SessionDep, user: TenantUserDep
 ) -> ServiceRead:
+    if not has_permission(user, "services.manage"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: services.manage")
     exists = await session.scalar(
         select(Service.id).where(Service.tenant_id == user.tenant_id, Service.code == payload.code)
     )
@@ -71,6 +74,8 @@ async def create_service(
 async def update_service(
     service_id: uuid.UUID, payload: ServiceUpdate, session: SessionDep, user: TenantUserDep
 ) -> ServiceRead:
+    if not has_permission(user, "services.manage"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: services.manage")
     row = await session.scalar(
         select(Service).where(Service.id == service_id, Service.tenant_id == user.tenant_id)
     )
@@ -82,6 +87,8 @@ async def update_service(
 
 @router.delete("/services/{service_id}", response_model=Ok)
 async def delete_service(service_id: uuid.UUID, session: SessionDep, user: TenantUserDep) -> Ok:
+    if not has_permission(user, "services.manage"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: services.manage")
     row = await session.scalar(
         select(Service).where(Service.id == service_id, Service.tenant_id == user.tenant_id)
     )
@@ -129,6 +136,13 @@ async def list_assignments(
         .join(Client, Client.id == ClientService.client_id)
         .where(ClientService.tenant_id == user.tenant_id)
     )
+    # Same client-ownership scoping /clients/* applies — see
+    # permissions.client_owner_clause's docstring for why this listing needs
+    # it too: without it, a role restricted to its own clients on the Clients
+    # page could still see every other client's service assignments here.
+    scope = client_owner_clause(user)
+    if scope is not None:
+        stmt = stmt.where(scope)
     if client_id:
         stmt = stmt.where(ClientService.client_id == client_id)
     if service_id:
@@ -156,6 +170,8 @@ async def list_assignments(
 async def assign_service(
     payload: ClientServiceCreate, session: SessionDep, user: TenantUserDep, request: Request
 ) -> ClientServiceRead:
+    if not has_permission(user, "services.manage"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: services.manage")
     client = await session.scalar(
         select(Client).where(Client.id == payload.client_id, Client.tenant_id == user.tenant_id)
     )
@@ -235,6 +251,8 @@ async def update_assignment(
     session: SessionDep,
     user: TenantUserDep,
 ) -> ClientServiceRead:
+    if not has_permission(user, "services.manage"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: services.manage")
     assignment = await session.scalar(
         select(ClientService).where(
             ClientService.id == assignment_id, ClientService.tenant_id == user.tenant_id
@@ -265,6 +283,8 @@ async def remove_assignment(
     user: TenantUserDep,
     drop_future_deadlines: bool = Query(default=True),
 ) -> Ok:
+    if not has_permission(user, "services.manage"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: services.manage")
     assignment = await session.scalar(
         select(ClientService).where(
             ClientService.id == assignment_id, ClientService.tenant_id == user.tenant_id

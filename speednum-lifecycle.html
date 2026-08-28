@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SpeedNum — Project Lifecycle</title>
+<style>
+  :root{
+    --bg:#f5f6f9; --panel:#ffffff; --panel-2:#fbfbfd; --border:#e1e4ea; --text:#1a1e27; --muted:#5c6474;
+    --code-bg:#eef0f5; --code-text:#3a4152;
+    --c-super:#2c4bd6; --c-super-bg:#e9edfd; --c-super-bd:#b9c4f7;
+    --c-owner:#0e8a4b; --c-owner-bg:#e6f7ee; --c-owner-bd:#a9e3c4;
+    --c-staff:#0e8a4b; --c-staff-bg:#eefaf3; --c-staff-bd:#bfead2;
+    --c-admin:#c07a10; --c-admin-bg:#fdf3e2; --c-admin-bd:#f2d59b;
+    --c-client:#7a3fc2; --c-client-bg:#f3ecfc; --c-client-bd:#d9c3f4;
+    --c-note-bg:#fff6e0; --c-note-bd:#f0c14b; --c-note-text:#6b4c02;
+    --shadow: 0 1px 2px rgba(20,24,34,0.05), 0 4px 14px rgba(20,24,34,0.04);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f1117; --panel:#171a23; --panel-2:#12141c; --border:#2a2e3b; --text:#e7e9ee; --muted:#9aa2b4;
+      --code-bg:#1d2029; --code-text:#c9cfdc;
+      --c-super:#8ea3ff; --c-super-bg:#1c2242; --c-super-bd:#3b4380;
+      --c-owner:#5fd394; --c-owner-bg:#122a1f; --c-owner-bd:#2e6248;
+      --c-staff:#5fd394; --c-staff-bg:#10241b; --c-staff-bd:#2a5a41;
+      --c-admin:#f0b23e; --c-admin-bg:#2c2410; --c-admin-bd:#6b551e;
+      --c-client:#c39bf2; --c-client-bg:#241a35; --c-client-bd:#523a73;
+      --c-note-bg:#2b230c; --c-note-bd:#7a5c14; --c-note-text:#eec96a;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 18px rgba(0,0,0,0.35);
+    }
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.5;}
+  .wrap{max-width:1240px;margin:0 auto;padding:32px 24px 96px;}
+  header.top{margin-bottom:28px;}
+  header.top h1{font-size:1.9rem;margin:0 0 6px;letter-spacing:-0.02em;}
+  header.top p{color:var(--muted);margin:0;max-width:820px;font-size:0.98rem;}
+  nav.toc{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0 8px;}
+  nav.toc a{font-size:0.82rem;padding:6px 12px;border-radius:999px;background:var(--panel);border:1px solid var(--border);color:var(--text);text-decoration:none;box-shadow:var(--shadow);}
+  nav.toc a:hover{border-color:var(--c-super);}
+  section{margin-top:52px;scroll-margin-top:20px;}
+  section h2{font-size:1.3rem;margin:0 0 6px;display:flex;align-items:baseline;gap:10px;}
+  section h2 .idx{color:var(--muted);font-weight:600;font-size:0.95rem;}
+  section > .lede{color:var(--muted);margin:0 0 20px;max-width:900px;font-size:0.94rem;}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:20px;}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-bottom:6px;}
+  .role-card{border-radius:12px;border:1px solid var(--border);padding:14px 16px;background:var(--panel);box-shadow:var(--shadow);}
+  .role-card .tag{display:inline-block;font-size:0.68rem;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;padding:2px 8px;border-radius:999px;margin-bottom:8px;}
+  .role-card h3{margin:0 0 6px;font-size:1rem;}
+  .role-card p{margin:0;color:var(--muted);font-size:0.86rem;}
+  .tag.super{background:var(--c-super-bg);color:var(--c-super);border:1px solid var(--c-super-bd);}
+  .tag.owner{background:var(--c-owner-bg);color:var(--c-owner);border:1px solid var(--c-owner-bd);}
+  .tag.admin{background:var(--c-admin-bg);color:var(--c-admin);border:1px solid var(--c-admin-bd);}
+  .tag.staff{background:var(--c-staff-bg);color:var(--c-staff);border:1px solid var(--c-staff-bd);}
+  .tag.client{background:var(--c-client-bg);color:var(--c-client);border:1px solid var(--c-client-bd);}
+
+  svg{width:100%;height:auto;display:block;}
+  .node{width:100%;height:100%;border-radius:10px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:6px 10px;font-size:12.5px;border:1.4px solid var(--border);background:var(--panel);box-shadow:var(--shadow);}
+  .node strong{font-size:13.5px;margin-bottom:3px;}
+  .node span{color:var(--muted);font-size:11px;line-height:1.35;}
+  .node.super{background:var(--c-super-bg);border-color:var(--c-super-bd);}
+  .node.super strong{color:var(--c-super);}
+  .node.owner{background:var(--c-owner-bg);border-color:var(--c-owner-bd);}
+  .node.owner strong{color:var(--c-owner);}
+  .node.staff{background:var(--c-staff-bg);border-color:var(--c-staff-bd);}
+  .node.staff strong{color:var(--c-staff);}
+  .node.admin{background:var(--c-admin-bg);border-color:var(--c-admin-bd);}
+  .node.admin strong{color:var(--c-admin);}
+  .node.entity{background:var(--panel-2);border-color:var(--border);}
+  .node.entity strong{color:var(--text);}
+  .node.client{background:var(--c-client-bg);border-color:var(--c-client-bd);}
+  .node.client strong{color:var(--c-client);}
+  .edge-label{fill:var(--muted);font-size:10.5px;}
+  path.edge{fill:none;stroke:var(--muted);stroke-width:1.6;}
+  path.edge.dashed{stroke-dasharray:4 4;}
+  path.edge.strong{stroke:var(--c-owner);stroke-width:1.8;}
+
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-size:0.8rem;color:var(--muted);margin-top:14px;}
+  .legend .swatch{display:inline-flex;align-items:center;gap:6px;}
+  .legend .ln{display:inline-block;width:26px;height:0;border-top:2px solid var(--muted);}
+  .legend .ln.dashed{border-top-style:dashed;}
+
+  .callout{margin-top:16px;background:var(--c-note-bg);border:1px solid var(--c-note-bd);color:var(--c-note-text);border-radius:12px;padding:14px 16px;font-size:0.87rem;}
+  .callout strong{display:block;margin-bottom:4px;font-size:0.82rem;text-transform:uppercase;letter-spacing:0.03em;}
+  code{background:var(--code-bg);color:var(--code-text);padding:1px 6px;border-radius:5px;font-size:0.85em;font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace;}
+
+  table.matrix{width:100%;border-collapse:collapse;font-size:0.86rem;}
+  table.matrix th, table.matrix td{border:1px solid var(--border);padding:9px 12px;text-align:left;vertical-align:top;}
+  table.matrix th{background:var(--panel-2);font-size:0.76rem;text-transform:uppercase;letter-spacing:0.03em;color:var(--muted);}
+  table.matrix td.entity-name{font-weight:600;white-space:nowrap;}
+  table.matrix tr:nth-child(even) td{background:var(--panel-2);}
+
+  .flow-row{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;}
+  .flow-box{flex:1 1 190px;min-width:170px;border-radius:12px;border:1px solid var(--border);background:var(--panel-2);padding:12px 14px;font-size:0.83rem;box-shadow:var(--shadow);}
+  .flow-box strong{display:block;font-size:0.88rem;margin-bottom:4px;}
+  .flow-box p{margin:0;color:var(--muted);font-size:0.79rem;}
+  .flow-arrow{display:flex;align-items:center;justify-content:center;min-width:44px;color:var(--muted);font-size:1.3rem;flex:0 0 auto;position:relative;}
+  .flow-arrow .lbl{position:absolute;top:-19px;left:50%;transform:translateX(-50%);font-size:0.65rem;color:var(--muted);white-space:nowrap;}
+
+  .mini-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;}
+  .mini-card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow);}
+  .mini-card h3{margin:0 0 10px;font-size:0.98rem;}
+  .steps{display:flex;flex-wrap:wrap;align-items:center;gap:4px;font-size:0.78rem;}
+  .chip{background:var(--code-bg);color:var(--code-text);border-radius:999px;padding:4px 10px;white-space:nowrap;}
+  .steps .arr{color:var(--muted);}
+  .mini-card .note{margin-top:10px;color:var(--muted);font-size:0.78rem;}
+
+  .statechain{display:flex;align-items:center;flex-wrap:wrap;gap:2px;}
+  .state{padding:8px 16px;border-radius:999px;font-size:0.82rem;font-weight:600;border:1.4px solid var(--border);background:var(--panel-2);}
+  .state.todo{border-color:var(--c-admin-bd);color:var(--c-admin);}
+  .state.progress{border-color:var(--c-super-bd);color:var(--c-super);}
+  .state.review{border-color:var(--c-client-bd);color:var(--c-client);}
+  .state.complete{border-color:var(--c-owner-bd);color:var(--c-owner);}
+  .state.blocked{border-color:#e05c5c;color:#e05c5c;}
+  .arrow-sep{color:var(--muted);padding:0 6px;}
+
+  footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--border);color:var(--muted);font-size:0.78rem;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>SpeedNum — Account, Client &amp; Work Lifecycle</h1>
+    <p>How accounts, clients, services and tasks are created, scoped and moved through their lifecycle — read directly out of the backend (<code>backend/app/deps.py</code>, <code>routers/</code>, <code>models.py</code>, <code>db/migrations/</code>) on branch <code>migration/portable-production-architecture</code>. Every claim below traces back to a real file/line.</p>
+    <nav class="toc">
+      <a href="#roles">1. Roles</a>
+      <a href="#hierarchy">2. Creation flow</a>
+      <a href="#matrix">3. Permission matrix</a>
+      <a href="#clients">4. Client assignment</a>
+      <a href="#services">5. Services &amp; catalogue</a>
+      <a href="#tasks">6. Tasks &amp; status</a>
+      <a href="#other">7. Other lifecycles</a>
+      <a href="#gaps">8. Known gaps</a>
+    </nav>
+  </header>
+
+  <section id="roles">
+    <h2><span class="idx">1</span> Roles — two independent axes</h2>
+    <p class="lede">There is no single flat "role" list. A profile has a tenant-scoped <code>role</code> enum <em>and</em> an independent, cross-tenant <code>is_superadmin</code> flag. A "client" is a separate concept again — it's whether <code>client_id</code> is set on the login.</p>
+    <div class="cards">
+      <div class="role-card"><span class="tag super">is_superadmin = true</span><h3>Superadmin</h3><p>Platform-wide, cross-tenant. Creates/suspends/deletes firms, is the only one who can use <code>/users</code>, can impersonate any tenant.</p></div>
+      <div class="role-card"><span class="tag owner">role = owner</span><h3>Owner</h3><p>Full control of their one firm. Sees the whole book regardless of assignment. Only role (besides superadmin) that can create other staff.</p></div>
+      <div class="role-card"><span class="tag admin">role = admin</span><h3>Admin</h3><p>Restricted firm staff — scoped to only the clients assigned to them (<code>owner_id</code>). <code>/team</code> and <code>/users</code> are hidden from them.</p></div>
+      <div class="role-card"><span class="tag staff">role = member</span><h3>Member</h3><p>Ordinary accountant login. Tenant-wide read/write on the book, same as Owner minus staff-management rights.</p></div>
+      <div class="role-card"><span class="tag staff">role = viewer</span><h3>Viewer</h3><p>Read-oriented staff role. Same tenant-wide visibility as Member; no distinct extra restriction found.</p></div>
+      <div class="role-card"><span class="tag client">client_id set</span><h3>Client-portal user</h3><p>Not a "role" value — any profile pinned to one client. Always forced to <code>role="member"</code> internally. Can only see its own client's books.</p></div>
+    </div>
+  </section>
+
+  <section id="hierarchy">
+    <h2><span class="idx">2</span> Who creates whom</h2>
+    <p class="lede">Solid arrows = a creation/provisioning action. Dashed arrows = direct superadmin-only control that bypasses the normal chain.</p>
+    <div class="panel">
+      <svg viewBox="0 0 1180 610" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+          </marker>
+        </defs>
+
+        <!-- edges first so nodes sit above -->
+        <path class="edge dashed" marker-end="url(#arrow)" d="M430,59 L370,59"/>
+        <text class="edge-label" x="400" y="50" text-anchor="middle">manages</text>
+
+        <path class="edge dashed" marker-end="url(#arrow)" d="M750,59 L810,59"/>
+        <text class="edge-label" x="780" y="50" text-anchor="middle">manages</text>
+
+        <path class="edge strong" marker-end="url(#arrow)" d="M590,94 L590,150"/>
+        <text class="edge-label" x="605" y="126">provisions tenant + first Owner</text>
+
+        <path class="edge" marker-end="url(#arrow)" d="M590,214 L590,242 L180,242 L180,270"/>
+        <path class="edge" marker-end="url(#arrow)" d="M590,214 L590,270"/>
+        <path class="edge" marker-end="url(#arrow)" d="M590,214 L590,242 L990,242 L990,270"/>
+        <text class="edge-label" x="590" y="236" text-anchor="middle">Owner or Superadmin creates via /team — picks any of the 4 roles</text>
+
+        <path class="edge" marker-end="url(#arrow)" d="M180,334 L180,390"/>
+        <path class="edge" marker-end="url(#arrow)" d="M590,334 L590,390"/>
+        <path class="edge" marker-end="url(#arrow)" d="M990,334 L990,390"/>
+
+        <path class="edge" marker-end="url(#arrow)" d="M590,446 L590,468 L160,468 L160,490"/>
+        <path class="edge" marker-end="url(#arrow)" d="M590,446 L590,468 L450,468 L450,490"/>
+        <path class="edge" marker-end="url(#arrow)" d="M590,446 L590,468 L740,468 L740,490"/>
+        <path class="edge" marker-end="url(#arrow)" d="M590,446 L590,468 L1030,468 L1030,490"/>
+
+        <!-- Row: superadmin-only side consoles -->
+        <foreignObject x="30" y="24" width="340" height="70"><div xmlns="http://www.w3.org/1999/xhtml" class="node super"><strong>Tenant console</strong><span>create / suspend / reactivate / delete a firm, impersonate (superadmin only)</span></div></foreignObject>
+
+        <foreignObject x="430" y="24" width="320" height="70"><div xmlns="http://www.w3.org/1999/xhtml" class="node super"><strong>Superadmin</strong><span>is_superadmin = true — platform-wide, cross-tenant</span></div></foreignObject>
+
+        <foreignObject x="810" y="24" width="340" height="70"><div xmlns="http://www.w3.org/1999/xhtml" class="node super"><strong>/users — all accounts</strong><span>full account CRUD incl. client-portal logins (superadmin only)</span></div></foreignObject>
+
+        <!-- Owner -->
+        <foreignObject x="430" y="150" width="320" height="64"><div xmlns="http://www.w3.org/1999/xhtml" class="node owner"><strong>Owner</strong><span>full control of their one firm's book</span></div></foreignObject>
+
+        <!-- Row C: staff roles -->
+        <foreignObject x="50" y="270" width="280" height="64"><div xmlns="http://www.w3.org/1999/xhtml" class="node admin"><strong>Admin</strong><span>restricted — sees only clients where owner_id = self</span></div></foreignObject>
+        <foreignObject x="450" y="270" width="280" height="64"><div xmlns="http://www.w3.org/1999/xhtml" class="node owner"><strong>Member</strong><span>accountant — full tenant-wide book access</span></div></foreignObject>
+        <foreignObject x="850" y="270" width="280" height="64"><div xmlns="http://www.w3.org/1999/xhtml" class="node owner"><strong>Viewer</strong><span>read-oriented staff — same tenant-wide visibility</span></div></foreignObject>
+
+        <!-- Row D -->
+        <foreignObject x="50" y="390" width="1080" height="56"><div xmlns="http://www.w3.org/1999/xhtml" class="node staff"><strong>Any firm staff (Owner · Admin · Member · Viewer)</strong><span>day-to-day creation rights below</span></div></foreignObject>
+
+        <!-- Row E: leaf entities -->
+        <foreignObject x="30" y="490" width="260" height="80"><div xmlns="http://www.w3.org/1999/xhtml" class="node entity"><strong>Client record</strong><span>POST /clients — owner_id set by creator/editor</span></div></foreignObject>
+        <foreignObject x="320" y="490" width="260" height="80"><div xmlns="http://www.w3.org/1999/xhtml" class="node client"><strong>Client-portal login</strong><span>POST /clients/{id}/portal-invite — admin: only for clients they own</span></div></foreignObject>
+        <foreignObject x="610" y="490" width="260" height="80"><div xmlns="http://www.w3.org/1999/xhtml" class="node entity"><strong>Service (catalogue)</strong><span>POST /services — tenant-wide, not scoped to admin/accountant</span></div></foreignObject>
+        <foreignObject x="900" y="490" width="260" height="80"><div xmlns="http://www.w3.org/1999/xhtml" class="node entity"><strong>Task / Project</strong><span>POST /tasks, /projects — not scoped by client ownership</span></div></foreignObject>
+      </svg>
+      <div class="legend">
+        <span class="swatch"><span class="ln"></span> creates / provisions</span>
+        <span class="swatch"><span class="ln dashed"></span> direct superadmin-only control</span>
+        <span class="swatch">■ <span style="color:var(--c-super)">blue</span> = superadmin surfaces</span>
+        <span class="swatch">■ <span style="color:var(--c-owner)">green</span> = owner/staff roles</span>
+        <span class="swatch">■ <span style="color:var(--c-admin)">amber</span> = restricted (admin)</span>
+        <span class="swatch">■ <span style="color:var(--c-client)">purple</span> = client-portal</span>
+      </div>
+      <div class="callout"><strong>Note</strong>While impersonating a tenant, a superadmin passes the same <code>OwnerOrSuperadminDep</code> check as an Owner — so in practice a superadmin can also create staff directly without going through a real Owner.</div>
+    </div>
+  </section>
+
+  <section id="matrix">
+    <h2><span class="idx">3</span> Creation permission matrix</h2>
+    <p class="lede">Every entity, who is allowed to create it, and the exact FastAPI dependency that enforces it.</p>
+    <div class="panel">
+      <table class="matrix">
+        <thead><tr><th>Entity</th><th>Who can create</th><th>Gate</th><th>Source</th></tr></thead>
+        <tbody>
+          <tr><td class="entity-name">Tenant (firm) + its Owner</td><td>Superadmin (or self-serve signup with a firm name)</td><td><code>SuperadminDep</code></td><td><code>admin.py:288</code>, <code>deps.py:66-98</code></td></tr>
+          <tr><td class="entity-name">Owner / Admin / Member / Viewer (staff)</td><td>Owner or Superadmin — picks any of the 4 roles</td><td><code>OwnerOrSuperadminDep</code></td><td><code>team.py:111</code></td></tr>
+          <tr><td class="entity-name">Client-portal login</td><td>Any firm staff (admin restricted to their own clients)</td><td><code>TenantUserDep</code> + <code>_owner_scope</code></td><td><code>clients.py:301</code></td></tr>
+          <tr><td class="entity-name">Platform account mgmt (<code>/users</code>)</td><td>Superadmin only</td><td><code>SuperadminTenantUserDep</code></td><td><code>users.py:97</code></td></tr>
+          <tr><td class="entity-name">Client record</td><td>Any firm staff</td><td><code>TenantUserDep</code></td><td><code>clients.py:193</code></td></tr>
+          <tr><td class="entity-name">Client (hard) delete</td><td>Owner / Admin / Superadmin</td><td><code>AdminUserDep</code></td><td><code>clients.py:269</code></td></tr>
+          <tr><td class="entity-name">Service (catalogue item)</td><td>Any firm staff</td><td><code>TenantUserDep</code></td><td><code>services.py:54</code></td></tr>
+          <tr><td class="entity-name">Client ↔ Service assignment</td><td>Any firm staff</td><td><code>TenantUserDep</code></td><td><code>clients.py:503</code>, <code>services.py:155</code></td></tr>
+          <tr><td class="entity-name">Project</td><td>Any firm staff</td><td><code>TenantUserDep</code></td><td><code>workflows.py:87</code></td></tr>
+          <tr><td class="entity-name">Task</td><td>Any firm staff</td><td><code>TenantUserDep</code></td><td><code>workflows.py:281</code></td></tr>
+          <tr><td class="entity-name">Invitation (staff)</td><td>Owner or Superadmin</td><td><code>OwnerOrSuperadminDep</code></td><td><code>team.py:420</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="clients">
+    <h2><span class="idx">4</span> Client assignment &amp; visibility scoping</h2>
+    <p class="lede">Two separate "assignment" fields exist, and only one of them is actually access-controlled.</p>
+    <div class="panel">
+      <div class="flow-row">
+        <div class="flow-box"><strong>clients.owner_id</strong><p>the assigned accountant / relationship owner. Set via <code>ClientCreate/ClientUpdate.owner_id</code> by any staff member.</p></div>
+        <div class="flow-arrow">→<span class="lbl">gates visibility</span></div>
+        <div class="flow-box"><strong>_owner_scope (clients.py:45-56)</strong><p>if caller.role == "admin" (and not superadmin): filter to <code>Client.owner_id == caller.id</code>. Everyone else sees the whole book.</p></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box"><strong>Applies to</strong><p>all of <code>/clients/*</code> — list, get, patch, delete, portal-invite, contacts, client-services sub-routes.</p></div>
+      </div>
+      <div class="flow-row" style="margin-top:16px;">
+        <div class="flow-box"><strong>client_services.assignee_id</strong><p>separate field — who does the actual work for one client↔service pairing. Independent of <code>owner_id</code>.</p></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box"><strong>No ownership check</strong><p>set via <code>POST /clients/{id}/services</code> or <code>POST /client-services</code> — any staff can assign any staff, regardless of who owns the client.</p></div>
+      </div>
+      <div class="callout"><strong>Import behaviour</strong>Bulk client imports resolve an accountant-name column to <code>owner_id</code>. If the name doesn't match anyone, the row still imports (commit <code>6b28de5</code>) — <code>owner_id</code> is just left unset and the original text is preserved under <code>Client.custom</code>, instead of blocking the row.</div>
+    </div>
+  </section>
+
+  <section id="services">
+    <h2><span class="idx">5</span> Services — a tenant-wide catalogue</h2>
+    <p class="lede">Unlike clients, services carry no owner/creator scoping — every staff role sees and edits the same catalogue.</p>
+    <div class="panel">
+      <div class="flow-row">
+        <div class="flow-box"><strong>Service</strong><p>tenant-wide catalogue item: code, name, category, frequency, default_price, due_rule (JSON), lead_time_days. Unique per (tenant, code).</p></div>
+        <div class="flow-arrow">→<span class="lbl">assigned to</span></div>
+        <div class="flow-box"><strong>client_services (join)</strong><p>per-client overrides: price, frequency_override, assignee_id, start/end date, is_active.</p></div>
+        <div class="flow-arrow">→<span class="lbl">projects</span></div>
+        <div class="flow-box"><strong>Deadlines</strong><p>auto-generated the moment a service is assigned to a client (one per client_service × period_end), status: open · snoozed · filed · dismissed.</p></div>
+      </div>
+      <div class="flow-row" style="margin-top:16px;">
+        <div class="flow-box"><strong>Project</strong><p>optional <code>service_id</code> link — a project can represent one instance of doing a service for a client.</p></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box"><strong>Task</strong><p>no direct <code>service_id</code> — reaches a service only through its project, one hop away. <code>client_id</code> auto-fills from the project if omitted.</p></div>
+      </div>
+      <p class="note" style="color:var(--muted);font-size:0.82rem;margin-top:14px;">A default Canadian service catalogue can be re-seeded any time via <code>POST /services/seed-defaults</code> (Owner/Admin/Superadmin only) — it also runs automatically when a new tenant is provisioned.</p>
+    </div>
+  </section>
+
+  <section id="tasks">
+    <h2><span class="idx">6</span> Tasks — status lifecycle</h2>
+    <p class="lede">Any staff role can create, assign, and move a task. There is no client-ownership restriction on tasks — flagged in §8.</p>
+    <div class="panel">
+      <div class="statechain">
+        <span class="state todo">todo</span><span class="arrow-sep">→</span>
+        <span class="state progress">in_progress</span><span class="arrow-sep">→</span>
+        <span class="state review">review</span><span class="arrow-sep">→</span>
+        <span class="state complete">complete</span>
+      </div>
+      <div style="margin-top:14px;">
+        <span class="state blocked">blocked</span>
+        <span style="color:var(--muted);font-size:0.82rem;margin-left:10px;">— a side-state reachable from in_progress or review, not part of the main chain</span>
+      </div>
+      <div class="callout" style="margin-top:18px;"><strong>Mechanics</strong>
+        Moved via <code>PATCH /tasks/{id}</code> (status field) or the kanban-specific <code>POST /tasks/{id}/move</code> (also re-indexes sibling <code>position</code>). Entering <code>complete</code> stamps <code>completed_at</code>; leaving it clears that stamp. Assigning/reassigning <code>assignee_id</code> always fires an in-app notification, plus email if configured.
+      </div>
+    </div>
+  </section>
+
+  <section id="other">
+    <h2><span class="idx">7</span> Other lifecycles</h2>
+    <div class="mini-grid">
+      <div class="mini-card">
+        <h3>Staff invitations</h3>
+        <div class="steps">
+          <span class="chip">Owner/Superadmin sends invite</span><span class="arr">→</span>
+          <span class="chip">token, 14-day expiry</span><span class="arr">→</span>
+          <span class="chip">recipient accepts</span><span class="arr">→</span>
+          <span class="chip">profile gets tenant + role</span>
+        </div>
+        <p class="note">Can be revoked before acceptance. <code>team.py:420-538</code></p>
+      </div>
+      <div class="mini-card">
+        <h3>Impersonation</h3>
+        <div class="steps">
+          <span class="chip">superadmin picks a tenant</span><span class="arr">→</span>
+          <span class="chip">POST /admin/tenants/{id}/impersonate</span><span class="arr">→</span>
+          <span class="chip">short-lived token, act_as_tenant claim</span><span class="arr">→</span>
+          <span class="chip">acts as that firm</span>
+        </div>
+        <p class="note">Audit rows always record the real superadmin's identity. <code>deps.py:121-135</code>, <code>admin.py:440-470</code></p>
+      </div>
+      <div class="mini-card">
+        <h3>Tenant (firm) lifecycle</h3>
+        <div class="steps">
+          <span class="chip">create</span><span class="arr">→</span>
+          <span class="chip">edit plan / caps</span><span class="arr">→</span>
+          <span class="chip">suspend</span><span class="arr">→</span>
+          <span class="chip">reactivate</span><span class="arr">→</span>
+          <span class="chip">delete (cascade)</span>
+        </div>
+        <p class="note">Suspended tenant's logins are rejected at sign-in. Superadmin console only. <code>admin.py</code></p>
+      </div>
+      <div class="mini-card">
+        <h3>Forced password change</h3>
+        <div class="steps">
+          <span class="chip">temp password issued</span><span class="arr">→</span>
+          <span class="chip">must_change_password = true</span><span class="arr">→</span>
+          <span class="chip">blocked until POST /auth/complete-password-change</span>
+        </div>
+        <p class="note">Enforced separately for tenant users and superadmins. <code>deps.py:162-177, 257-268</code></p>
+      </div>
+      <div class="mini-card">
+        <h3>Engagement letters</h3>
+        <div class="steps">
+          <span class="chip">draft</span><span class="arr">→</span>
+          <span class="chip">sent</span><span class="arr">→</span>
+          <span class="chip">viewed</span><span class="arr">→</span>
+          <span class="chip">signed</span><span class="arr">/</span><span class="chip">declined</span><span class="arr">/</span><span class="chip">void</span>
+        </div>
+        <p class="note">Tied to a client. <code>0001_schema.sql:357-394</code></p>
+      </div>
+      <div class="mini-card">
+        <h3>Reminders</h3>
+        <div class="steps">
+          <span class="chip">open</span><span class="arr">→</span>
+          <span class="chip">acknowledged</span><span class="arr">/</span><span class="chip">snoozed</span><span class="arr">→</span>
+          <span class="chip">done</span><span class="arr">/</span><span class="chip">dismissed</span>
+        </div>
+        <p class="note">Distinct from one-shot Notifications; deduplicated by <code>dedupe_key</code>. <code>models.py:672-681</code></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="gaps">
+    <h2><span class="idx">8</span> Known inconsistencies worth knowing</h2>
+    <div class="panel">
+      <div class="callout">
+        <strong>Admin scoping is not applied everywhere</strong>
+        <code>_owner_scope</code> (the rule that limits a plain Admin to only their own clients) is defined locally in <code>clients.py</code> and only guards <code>/clients/*</code> routes. It is <strong>not</strong> reused by <code>/client-services</code> (services.py) or <code>/tasks</code>/<code>/projects</code> (workflows.py) — so a restricted Admin's client list is scoped on the Clients page, but the same Admin can still see and act on every client's service-assignments and tasks through those two surfaces.
+      </div>
+      <div class="callout" style="margin-top:12px;">
+        <strong>"Users" vs "Accountants" vs "Clients"</strong>
+        These are three different things sharing the same underlying <code>profiles</code> table: <strong>Accountants</strong> (<code>/team</code>) = staff rows (<code>client_id IS NULL</code>), any of the 4 roles. <strong>Users</strong> (<code>/users</code>, superadmin-only) = every profile, staff and client-portal alike. <strong>Clients</strong> (<code>/clients</code>) = the firm's own customer records in a completely separate table — a client can exist with zero login at all.
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Generated from the codebase on branch <code>migration/portable-production-architecture</code> — SpeedNum backend (<code>backend/app/deps.py</code>, <code>routers/</code>, <code>models.py</code>, <code>db/migrations/</code>). This is a static snapshot; re-run the research if the branch has moved on.
+  </footer>
+
+</div>
+</body>
+</html>

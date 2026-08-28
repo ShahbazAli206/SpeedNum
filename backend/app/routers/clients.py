@@ -7,8 +7,10 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select
 
-from ..deps import AdminUserDep, SessionDep, TenantUserDep, client_ip
+from ..deps import SessionDep, TenantUserDep, client_ip
 from ..models import Client, ClientService, Contact, Deadline, Profile, Service, Task
+from ..permissions import client_owner_clause, has_permission
+from ..seats import ensure_client_seat_available
 from ..schemas import (
     ClientCreate,
     ClientRead,
@@ -43,17 +45,22 @@ MIN_ANNUAL_FEE = 50
 
 
 def _owner_scope(user: TenantUserDep):
-    """Restricts an 'admin' to the clients assigned to them.
+    """Restricts a role lacking clients.view_all to the clients assigned to
+    them (Client.owner_id).
 
     An owner runs the whole practice and a platform superadmin (including
-    while impersonating a tenant) oversees every firm, so both still see the
-    full book, assigned or not. A plain 'admin', though, should see only
-    their own clients — not another admin's, and not unassigned ones —
-    otherwise every admin login effectively sees the whole firm's book
-    regardless of who a client is actually assigned to."""
-    if user.profile.role == "admin" and not user.profile.is_superadmin:
-        return Client.owner_id == user.profile.id
-    return None
+    while impersonating a tenant) always has clients.view_all (see
+    permissions.resolve_permission), so both still see the full book,
+    assigned or not. Any other role only sees its own clients — not another
+    colleague's, and not unassigned ones — unless the tenant's owner has
+    explicitly granted that role clients.view_all. This used to be hardcoded
+    to role == "admin"; it is now whatever the tenant's Roles & Permissions
+    settings say (see app/permissions.py), defaulting on migration to the
+    exact same admin-only restriction so no existing tenant's access changed
+    on deploy. Thin wrapper around permissions.client_owner_clause, which is
+    also reused by services.py and workflows.py so the same rule applies to
+    client-service assignments and tasks, not just this router."""
+    return client_owner_clause(user)
 
 
 def _check_annual_fee(annual_fee: float | None) -> None:
@@ -194,6 +201,11 @@ async def list_clients(
 async def create_client(
     payload: ClientCreate, session: SessionDep, user: TenantUserDep, request: Request
 ) -> ClientRead:
+    if not has_permission(user, "clients.manage"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: clients.manage")
+    if payload.owner_id is not None and not has_permission(user, "clients.assign"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: clients.assign")
+    await ensure_client_seat_available(session, user.tenant)
     _check_annual_fee(payload.annual_fee)
     row = Client(tenant_id=user.tenant_id, created_by=user.profile.id, **payload.model_dump())
     session.add(row)
@@ -235,7 +247,11 @@ async def update_client(
     user: TenantUserDep,
     request: Request,
 ) -> ClientRead:
+    if not has_permission(user, "clients.manage"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: clients.manage")
     _check_annual_fee(payload.annual_fee)
+    if "owner_id" in payload.model_fields_set and not has_permission(user, "clients.assign"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: clients.assign")
     stmt = select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
     scope = _owner_scope(user)
     if scope is not None:
@@ -266,11 +282,17 @@ async def update_client(
 
 @router.delete("/clients/{client_id}", response_model=Ok)
 async def delete_client(
-    client_id: uuid.UUID, session: SessionDep, user: AdminUserDep, request: Request
+    client_id: uuid.UUID, session: SessionDep, user: TenantUserDep, request: Request
 ) -> Ok:
-    """Admin-gated: this is a hard delete of the client and everything FK'd to
-    it (deadlines, tasks, letters, files) — too destructive to leave open to
-    any staff member the way read/update access is."""
+    """clients.delete-gated: this is a hard delete of the client and
+    everything FK'd to it (deadlines, tasks, letters, files) — too
+    destructive to leave open to any staff member the way read/update access
+    is. Used to be hardcoded to AdminUserDep (owner/admin/superadmin); the
+    legacy fallback in app/permissions.py reproduces that exact rule for any
+    profile not yet on a custom role, so this swap changes nothing until an
+    Owner deliberately reconfigures a role's grants."""
+    if not has_permission(user, "clients.delete"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: clients.delete")
     stmt = select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
     scope = _owner_scope(user)
     if scope is not None:

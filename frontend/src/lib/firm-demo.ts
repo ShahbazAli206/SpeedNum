@@ -93,6 +93,10 @@ export interface TeamMember {
   phone: string | null;
   title: string;
   role: UserRole;
+  /** Tenant-defined Role granting this member's actual permissions — see
+   * lib/types.ts's Profile.role_id. Optional/absent on the seeded demo
+   * fixtures below, which predate custom roles. */
+  role_id?: string | null;
   weekly_capacity: number;
   is_active: boolean;
   status: TeamStatus;

@@ -531,7 +531,10 @@ export function ClientDetailClient({
                 <Button size="sm" variant="secondary" icon={<Pencil className="size-3.5" />} onClick={openEdit}>
                   Edit
                 </Button>
-                {session.isAdmin ? (
+                {/* clients.delete, not a raw isAdmin check — see
+                    backend/app/permissions.py; an Owner can grant or deny
+                    this per custom role independently of owner/admin/member. */}
+                {session.hasPermission("clients.delete") ? (
                   <Button
                     size="sm"
                     variant="secondary"

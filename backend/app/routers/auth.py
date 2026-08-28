@@ -19,6 +19,7 @@ from sqlalchemy import func, select, text
 from ..config import settings
 from ..deps import CurrentUserDep, SessionDep, client_ip
 from ..models import Notification, Tenant
+from ..permissions import PERMISSION_KEYS, has_permission, seed_default_roles
 from ..schemas import (
     AuthResult,
     BootstrapRequest,
@@ -324,6 +325,7 @@ async def me(session: SessionDep, user: CurrentUserDep) -> MeResponse:
         tenant=TenantRead.model_validate(user.tenant) if user.tenant else None,
         unread_notifications=unread,
         is_impersonating=user.impersonating,
+        permissions={key: has_permission(user, key) for key in PERMISSION_KEYS},
     )
 
 
@@ -398,6 +400,7 @@ async def bootstrap_firm(
     await session.execute(
         text("select public.seed_default_services(:tenant_id)"), {"tenant_id": str(tenant.id)}
     )
+    await seed_default_roles(session, tenant.id)
 
     user.profile.tenant_id = tenant.id
     user.profile.role = "owner"
@@ -429,4 +432,5 @@ async def bootstrap_firm(
         profile=ProfileRead.model_validate(user.profile),
         tenant=TenantRead.model_validate(tenant),
         unread_notifications=1,
+        permissions={key: has_permission(user, key) for key in PERMISSION_KEYS},
     )

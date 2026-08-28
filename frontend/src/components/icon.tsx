@@ -29,6 +29,7 @@ import {
   Tag,
   UserPlus,
   Users,
+  Wallet,
   type LucideIcon,
 } from "lucide-react";
 
@@ -70,6 +71,7 @@ const ICONS: Record<string, LucideIcon> = {
   tag: Tag,
   "user-plus": UserPlus,
   users: Users,
+  wallet: Wallet,
 };
 
 export function Icon({ name, className }: { name: string; className?: string }) {

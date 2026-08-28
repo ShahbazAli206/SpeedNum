@@ -145,6 +145,7 @@ async def provision(
     email: str,
     full_name: str,
     role: str = "member",
+    role_id: uuid.UUID | None = None,
     client_id: uuid.UUID | None = None,
     title: str | None = None,
     phone: str | None = None,
@@ -198,6 +199,10 @@ async def provision(
         phone=phone,
         # A portal login has no say over firm data, whatever role was asked for.
         role="member" if client_id is not None else role,
+        # Same reasoning — a custom Role's grants are meaningless to a portal
+        # account, which never reaches app.permissions' checks in the first
+        # place (they're rejected by get_tenant_user before that).
+        role_id=role_id if client_id is None else None,
         weekly_capacity=weekly_capacity,
         is_active=True,
         must_change_password=True,

@@ -247,17 +247,22 @@ export function ClientsClient({
           >
             <Eye className="size-4" />
           </Link>
-          {/* Edit is any staff member's call (PATCH /clients/{id} has no
-              admin gate) — only deleting a client is admin-only. */}
-          <Link
-            href={`/clients/${row.id}?edit=1`}
-            onClick={(event) => event.stopPropagation()}
-            aria-label={`Edit ${row.business_name}`}
-            className="rounded-lg p-1.5 text-muted transition hover:bg-surface-2 hover:text-ink"
-          >
-            <Pencil className="size-4" />
-          </Link>
-          {session.isAdmin ? (
+          {/* Gated on the actual server-enforced permissions (clients.manage /
+              clients.delete — see backend/app/permissions.py), not a raw
+              owner/admin/superadmin role check: an Owner can grant or deny
+              either independently per custom role now, so "isAdmin" alone no
+              longer says who can edit or delete a client. */}
+          {session.hasPermission("clients.manage") ? (
+            <Link
+              href={`/clients/${row.id}?edit=1`}
+              onClick={(event) => event.stopPropagation()}
+              aria-label={`Edit ${row.business_name}`}
+              className="rounded-lg p-1.5 text-muted transition hover:bg-surface-2 hover:text-ink"
+            >
+              <Pencil className="size-4" />
+            </Link>
+          ) : null}
+          {session.hasPermission("clients.delete") ? (
             <button
               type="button"
               disabled={deletingId === row.id}

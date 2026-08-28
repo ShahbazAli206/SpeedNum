@@ -232,6 +232,7 @@ export function toTeamRow(member: TeamMember): TeamRow {
     phone: member.phone,
     title: member.title || "",
     role: member.role as UserRole,
+    role_id: member.role_id,
     weekly_capacity: member.weekly_capacity,
     is_active: member.is_active,
     status,

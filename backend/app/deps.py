@@ -14,7 +14,8 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import get_session
-from .models import Profile, Tenant
+from .models import Profile, RolePermission, Tenant
+from .permissions import has_permission, seed_default_roles
 from .security import TokenClaims, verify_token
 
 log = logging.getLogger(__name__)
@@ -35,6 +36,13 @@ class CurrentUser:
     # tenant-scoped router serves that firm's data automatically as a result;
     # audit rows still record the superadmin's real identity as the actor.
     impersonating: bool = False
+    # This profile's tenant-defined Role's grants (app/permissions.py), keyed
+    # by permission_key. None when profile.role_id is unset — Owner and
+    # superadmin always have one of those (see is_admin below), and for any
+    # other profile it means "not yet migrated onto a custom role", in which
+    # case has_permission() falls back to the pre-permissions hardcoded
+    # behaviour rather than silently denying everything.
+    role_permissions: dict[str, bool] | None = None
 
     @property
     def id(self) -> uuid.UUID:
@@ -84,6 +92,7 @@ async def _provision_profile(session: AsyncSession, claims: TokenClaims) -> Prof
         await session.execute(
             text("select public.seed_default_services(:tenant_id)"), {"tenant_id": str(tenant_id)}
         )
+        await seed_default_roles(session, tenant_id)
 
     profile = Profile(
         id=uuid.UUID(claims.user_id),
@@ -138,7 +147,22 @@ async def get_current_user(
     if profile.last_seen_at is None or (now - profile.last_seen_at) > timedelta(minutes=10):
         profile.last_seen_at = now
 
-    return CurrentUser(profile=profile, tenant=tenant, claims=claims, impersonating=impersonating)
+    role_permissions: dict[str, bool] | None = None
+    if profile.role_id is not None:
+        grants = await session.execute(
+            select(RolePermission.permission_key, RolePermission.allowed).where(
+                RolePermission.role_id == profile.role_id
+            )
+        )
+        role_permissions = dict(grants.all())
+
+    return CurrentUser(
+        profile=profile,
+        tenant=tenant,
+        claims=claims,
+        impersonating=impersonating,
+        role_permissions=role_permissions,
+    )
 
 
 CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
@@ -249,6 +273,21 @@ async def require_owner_or_superadmin(user: TenantUserDep) -> CurrentUser:
 
 
 OwnerOrSuperadminDep = Annotated[CurrentUser, Depends(require_owner_or_superadmin)]
+
+
+def require_permission(key: str):
+    """Dependency factory for the owner-configurable permission checks in
+    app/permissions.py — e.g. `user: Annotated[CurrentUser, Depends(require_permission("clients.assign"))]`.
+    A plain function returning a dependency (rather than one fixed dependency)
+    because the permission key varies per call site; unlike require_admin and
+    friends above this can't be a single module-level Annotated alias."""
+
+    async def _check(user: TenantUserDep) -> CurrentUser:
+        if not has_permission(user, key):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, f"Missing permission: {key}")
+        return user
+
+    return _check
 
 
 async def require_superadmin(user: CurrentUserDep) -> CurrentUser:

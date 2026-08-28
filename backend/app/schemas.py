@@ -97,6 +97,10 @@ class ProfileRead(ORMModel):
     phone: str | None = None
     avatar_url: str | None = None
     role: UserRole = "member"
+    # Tenant-defined Role (app.models.Role) this profile is granted through —
+    # see app/permissions.py. Null for Owner/superadmin (who bypass the
+    # permission system) and for any profile not yet assigned a custom role.
+    role_id: uuid.UUID | None = None
     weekly_capacity: int = 40
     is_active: bool = True
     is_superadmin: bool = False
@@ -111,6 +115,7 @@ class ProfileUpdate(BaseModel):
     phone: str | None = None
     avatar_url: str | None = None
     role: UserRole | None = None
+    role_id: uuid.UUID | None = None
     weekly_capacity: int | None = None
     is_active: bool | None = None
     notify_deadline_digest: bool | None = None
@@ -141,10 +146,52 @@ class StaffCreate(BaseModel):
     email: EmailStr
     full_name: str = Field(min_length=1, max_length=120)
     role: UserRole = "member"
+    # Which tenant-defined Role (see the new /roles endpoints) grants this
+    # staff member their permissions. Optional: a firm that hasn't set up
+    # custom roles yet can omit it, and app/permissions.py's legacy fallback
+    # applies based on `role` alone, same as before this feature existed.
+    role_id: uuid.UUID | None = None
     title: str | None = Field(default=None, max_length=80)
     phone: str | None = Field(default=None, max_length=40)
     weekly_capacity: int = Field(default=40, ge=0, le=168)
     send_email: bool = True
+
+
+# --- Roles & permissions -------------------------------------------------------
+class PermissionInfo(BaseModel):
+    key: str
+    label: str
+    description: str
+
+
+class RolePermissionInput(BaseModel):
+    permission_key: str
+    allowed: bool = True
+
+
+class RoleCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    description: str | None = Field(default=None, max_length=400)
+    permissions: list[RolePermissionInput] = Field(default_factory=list)
+
+
+class RoleUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    description: str | None = Field(default=None, max_length=400)
+    # When provided, replaces the role's entire permission set (not a merge) —
+    # the frontend's permissions page always submits the full grid, so a
+    # partial-merge semantics would silently leave stale grants in place.
+    permissions: list[RolePermissionInput] | None = None
+
+
+class RoleRead(ORMModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    name: str
+    description: str | None = None
+    permissions: dict[str, bool] = Field(default_factory=dict)
+    member_count: int = 0
+    created_at: datetime | None = None
 
 
 class CredentialResult(BaseModel):
@@ -177,6 +224,15 @@ class PlatformUserRead(ProfileRead):
     last_sign_in: datetime | None = None
 
 
+class PlatformAccountRead(PlatformUserRead):
+    """A row in the cross-tenant accounts directory (GET /admin/accounts) —
+    PlatformUserRead plus which tenant it belongs to, since this list spans
+    every tenant rather than the impersonated one. See routers/admin_accounts.py."""
+
+    tenant_id: uuid.UUID | None = None
+    tenant_name: str | None = None
+
+
 class PlatformUserCreate(BaseModel):
     email: EmailStr
     full_name: str = Field(min_length=1, max_length=120)
@@ -206,6 +262,10 @@ class MeResponse(BaseModel):
     # (deps.CurrentUser.impersonating). The firm shell shows a "viewing as
     # superadmin / exit to platform" banner off this flag.
     is_impersonating: bool = False
+    # This profile's fully-resolved permission set (app/permissions.PERMISSION_KEYS
+    # -> allowed), computed server-side so the frontend never re-implements
+    # has_permission's owner/superadmin-bypass and legacy-fallback logic.
+    permissions: dict[str, bool] = Field(default_factory=dict)
 
 
 # --- Platform superadmin console (cross-tenant) ------------------------------

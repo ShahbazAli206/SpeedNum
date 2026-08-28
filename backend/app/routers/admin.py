@@ -23,6 +23,7 @@ from sqlalchemy import func, select, text
 from ..config import settings as app_settings
 from ..deps import SessionDep, SuperadminDep, client_ip
 from ..models import AuditLog, Client, Deadline, EngagementLetter, Profile, Tenant
+from ..permissions import seed_default_roles
 from ..schemas import (
     ImpersonateResult,
     PlatformAuditLogRead,
@@ -239,6 +240,7 @@ async def provision_tenant(
     await session.execute(
         text("select public.seed_default_services(:tenant_id)"), {"tenant_id": str(tenant.id)}
     )
+    await seed_default_roles(session, tenant.id)
 
     try:
         provisioned = await accounts.provision(

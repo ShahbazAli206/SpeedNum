@@ -125,6 +125,81 @@ class Profile(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     tenant: Mapped[Tenant | None] = relationship(lazy="joined")
+    role_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("roles.id", ondelete="SET NULL")
+    )
+
+
+class Role(Base):
+    """A tenant-defined staff role type (e.g. "Clerk Admin"). Free-form name,
+    scoped to one tenant. Owner and platform superadmin are never represented
+    here — see app/permissions.py's has_permission for why."""
+
+    __tablename__ = "roles"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PlatformExpense(Base):
+    """Provider operating cost (hosting, domains, dev/maintenance) —
+    superadmin-only manual ledger, unrelated to any tenant. See
+    db/migrations/0019_platform_finance.sql."""
+
+    __tablename__ = "platform_expenses"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    vendor: Mapped[str | None] = mapped_column(Text)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(Text, default="USD")
+    expense_date: Mapped[date] = mapped_column(Date, server_default=func.current_date())
+    is_recurring: Mapped[bool] = mapped_column(Boolean, default=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PlatformIncome(Base):
+    """Money received from a tenant firm — superadmin-only manual ledger.
+    `tenant_id` is SET NULL (not cascaded) if the tenant is later deleted, so
+    historical revenue is never lost. See db/migrations/0019_platform_finance.sql."""
+
+    __tablename__ = "platform_income"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="SET NULL")
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(Text, default="USD")
+    received_date: Mapped[date] = mapped_column(Date, server_default=func.current_date())
+    method: Mapped[str] = mapped_column(Text, default="manual")
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RolePermission(Base):
+    """One permission grant for a Role. `permission_key` is validated against
+    app.permissions.PERMISSION_KEYS at the API layer rather than a DB enum, so
+    adding a new permission never needs a migration."""
+
+    __tablename__ = "role_permissions"
+
+    role_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True
+    )
+    permission_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    allowed: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class Invitation(Base):

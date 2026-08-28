@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 
 from ..config import settings
 from ..deps import CurrentUserDep, OwnerOrSuperadminDep, SessionDep, TeamVisibleDep, client_ip
-from ..models import Client, Deadline, Invitation, Profile, Task, TeamNote
+from ..models import Client, Deadline, Invitation, Profile, Role, Task, Tenant, TeamNote
 from ..schemas import (
     CredentialResult,
     InvitationAccept,
@@ -25,6 +25,7 @@ from ..schemas import (
     TeamNoteCreate,
     TeamNoteRead,
 )
+from ..seats import ensure_staff_seat_available
 from ..services import accounts, audit
 from ..services.accounts import ROLE_LABELS, AccountError
 from ..services.email import invite_html, send_email, sender_name
@@ -44,6 +45,15 @@ _account_creation_rate_limit = rate_limit_by_tenant("team-account-creation", lim
 
 def _invite_url(token: str) -> str:
     return f"{settings.public_app_url.rstrip('/')}/signup?invite={token}"
+
+
+async def _ensure_role_in_tenant(session: SessionDep, tenant_id: uuid.UUID, role_id: uuid.UUID) -> None:
+    """A role_id has to belong to this tenant, same reasoning as
+    workflows.py's _validate_task_references — an id alone doesn't prove
+    tenancy, only that the row exists somewhere."""
+    exists = await session.scalar(select(Role.id).where(Role.id == role_id, Role.tenant_id == tenant_id))
+    if exists is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "That role does not belong to this firm.")
 
 
 @router.get("", response_model=list[TeamMemberRead])
@@ -121,6 +131,11 @@ async def create_member(
     """
     email = str(payload.email).strip().lower()
 
+    await ensure_staff_seat_available(session, user.tenant)
+
+    if payload.role_id is not None:
+        await _ensure_role_in_tenant(session, user.tenant_id, payload.role_id)
+
     try:
         result = await accounts.provision(
             session,
@@ -128,6 +143,7 @@ async def create_member(
             email=email,
             full_name=payload.full_name,
             role=payload.role,
+            role_id=payload.role_id,
             title=payload.title,
             phone=payload.phone,
             weekly_capacity=payload.weekly_capacity,
@@ -245,6 +261,9 @@ async def update_member(
         select(Profile).where(Profile.id == profile_id, Profile.tenant_id == user.tenant_id)
     )
     ensure_found(member, "Team member")
+
+    if payload.role_id is not None:
+        await _ensure_role_in_tenant(session, user.tenant_id, payload.role_id)
 
     if payload.role is not None and member.id == user.profile.id and payload.role != "owner":
         owners = await session.scalar(
@@ -434,6 +453,8 @@ async def invite_member(
     if existing_member:
         raise HTTPException(status.HTTP_409_CONFLICT, "That person is already on your team.")
 
+    await ensure_staff_seat_available(session, user.tenant)
+
     pending = await session.scalar(
         select(Invitation).where(
             Invitation.tenant_id == user.tenant_id,
@@ -508,6 +529,13 @@ async def accept_invitation(
         raise HTTPException(
             status.HTTP_409_CONFLICT, "This account already belongs to a different firm."
         )
+
+    # Re-checked here, not only at invite-send time: a pending invitation
+    # creates no profiles row, so several invites can be sent while under the
+    # cap and then all accepted later, overshooting it if this weren't here.
+    invitation_tenant = await session.get(Tenant, invitation.tenant_id)
+    if invitation_tenant is not None:
+        await ensure_staff_seat_available(session, invitation_tenant)
 
     user.profile.tenant_id = invitation.tenant_id
     user.profile.role = invitation.role

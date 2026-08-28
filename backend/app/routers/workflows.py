@@ -11,6 +11,7 @@ from sqlalchemy import func, or_, select
 from ..config import settings
 from ..deps import SessionDep, TenantUserDep, client_ip
 from ..models import Client, Profile, Project, Task
+from ..permissions import client_owner_clause, has_permission
 from ..services.email import deliver, task_assigned_html
 from ..schemas import (
     Ok,
@@ -45,6 +46,11 @@ async def list_projects(
         .join(Client, Client.id == Project.client_id)
         .where(Project.tenant_id == user.tenant_id)
     )
+    # Every project belongs to exactly one client, so the same client-ownership
+    # scoping as /clients/* applies directly — see permissions.client_owner_clause.
+    scope = client_owner_clause(user)
+    if scope is not None:
+        stmt = stmt.where(scope)
     if client_id:
         stmt = stmt.where(Project.client_id == client_id)
     if status_filter:
@@ -88,6 +94,8 @@ async def list_projects(
 async def create_project(
     payload: ProjectCreate, session: SessionDep, user: TenantUserDep
 ) -> ProjectRead:
+    if not has_permission(user, "tasks.manage"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: tasks.manage")
     client = await session.scalar(
         select(Client).where(Client.id == payload.client_id, Client.tenant_id == user.tenant_id)
     )
@@ -110,6 +118,8 @@ async def create_project(
 async def update_project(
     project_id: uuid.UUID, payload: ProjectUpdate, session: SessionDep, user: TenantUserDep
 ) -> ProjectRead:
+    if not has_permission(user, "tasks.manage"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: tasks.manage")
     project = await session.scalar(
         select(Project).where(Project.id == project_id, Project.tenant_id == user.tenant_id)
     )
@@ -129,6 +139,8 @@ async def update_project(
 
 @router.delete("/projects/{project_id}", response_model=Ok)
 async def delete_project(project_id: uuid.UUID, session: SessionDep, user: TenantUserDep) -> Ok:
+    if not has_permission(user, "tasks.manage"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: tasks.manage")
     project = await session.scalar(
         select(Project).where(Project.id == project_id, Project.tenant_id == user.tenant_id)
     )
@@ -153,6 +165,18 @@ async def list_tasks(
     limit: int = Query(default=500, ge=1, le=1000),
 ) -> list[TaskRead]:
     stmt = select(Task).where(Task.tenant_id == user.tenant_id)
+
+    # Gated on tasks.view_all rather than clients.view_all — an Owner may want
+    # to control task visibility independently of client visibility (e.g. a
+    # role that sees every client but only its own tasks). A client-linked
+    # task is hidden unless the caller owns that client; a task with no
+    # client_id (internal/non-client work) is never hidden by this rule, since
+    # it isn't tied to any client's assignment in the first place.
+    if not has_permission(user, "tasks.view_all"):
+        owned_client_ids = select(Client.id).where(
+            Client.tenant_id == user.tenant_id, Client.owner_id == user.profile.id
+        )
+        stmt = stmt.where(or_(Task.client_id.is_(None), Task.client_id.in_(owned_client_ids)))
 
     if client_id:
         stmt = stmt.where(Task.client_id == client_id)
@@ -282,6 +306,8 @@ async def _notify_assignee(session: SessionDep, *, tenant_id: uuid.UUID, tenant_
 async def create_task(
     payload: TaskCreate, session: SessionDep, user: TenantUserDep, request: Request
 ) -> TaskRead:
+    if not has_permission(user, "tasks.manage"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: tasks.manage")
     data = payload.model_dump()
     if data.get("project_id"):
         # Checked unconditionally, not only when client_id is also absent —
@@ -335,6 +361,8 @@ async def get_task(task_id: uuid.UUID, session: SessionDep, user: TenantUserDep)
 async def update_task(
     task_id: uuid.UUID, payload: TaskUpdate, session: SessionDep, user: TenantUserDep
 ) -> TaskRead:
+    if not has_permission(user, "tasks.manage"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: tasks.manage")
     task = await session.scalar(
         select(Task).where(Task.id == task_id, Task.tenant_id == user.tenant_id)
     )
@@ -363,6 +391,12 @@ async def update_task(
 async def move_task(
     task_id: uuid.UUID, payload: TaskMove, session: SessionDep, user: TenantUserDep
 ) -> TaskRead:
+    # Same tasks.manage gate as update_task — there's no separate "move only
+    # my own assigned tasks" permission in this pass (see PLATFORM_IMPLEMENTATION_LOG.md),
+    # so a role with tasks.manage off cannot drag-and-drop a task's status
+    # either, even one assigned to them. Flagged as a known simplification.
+    if not has_permission(user, "tasks.manage"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: tasks.manage")
     task = await session.scalar(
         select(Task).where(Task.id == task_id, Task.tenant_id == user.tenant_id)
     )
@@ -400,6 +434,8 @@ async def move_task(
 
 @router.delete("/tasks/{task_id}", response_model=Ok)
 async def delete_task(task_id: uuid.UUID, session: SessionDep, user: TenantUserDep) -> Ok:
+    if not has_permission(user, "tasks.manage"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: tasks.manage")
     task = await session.scalar(
         select(Task).where(Task.id == task_id, Task.tenant_id == user.tenant_id)
     )

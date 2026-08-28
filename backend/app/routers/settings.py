@@ -12,6 +12,7 @@ from ..config import settings
 from ..deps import AdminUserDep, SessionDep, TenantUserDep, client_ip
 from ..models import AuditLog
 from ..schemas import AuditLogRead, TenantRead, TenantUpdate
+from ..seats import seat_usage
 from ..services import audit
 from ..services.email import deliver, email_status, sender_name, test_message_html
 from ..utils import apply_updates
@@ -19,9 +20,24 @@ from ..utils import apply_updates
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 
+class SeatUsage(BaseModel):
+    staff_used: int
+    staff_seats: int | None
+    client_used: int
+    client_seats: int | None
+
+
 @router.get("/tenant", response_model=TenantRead)
 async def get_tenant(user: TenantUserDep) -> TenantRead:
     return TenantRead.model_validate(user.tenant)
+
+
+@router.get("/seats", response_model=SeatUsage)
+async def get_seat_usage(session: SessionDep, user: TenantUserDep) -> SeatUsage:
+    """"14/20 staff seats, 340/500 client seats" — any firm staff can see it
+    (matches the visibility of the Team/Clients pages that would surface a
+    seat-limit error), not just the Owner. See app/seats.py."""
+    return SeatUsage(**await seat_usage(session, user.tenant))
 
 
 @router.patch("/tenant", response_model=TenantRead)

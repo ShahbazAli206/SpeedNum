@@ -21,6 +21,7 @@ from sqlalchemy import select
 
 from ..deps import AdminUserDep, SessionDep, SuperadminDep, TenantUserDep, client_ip
 from ..models import Client, Profile, Service, Tenant
+from ..seats import remaining_client_seats, remaining_staff_seats
 from ..schemas import (
     ImportCommitRequest,
     ImportPreview,
@@ -383,6 +384,11 @@ async def commit_clients(
     errors: list[str] = []
     allowed = {column.name for column in Client.__table__.columns}
 
+    # Tracked locally rather than re-querying COUNT(*) before every row — see
+    # seats.remaining_client_seats. Only decremented for genuinely new rows
+    # (existing.None branch below); an update never touches the cap.
+    seats_left = await remaining_client_seats(session, user.tenant)
+
     for index, row in enumerate(payload.rows, start=1):
         data = {k: v for k, v in row.items() if k in allowed and k not in ("id", "tenant_id")}
         legal_name = (data.get("legal_name") or "").strip()
@@ -412,6 +418,11 @@ async def commit_clients(
                     )
                 )
 
+        if existing is None and seats_left is not None and seats_left <= 0:
+            failed += 1
+            errors.append(f"Row {index} ({legal_name}): client seat limit reached — contact your provider for more seats")
+            continue
+
         try:
             # A savepoint keeps one bad row from discarding the whole import.
             async with session.begin_nested():
@@ -422,11 +433,15 @@ async def commit_clients(
                 else:
                     session.add(Client(tenant_id=user.tenant_id, created_by=user.profile.id, **data))
                     created += 1
+                    if seats_left is not None:
+                        seats_left -= 1
         except Exception as exc:  # noqa: BLE001 - surface the row that failed
             if existing is not None:
                 updated -= 1
             else:
                 created -= 1
+                if seats_left is not None:
+                    seats_left += 1
             failed += 1
             errors.append(f"Row {index} ({legal_name}): {type(exc).__name__}")
 
@@ -635,8 +650,21 @@ async def commit_users(
     created = failed = emailed = 0
     errors: list[str] = []
 
+    # Only staff rows (client_id is None) draw on the staff seat pool — a
+    # client-portal row pins to an existing client, it doesn't create one, so
+    # it never touches either seat pool. Tracked locally, same reasoning as
+    # commit_clients' seats_left just above in this file.
+    staff_seats_left = await remaining_staff_seats(session, user.tenant)
+
     for index, row in enumerate(rows, start=1):
         email = str(row.email).strip().lower()
+        if row.client_id is None and staff_seats_left is not None and staff_seats_left <= 0:
+            failed += 1
+            errors.append(f"Row {index} ({email}): staff seat limit reached — contact your provider for more seats")
+            outcomes.append(
+                {"email": email, "full_name": row.full_name, "created": False, "error": "Staff seat limit reached"}
+            )
+            continue
         try:
             # A savepoint per row: a failure rolls back only that account's
             # profile insert, leaving the successful ones committed.
@@ -667,6 +695,8 @@ async def commit_users(
             continue
 
         created += 1
+        if row.client_id is None and staff_seats_left is not None:
+            staff_seats_left -= 1
         if result.email_sent:
             emailed += 1
         outcomes.append(
