@@ -39,6 +39,9 @@ const AUTH_ONLY = ["/login", "/signup"];
 /** Where each kind of account belongs after signing in. */
 const FIRM_HOME = "/overview";
 const PORTAL_HOME = "/dashboard";
+/** A superadmin who owns no firm of their own — see components/firm/shell.tsx's
+ *  isProviderOnly — has nothing real on /overview, only empty/demo fixtures. */
+const PROVIDER_HOME = "/admin";
 
 function matches(pathname: string, routes: string[]): boolean {
   return routes.some((route) => pathname === route || pathname.startsWith(`${route}/`));
@@ -58,7 +61,7 @@ function matches(pathname: string, routes: string[]): boolean {
  * permissive here is deliberate — a wrong guess would lock a legitimate
  * user out of their own app.
  */
-function accountKindFromAccessToken(token: string | undefined): "firm" | "portal" | null {
+function accountKindFromAccessToken(token: string | undefined): "firm" | "portal" | "provider" | null {
   if (!token) return null;
   try {
     const payloadSegment = token.split(".")[1];
@@ -71,7 +74,14 @@ function accountKindFromAccessToken(token: string | undefined): "firm" | "portal
     const clientId = metadata.client_id;
     if (typeof clientId === "string" && clientId.length > 0) return "portal";
     if (metadata.is_portal === true) return "portal";
-    if (metadata.is_staff === true) return "firm";
+    if (metadata.is_staff === true) {
+      // A staff login with no tenant_id at all is the pure platform-provider
+      // account (superadmin owning no firm of its own) — see
+      // components/firm/shell.tsx's isProviderOnly for the matching nav
+      // filter. A superadmin who also owns a firm still has tenant_id set,
+      // so they land on FIRM_HOME like any other owner, unaffected.
+      return metadata.tenant_id ? "firm" : "provider";
+    }
     return null;
   } catch {
     return null;
@@ -116,7 +126,9 @@ export function proxy(request: NextRequest) {
           ? requested
           : kind === "portal"
             ? PORTAL_HOME
-            : FIRM_HOME;
+            : kind === "provider"
+              ? PROVIDER_HOME
+              : FIRM_HOME;
       return NextResponse.redirect(redirect);
     }
 

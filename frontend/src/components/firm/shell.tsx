@@ -134,18 +134,27 @@ function FirmShellInner({ children }: { children: ReactNode }) {
   // everyone else, including Member/Viewer (unlike hiddenFromAdmin, which
   // only blocks a plain admin).
   const isOwner = isSuperadmin || session.me?.profile.role === "owner";
+  // A superadmin who owns no firm of their own (the pure "platform provider"
+  // account — see PLATFORM_IMPLEMENTATION_LOG.md) has nothing real behind
+  // Clients/Services/Task Master/etc.: those pages would only ever show
+  // empty state or stale demo fixtures for them. Restrict the whole nav to
+  // the superadminOnly items instead of every firm-facing one — a superadmin
+  // who *does* own a firm (this account also being an Owner somewhere) is
+  // unaffected, since `session.me.tenant` is set for them.
+  const isProviderOnly = isSuperadmin && session.me !== null && session.me.tenant === null;
   const visibleNav = useMemo(
     () =>
       FIRM_NAV.map((group) => ({
         ...group,
         items: group.items.filter((item) => {
+          if (isProviderOnly) return Boolean(item.superadminOnly);
           if (item.superadminOnly && !isSuperadmin) return false;
           if (item.hiddenFromAdmin && isPlainAdmin) return false;
           if (item.ownerOnly && !isOwner) return false;
           return true;
         }),
       })).filter((group) => group.items.length > 0),
-    [isSuperadmin, isPlainAdmin, isOwner],
+    [isSuperadmin, isPlainAdmin, isOwner, isProviderOnly],
   );
   const visibleNavFlat = useMemo(
     () => visibleNav.flatMap((group) => group.items.map((item) => ({ ...item, group: group.group }))),
