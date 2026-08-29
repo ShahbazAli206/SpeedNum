@@ -271,8 +271,8 @@ class MeResponse(BaseModel):
 # --- Platform superadmin console (cross-tenant) ------------------------------
 # The tenants surface at frontend/src/app/(firm)/admin: every firm on the
 # platform, with create / edit / suspend / delete / impersonate / resend-invite.
-# `max_clients` / `max_users` / `is_demo` live in Tenant.settings (JSONB) so no
-# migration is needed; null caps read as unlimited.
+# `max_clients` / `max_users` / `is_demo` / `is_platform` live in Tenant.settings
+# (JSONB) so no migration is needed; null caps read as unlimited.
 class TenantAdminSummary(BaseModel):
     """One row in the tenants table."""
 
@@ -283,6 +283,10 @@ class TenantAdminSummary(BaseModel):
     seats: int
     is_active: bool
     is_demo: bool = False
+    # The provider's own internal workspace (at most one, by convention) —
+    # see models.Tenant.is_platform. Distinct from is_demo: a demo tenant is
+    # still a pretend *customer*; this one is us.
+    is_platform: bool = False
     custom_domain: str | None = None
     admin_email: str | None = None
     trial_ends_at: datetime | None = None
@@ -322,6 +326,7 @@ class TenantAdminCreate(BaseModel):
     max_clients: int | None = Field(default=None, ge=0)
     max_users: int | None = Field(default=None, ge=0)
     is_demo: bool = False
+    is_platform: bool = False
     send_email: bool = True
 
 
@@ -337,6 +342,7 @@ class TenantAdminEdit(BaseModel):
     max_clients: int | None = Field(default=None, ge=0)
     max_users: int | None = Field(default=None, ge=0)
     is_demo: bool | None = None
+    is_platform: bool | None = None
 
 
 class ImpersonateResult(BaseModel):

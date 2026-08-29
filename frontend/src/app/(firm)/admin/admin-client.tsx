@@ -160,6 +160,7 @@ export function AdminClient() {
       { header: "Plan", value: (row: TenantSummary) => row.plan },
       { header: "Status", value: (row: TenantSummary) => (row.is_active ? "Active" : "Suspended") },
       { header: "Demo", value: (row: TenantSummary) => (row.is_demo ? "Yes" : "No") },
+      { header: "Platform workspace", value: (row: TenantSummary) => (row.is_platform ? "Yes" : "No") },
       { header: "Clients", value: (row: TenantSummary) => row.clients },
       { header: "Max clients", value: (row: TenantSummary) => cap(row.max_clients) },
       { header: "Users", value: (row: TenantSummary) => row.users },
@@ -356,6 +357,11 @@ export function AdminClient() {
                             {tenant.is_demo ? (
                               <Badge tone="warn" className="ml-1">
                                 Demo
+                              </Badge>
+                            ) : null}
+                            {tenant.is_platform ? (
+                              <Badge tone="brand" className="ml-1">
+                                Platform
                               </Badge>
                             ) : null}
                           </span>
@@ -567,6 +573,7 @@ function CreateTenantModal({
   const [maxClients, setMaxClients] = useState("");
   const [maxUsers, setMaxUsers] = useState("");
   const [isDemo, setIsDemo] = useState(false);
+  const [isPlatform, setIsPlatform] = useState(false);
   const [sendEmail, setSendEmail] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -587,6 +594,7 @@ function CreateTenantModal({
         max_clients: numberOrNull(maxClients),
         max_users: numberOrNull(maxUsers),
         is_demo: isDemo,
+        is_platform: isPlatform,
         send_email: sendEmail,
       });
       onCreated(result.admin);
@@ -672,6 +680,19 @@ function CreateTenantModal({
           }
         />
         <Checkbox
+          checked={isPlatform}
+          onChange={(e) => setIsPlatform(e.target.checked)}
+          label={
+            <span>
+              This is our own platform workspace
+              <span className="block text-[12px] text-muted">
+                Not a customer — an account here sees Settings and Notifications for this workspace, but not
+                the client-servicing pages. At most one tenant should carry this.
+              </span>
+            </span>
+          }
+        />
+        <Checkbox
           checked={sendEmail}
           onChange={(e) => setSendEmail(e.target.checked)}
           label="Email the admin their sign-in credentials"
@@ -699,6 +720,7 @@ export function EditTenantModal({
   const [maxClients, setMaxClients] = useState(tenant.max_clients === null ? "" : String(tenant.max_clients));
   const [maxUsers, setMaxUsers] = useState(tenant.max_users === null ? "" : String(tenant.max_users));
   const [isDemo, setIsDemo] = useState(tenant.is_demo);
+  const [isPlatform, setIsPlatform] = useState(tenant.is_platform);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -715,6 +737,7 @@ export function EditTenantModal({
       max_clients: numberOrNull(maxClients),
       max_users: numberOrNull(maxUsers),
       is_demo: isDemo,
+      is_platform: isPlatform,
     };
     try {
       await updateTenant(tenant.id, payload);
@@ -795,6 +818,19 @@ export function EditTenantModal({
             <span>
               Sandbox / demo tenant
               <span className="block text-[12px] text-muted">For evaluation — keep real client data out of it.</span>
+            </span>
+          }
+        />
+        <Checkbox
+          checked={isPlatform}
+          onChange={(e) => setIsPlatform(e.target.checked)}
+          label={
+            <span>
+              This is our own platform workspace
+              <span className="block text-[12px] text-muted">
+                Not a customer — an account here sees Settings and Notifications for this workspace, but not
+                the client-servicing pages. At most one tenant should carry this.
+              </span>
             </span>
           }
         />

@@ -135,14 +135,22 @@ function FirmShellInner({ children }: { children: ReactNode }) {
   // everyone else, including Member/Viewer (unlike hiddenFromAdmin, which
   // only blocks a plain admin).
   const isOwner = isSuperadmin || session.me?.profile.role === "owner";
-  // A superadmin who owns no firm of their own (the pure "platform provider"
-  // account — see PLATFORM_IMPLEMENTATION_LOG.md) has nothing real behind
-  // Clients/Services/Task Master/etc.: those pages would only ever show
-  // empty state or stale demo fixtures for them. Restrict the whole nav to
-  // the superadminOnly items instead of every firm-facing one — a superadmin
-  // who *does* own a firm (this account also being an Owner somewhere) is
-  // unaffected, since `session.me.tenant` is set for them.
-  const isProviderOnly = isSuperadmin && session.me !== null && session.me.tenant === null;
+  // The provider's own internal workspace — a real tenant row (so Settings/
+  // Notifications have something to actually operate on), just flagged so it
+  // never gets treated as a customer. Set from the Admin console's "This is
+  // our own platform workspace" checkbox (Tenant.settings.is_platform — see
+  // backend/app/routers/admin.py). Distinct from having no tenant at all.
+  const isPlatformTenant = Boolean(session.me?.tenant?.settings?.is_platform);
+  // A superadmin with no firm of their own, OR whose one firm *is* that
+  // platform workspace, has nothing real behind Clients/Services/Task
+  // Master/etc. — those pages would only ever show empty state or stale
+  // demo fixtures. Restrict the nav to the superadminOnly items (plus
+  // Settings/Notifications when there's an actual platform tenant backing
+  // them — see PROVIDER_ALLOWED_ROUTES below) instead of every firm-facing
+  // one. A superadmin who owns a *real* customer firm is unaffected, since
+  // that tenant carries neither condition.
+  const isProviderOnly =
+    isSuperadmin && session.me !== null && (session.me.tenant === null || isPlatformTenant);
   // Hiding the nav link (above) doesn't stop a direct URL visit — a
   // bookmark, the "Your Firm" breadcrumb, browser history — from still
   // reaching a firm-only page's real component, which then either 403s or
@@ -151,8 +159,16 @@ function FirmShellInner({ children }: { children: ReactNode }) {
   // one shared check here, since every firm-only route had the same gap).
   // /admin/** and /users are exempt: they're exactly the pages a provider-only
   // account is meant to use. /account is exempt too — editing your own name/
-  // password (CurrentUserDep) needs no tenant at all.
-  const PROVIDER_ALLOWED_ROUTES = ["/admin", "/users", "/account"];
+  // password (CurrentUserDep) needs no tenant at all. /settings and
+  // /notifications join the exemption only when there's a real platform
+  // tenant to back them — a truly tenant-less account still has nothing for
+  // either page to show.
+  const PROVIDER_ALLOWED_ROUTES = [
+    "/admin",
+    "/users",
+    "/account",
+    ...(isPlatformTenant ? ["/settings", "/notifications"] : []),
+  ];
   const isBlockedForProviderOnly =
     isProviderOnly &&
     !PROVIDER_ALLOWED_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
@@ -161,14 +177,17 @@ function FirmShellInner({ children }: { children: ReactNode }) {
       FIRM_NAV.map((group) => ({
         ...group,
         items: group.items.filter((item) => {
-          if (isProviderOnly) return Boolean(item.superadminOnly) && !item.hiddenForProviderOnly;
+          if (isProviderOnly) {
+            if (isPlatformTenant && (item.href === "/settings" || item.href === "/notifications")) return true;
+            return Boolean(item.superadminOnly) && !item.hiddenForProviderOnly;
+          }
           if (item.superadminOnly && !isSuperadmin) return false;
           if (item.hiddenFromAdmin && isPlainAdmin) return false;
           if (item.ownerOnly && !isOwner) return false;
           return true;
         }),
       })).filter((group) => group.items.length > 0),
-    [isSuperadmin, isPlainAdmin, isOwner, isProviderOnly],
+    [isSuperadmin, isPlainAdmin, isOwner, isProviderOnly, isPlatformTenant],
   );
   const visibleNavFlat = useMemo(
     () => visibleNav.flatMap((group) => group.items.map((item) => ({ ...item, group: group.group }))),

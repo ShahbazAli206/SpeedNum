@@ -27,6 +27,9 @@ export interface TenantSummary {
   seats: number;
   is_active: boolean;
   is_demo: boolean;
+  /** The provider's own internal workspace (at most one, by convention) —
+   * distinct from is_demo, which is still a pretend *customer*. */
+  is_platform: boolean;
   custom_domain: string | null;
   admin_email: string | null;
   trial_ends_at: string | null;
@@ -78,6 +81,7 @@ export interface TenantCreateInput {
   max_clients?: number | null;
   max_users?: number | null;
   is_demo?: boolean;
+  is_platform?: boolean;
   send_email?: boolean;
 }
 
@@ -91,6 +95,7 @@ export interface TenantEditInput {
   max_clients?: number | null;
   max_users?: number | null;
   is_demo?: boolean;
+  is_platform?: boolean;
 }
 
 export interface ReachData {

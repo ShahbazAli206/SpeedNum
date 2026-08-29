@@ -52,9 +52,14 @@ def _int_cap(value: Any) -> int | None:
     return None
 
 
-def _caps(tenant: Tenant) -> tuple[int | None, int | None, bool]:
+def _caps(tenant: Tenant) -> tuple[int | None, int | None, bool, bool]:
     s = tenant.settings or {}
-    return _int_cap(s.get("max_clients")), _int_cap(s.get("max_users")), bool(s.get("is_demo"))
+    return (
+        _int_cap(s.get("max_clients")),
+        _int_cap(s.get("max_users")),
+        bool(s.get("is_demo")),
+        bool(s.get("is_platform")),
+    )
 
 
 async def _firm_admin(session: SessionDep, tenant_id: uuid.UUID) -> Profile | None:
@@ -78,7 +83,7 @@ async def _firm_admin(session: SessionDep, tenant_id: uuid.UUID) -> Profile | No
 
 
 def _summary(tenant: Tenant, *, clients: int, users: int, letters: int, admin_email: str | None) -> dict[str, Any]:
-    max_clients, max_users, is_demo = _caps(tenant)
+    max_clients, max_users, is_demo, is_platform = _caps(tenant)
     return {
         "id": tenant.id,
         "name": tenant.name,
@@ -87,6 +92,7 @@ def _summary(tenant: Tenant, *, clients: int, users: int, letters: int, admin_em
         "seats": tenant.seats,
         "is_active": tenant.is_active,
         "is_demo": is_demo,
+        "is_platform": is_platform,
         "custom_domain": tenant.custom_domain,
         "admin_email": admin_email or tenant.email,
         "trial_ends_at": tenant.trial_ends_at,
@@ -232,6 +238,7 @@ async def provision_tenant(
             "max_clients": payload.max_clients,
             "max_users": payload.max_users,
             "is_demo": payload.is_demo,
+            "is_platform": payload.is_platform,
         },
     )
     session.add(tenant)
@@ -349,9 +356,9 @@ async def update_tenant(
         tenant.is_active = data["is_active"]
         changed.append("is_active")
 
-    # settings-backed caps and the demo flag — merge, don't clobber other keys.
+    # settings-backed caps and the demo/platform flags — merge, don't clobber other keys.
     new_settings = dict(tenant.settings or {})
-    for key in ("max_clients", "max_users", "is_demo"):
+    for key in ("max_clients", "max_users", "is_demo", "is_platform"):
         if key in data:
             new_settings[key] = data[key]
             changed.append(key)
