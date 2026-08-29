@@ -14,5 +14,9 @@ export async function POST() {
   if (!result.ok) {
     return new NextResponse(result.body, { status: result.status, headers: { "Content-Type": "application/json" } });
   }
-  return NextResponse.json({ access_token: result.accessToken, expires_in: result.expiresIn });
+  return NextResponse.json({
+    access_token: result.accessToken,
+    expires_in: result.expiresIn,
+    impersonation_lost: result.impersonationLost,
+  });
 }

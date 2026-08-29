@@ -23,5 +23,5 @@ export async function GET() {
   if (!result.ok) {
     return NextResponse.json({ detail: "Not signed in." }, { status: 401 });
   }
-  return NextResponse.json({ access_token: result.accessToken });
+  return NextResponse.json({ access_token: result.accessToken, impersonation_lost: result.impersonationLost });
 }

@@ -25,6 +25,28 @@ export function currentAccessToken(): string | null {
   return accessToken;
 }
 
+/**
+ * A superadmin was impersonating a firm and a background token refresh
+ * couldn't re-enter it (see session-server.ts's refreshFromCookie) — the
+ * browser is now silently back on the superadmin's own tenant-less session
+ * while whatever page it's on still shows that firm's stale content. Sending
+ * them to the Admin console with an explanation is better than leaving them
+ * to find out the hard way the next time an action 409s with "no firm is
+ * linked to this account" (see PLATFORM_IMPLEMENTATION_LOG.md).
+ */
+function handleImpersonationLost() {
+  if (typeof window === "undefined") return;
+  if (window.location.pathname === "/admin" && window.location.search.includes("impersonation_ended")) return;
+  // A hard navigation, deliberately: this runs inside ensureHydrated/
+  // refreshAccessToken, plain module functions called from anywhere
+  // (lib/api.ts's fetch wrapper included) with no React render tree to call
+  // useRouter() from. A full reload is also the correct reset here, not
+  // just the available one — it clears every other piece of client-side
+  // state that assumed the old (impersonated) tenant, not just the route.
+  // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+  window.location.href = "/admin?impersonation_ended=1";
+}
+
 export function setAccessToken(token: string | null): void {
   accessToken = token;
   hydrated = true;
@@ -45,8 +67,9 @@ export async function ensureHydrated(): Promise<string | null> {
         setAccessToken(null);
         return null;
       }
-      const data = (await response.json()) as { access_token: string };
+      const data = (await response.json()) as { access_token: string; impersonation_lost?: boolean };
       setAccessToken(data.access_token);
+      if (data.impersonation_lost) handleImpersonationLost();
       return data.access_token;
     } catch {
       setAccessToken(null);
@@ -69,8 +92,9 @@ export async function refreshAccessToken(): Promise<string | null> {
       setAccessToken(null);
       return null;
     }
-    const data = (await response.json()) as { access_token: string };
+    const data = (await response.json()) as { access_token: string; impersonation_lost?: boolean };
     setAccessToken(data.access_token);
+    if (data.impersonation_lost) handleImpersonationLost();
     return data.access_token;
   } catch {
     setAccessToken(null);

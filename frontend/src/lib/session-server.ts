@@ -184,7 +184,8 @@ export async function mintImpersonationToken(
 export async function refreshFromCookie(
   { ignoreImpersonation = false }: { ignoreImpersonation?: boolean } = {},
 ): Promise<
-  { ok: true; accessToken: string; expiresIn: number } | { ok: false; status: number; body: string }
+  | { ok: true; accessToken: string; expiresIn: number; impersonationLost: boolean }
+  | { ok: false; status: number; body: string }
 > {
   const { cookies } = await import("next/headers");
   const jar = await cookies();
@@ -234,12 +235,28 @@ export async function refreshFromCookie(
     const impersonation = await mintImpersonationToken(parsed.access_token, actingTenant);
     if (impersonation) {
       setAccessCookie(jar, impersonation.access_token, impersonation.expires_in);
-      return { ok: true, accessToken: impersonation.access_token, expiresIn: impersonation.expires_in };
+      return {
+        ok: true,
+        accessToken: impersonation.access_token,
+        expiresIn: impersonation.expires_in,
+        impersonationLost: false,
+      };
     }
-    // Couldn't re-enter the firm — end the impersonation and fall back.
+    // Couldn't re-enter the firm (tenant deleted/suspended mid-session, the
+    // superadmin's own account picked up must_change_password from a fresh
+    // credential reset, a transient backend error — mintImpersonationToken
+    // doesn't distinguish, it just returns null either way) — end the
+    // impersonation and fall back to the superadmin's own session. Flagged
+    // as `impersonationLost` rather than silently swallowed: without this,
+    // the browser tab keeps showing that firm's stale page content while
+    // every request underneath it now silently belongs to no firm at all —
+    // the exact "couldn't save, no firm is linked to this account" dead end
+    // this was written to stop (see PLATFORM_IMPLEMENTATION_LOG.md).
     jar.delete(ACT_AS_COOKIE);
+    setAccessCookie(jar, parsed.access_token, parsed.expires_in);
+    return { ok: true, accessToken: parsed.access_token, expiresIn: parsed.expires_in, impersonationLost: true };
   }
 
   setAccessCookie(jar, parsed.access_token, parsed.expires_in);
-  return { ok: true, accessToken: parsed.access_token, expiresIn: parsed.expires_in };
+  return { ok: true, accessToken: parsed.access_token, expiresIn: parsed.expires_in, impersonationLost: false };
 }

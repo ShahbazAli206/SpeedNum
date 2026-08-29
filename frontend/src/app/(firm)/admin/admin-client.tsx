@@ -18,12 +18,13 @@ import {
   Users,
 } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 import { KpiTile } from "@/components/charts";
 import { ExportMenu } from "@/components/dashboard/export-menu";
 import { KpiRow } from "@/components/dashboard/page-shell";
+import { useToast } from "@/components/toast";
 import {
   Alert,
   Badge,
@@ -89,6 +90,9 @@ export function AdminClient() {
   const stats = useApi<PlatformStats>("/admin/stats");
   const tenants = useApi<TenantSummary[]>("/admin/tenants");
   const audit = useApi<PlatformAuditEntry[]>("/admin/audit");
+  const toast = useToast();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "suspended">("all");
@@ -98,8 +102,27 @@ export function AdminClient() {
   // The provider-only rail's "Add owner" quick action (components/firm/shell.tsx)
   // links here with ?new=1 so it opens straight into tenant creation, the same
   // one-click feel as a firm's "Add client" landing on /clients/new.
-  const requestedNew = useSearchParams().get("new") === "1";
+  const requestedNew = searchParams.get("new") === "1";
   const [creating, setCreating] = useState(requestedNew);
+
+  // A background token refresh couldn't re-enter the firm being impersonated
+  // (lib/auth-client.ts's handleImpersonationLost) and landed here instead —
+  // tell the person why, rather than let them discover it only when the next
+  // action they take 409s with "no firm is linked to this account".
+  useEffect(() => {
+    if (searchParams.get("impersonation_ended") !== "1") return;
+    toast.info(
+      "Returned to the platform console",
+      "Your session inside that firm ended unexpectedly (it may have been suspended or removed, or your own sign-in needed refreshing). Open it again from the list below if you still need it.",
+    );
+    const next = new URLSearchParams(searchParams);
+    next.delete("impersonation_ended");
+    router.replace(next.size ? `/admin?${next.toString()}` : "/admin");
+    // Fires once for whatever query string this component mounted with —
+    // re-running on every searchParams identity change would re-show the
+    // toast after router.replace's own re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [editing, setEditing] = useState<TenantSummary | null>(null);
   const [deleting, setDeleting] = useState<TenantSummary | null>(null);
   const [credentials, setCredentials] = useState<CredentialResult | null>(null);
