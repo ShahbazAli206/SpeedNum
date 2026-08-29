@@ -9,6 +9,7 @@ import {
   Plus,
   Search,
   Settings,
+  ShieldOff,
   UserRound,
   X,
 } from "lucide-react";
@@ -26,7 +27,7 @@ import { UrgentDeadlineBanner } from "@/components/dashboard/urgent-deadline-ban
 import { Icon } from "@/components/icon";
 import { Logo } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Badge, Menu, Skeleton, type Tone } from "@/components/ui";
+import { Badge, ButtonLink, EmptyState, Menu, Skeleton, type Tone } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { getFirmOverview } from "@/lib/firm-demo";
 import { SessionProvider, useSession } from "@/lib/session";
@@ -142,6 +143,19 @@ function FirmShellInner({ children }: { children: ReactNode }) {
   // who *does* own a firm (this account also being an Owner somewhere) is
   // unaffected, since `session.me.tenant` is set for them.
   const isProviderOnly = isSuperadmin && session.me !== null && session.me.tenant === null;
+  // Hiding the nav link (above) doesn't stop a direct URL visit — a
+  // bookmark, the "Your Firm" breadcrumb, browser history — from still
+  // reaching a firm-only page's real component, which then either 403s or
+  // renders empty/stale data and only fails once an action is taken (see
+  // PLATFORM_IMPLEMENTATION_LOG.md — this replaced a page-by-page guard with
+  // one shared check here, since every firm-only route had the same gap).
+  // /admin/** and /users are exempt: they're exactly the pages a provider-only
+  // account is meant to use. /account is exempt too — editing your own name/
+  // password (CurrentUserDep) needs no tenant at all.
+  const PROVIDER_ALLOWED_ROUTES = ["/admin", "/users", "/account"];
+  const isBlockedForProviderOnly =
+    isProviderOnly &&
+    !PROVIDER_ALLOWED_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
   const visibleNav = useMemo(
     () =>
       FIRM_NAV.map((group) => ({
@@ -490,7 +504,18 @@ function FirmShellInner({ children }: { children: ReactNode }) {
         <UrgentDeadlineBanner />
 
         <main id="main" className="flex-1 px-4 py-6 sm:px-6 sm:py-8">
-          <div className="mx-auto max-w-7xl">{children}</div>
+          <div className="mx-auto max-w-7xl">
+            {isBlockedForProviderOnly ? (
+              <EmptyState
+                icon={<ShieldOff className="size-6" />}
+                title="There's no firm here"
+                description="You're signed in as the platform provider, with no company of your own. Open a company from the Admin console to work inside it, or use one of the pages in the sidebar."
+                action={<ButtonLink href="/admin">Go to Admin console</ButtonLink>}
+              />
+            ) : (
+              children
+            )}
+          </div>
         </main>
       </div>
 
