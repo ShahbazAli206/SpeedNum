@@ -196,6 +196,12 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         icon: "users",
         description: "Every platform account — staff and client-portal logins",
         superadminOnly: true,
+        // Needs one specific tenant already impersonated to show anything —
+        // useless to a pure platform-provider account, and superseded there
+        // by /admin/accounts (search/act across every tenant with no
+        // impersonation step). Still shown to a superadmin who also owns a
+        // firm, or while impersonating one.
+        hiddenForProviderOnly: true,
       },
       {
         label: "Notifications",
@@ -300,6 +306,11 @@ export interface DashboardNavItem {
    * lets Member/Viewer through. Deciding what a role can see or do is an
    * Owner-level action, so Member/Viewer are hidden here too. */
   ownerOnly?: boolean;
+  /** Hidden specifically from a tenant-less superadmin's provider-only nav
+   * (components/firm/shell.tsx's isProviderOnly) even though it's otherwise
+   * superadminOnly — for a page that needs one specific tenant already
+   * selected/impersonated to be useful at all. */
+  hiddenForProviderOnly?: boolean;
 }
 
 export const DASHBOARD_NAV: { group: string; items: DashboardNavItem[] }[] = [

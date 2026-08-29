@@ -147,7 +147,7 @@ function FirmShellInner({ children }: { children: ReactNode }) {
       FIRM_NAV.map((group) => ({
         ...group,
         items: group.items.filter((item) => {
-          if (isProviderOnly) return Boolean(item.superadminOnly);
+          if (isProviderOnly) return Boolean(item.superadminOnly) && !item.hiddenForProviderOnly;
           if (item.superadminOnly && !isSuperadmin) return false;
           if (item.hiddenFromAdmin && isPlainAdmin) return false;
           if (item.ownerOnly && !isOwner) return false;
