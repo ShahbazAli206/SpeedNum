@@ -136,9 +136,13 @@ export function FirmBrandingProvider({ children }: { children: ReactNode }) {
   const [branding, setBrandingState] = useState<FirmBranding>(FALLBACK_BRANDING);
   // /admin/** is the cross-tenant superadmin console — it must look the same
   // no matter which firm the logged-in superadmin happens to own, so it never
-  // wears one tenant's logo/colours/font. Everywhere else in the (firm) group
-  // is that tenant's own staff-facing area, where its branding belongs.
-  const isProviderConsole = usePathname()?.startsWith("/admin") ?? false;
+  // wears one tenant's logo/colours/font. The one exception is the platform's
+  // own tenant (settings.is_platform): for that account /admin *is* their own
+  // firm portal, not a view into someone else's, so their saved branding
+  // should follow them there too. Everywhere else in the (firm) group is that
+  // tenant's own staff-facing area, where its branding belongs.
+  const isPlatformTenant = Boolean(me?.tenant?.settings?.is_platform);
+  const isProviderConsole = (usePathname()?.startsWith("/admin") ?? false) && !isPlatformTenant;
 
   useEffect(() => {
     const next = isProviderConsole ? FALLBACK_BRANDING : fromTenant(me?.tenant ?? null);
