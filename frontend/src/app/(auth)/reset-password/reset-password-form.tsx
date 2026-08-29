@@ -1,11 +1,11 @@
 "use client";
 
-import { CircleCheck, Eye, EyeOff, KeyRound, TriangleAlert } from "lucide-react";
+import { CircleCheck, KeyRound, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
-import { Alert, Button, Field, Input } from "@/components/ui";
+import { Alert, Button, Field, PasswordInput } from "@/components/ui";
 import { post } from "@/lib/api";
 import { AUTH_CONFIGURED, validatePassword } from "@/lib/auth";
 
@@ -15,7 +15,6 @@ export function ResetPasswordForm() {
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [reveal, setReveal] = useState(false);
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -111,30 +110,17 @@ export function ResetPasswordForm() {
 
       <form onSubmit={submit} noValidate className="mt-7">
         <Field label="New password">
-          <div className="relative">
-            <Input
-              type={reveal ? "text" : "password"}
-              autoComplete="new-password"
-              placeholder="At least 8 characters"
-              className="pr-10"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-            <button
-              type="button"
-              onClick={() => setReveal((value) => !value)}
-              aria-label={reveal ? "Hide password" : "Show password"}
-              className="absolute inset-y-0 right-0 grid w-10 place-items-center text-muted transition hover:text-ink"
-            >
-              {reveal ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-            </button>
-          </div>
+          <PasswordInput
+            autoComplete="new-password"
+            placeholder="At least 8 characters"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
         </Field>
 
         <div className="mt-4">
           <Field label="Confirm new password">
-            <Input
-              type={reveal ? "text" : "password"}
+            <PasswordInput
               autoComplete="new-password"
               value={confirm}
               onChange={(event) => setConfirm(event.target.value)}

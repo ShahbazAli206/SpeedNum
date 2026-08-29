@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useToast } from "@/components/toast";
-import { Button, Field, Input, Switch } from "@/components/ui";
+import { Button, Field, Input, PasswordInput, Switch } from "@/components/ui";
 import { patch, post } from "@/lib/api";
 import { AUTH_CONFIGURED, validatePassword } from "@/lib/auth";
 import { DEMO_ACCOUNT } from "@/lib/demo";
@@ -215,8 +215,7 @@ export function SettingsClient() {
         <form onSubmit={updatePassword}>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Current password" error={passwordError}>
-              <Input
-                type="password"
+              <PasswordInput
                 autoComplete="current-password"
                 value={passwords.current}
                 onChange={(event) =>
@@ -225,8 +224,7 @@ export function SettingsClient() {
               />
             </Field>
             <Field label="New password" hint="At least 8 characters">
-              <Input
-                type="password"
+              <PasswordInput
                 autoComplete="new-password"
                 value={passwords.next}
                 onChange={(event) =>

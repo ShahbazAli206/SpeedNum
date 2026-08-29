@@ -1,12 +1,12 @@
 "use client";
 
-import { ArrowRight, Eye, EyeOff, TriangleAlert } from "lucide-react";
+import { ArrowRight, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { GoogleSignInButton } from "@/components/auth/google-signin-button";
-import { Alert, Button, Checkbox, Field, Input } from "@/components/ui";
+import { Alert, Button, Checkbox, Field, Input, PasswordInput } from "@/components/ui";
 import { post } from "@/lib/api";
 import { register } from "@/lib/auth-client";
 import {
@@ -54,7 +54,6 @@ export function SignupForm() {
     password: "",
   });
   const [agreed, setAgreed] = useState(false);
-  const [reveal, setReveal] = useState(false);
   const [pending, setPending] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [errors, setErrors] = useState<Errors>({});
@@ -206,24 +205,12 @@ export function SignupForm() {
 
         <div className="mt-4">
           <span className="mb-1.5 block text-[13px] font-medium text-ink-soft">Password</span>
-          <div className="relative">
-            <Input
-              type={reveal ? "text" : "password"}
-              autoComplete="new-password"
-              placeholder="At least 8 characters"
-              className="pr-10"
-              value={values.password}
-              onChange={set("password")}
-            />
-            <button
-              type="button"
-              onClick={() => setReveal((value) => !value)}
-              aria-label={reveal ? "Hide password" : "Show password"}
-              className="absolute inset-y-0 right-0 grid w-10 place-items-center text-muted transition hover:text-ink"
-            >
-              {reveal ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-            </button>
-          </div>
+          <PasswordInput
+            autoComplete="new-password"
+            placeholder="At least 8 characters"
+            value={values.password}
+            onChange={set("password")}
+          />
 
           {values.password ? (
             <div className="mt-2 flex items-center gap-2">

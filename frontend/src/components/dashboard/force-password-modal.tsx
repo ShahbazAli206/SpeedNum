@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { useToast } from "@/components/toast";
-import { Button, Field, Input, Modal } from "@/components/ui";
+import { Button, Field, Modal, PasswordInput } from "@/components/ui";
 import { get, post } from "@/lib/api";
 import { AUTH_CONFIGURED, validatePassword } from "@/lib/auth";
 import type { Me } from "@/lib/types";
@@ -107,8 +107,7 @@ export function ForcePasswordModal() {
       }
     >
       <Field label="New password">
-        <Input
-          type="password"
+        <PasswordInput
           autoComplete="new-password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
@@ -116,8 +115,7 @@ export function ForcePasswordModal() {
       </Field>
       <div className="mt-4">
         <Field label="Confirm new password" error={error}>
-          <Input
-            type="password"
+          <PasswordInput
             autoComplete="new-password"
             value={confirm}
             onChange={(event) => setConfirm(event.target.value)}

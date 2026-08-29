@@ -1,12 +1,12 @@
 "use client";
 
-import { ArrowRight, Eye, EyeOff, TriangleAlert, User } from "lucide-react";
+import { ArrowRight, TriangleAlert, User } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { GoogleSignInButton } from "@/components/auth/google-signin-button";
-import { Alert, Button, Checkbox, Field, Input } from "@/components/ui";
+import { Alert, Button, Checkbox, Field, Input, PasswordInput } from "@/components/ui";
 import { get } from "@/lib/api";
 import { login } from "@/lib/auth-client";
 import { AUTH_CONFIGURED, validateEmail, validatePassword } from "@/lib/auth";
@@ -50,7 +50,6 @@ export function LoginForm() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [reveal, setReveal] = useState(false);
   const [pending, setPending] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
@@ -138,25 +137,13 @@ export function LoginForm() {
               Forgot password?
             </Link>
           </div>
-          <div className="relative">
-            <Input
-              type={reveal ? "text" : "password"}
-              name="password"
-              autoComplete="current-password"
-              placeholder="••••••••"
-              className="pr-10"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-            <button
-              type="button"
-              onClick={() => setReveal((value) => !value)}
-              aria-label={reveal ? "Hide password" : "Show password"}
-              className="absolute inset-y-0 right-0 grid w-10 place-items-center text-muted transition hover:text-ink"
-            >
-              {reveal ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-            </button>
-          </div>
+          <PasswordInput
+            name="password"
+            autoComplete="current-password"
+            placeholder="••••••••"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
           {errors.password ? (
             <p className="mt-1 flex items-center gap-1 text-[12px] text-danger">
               <TriangleAlert className="size-3" />

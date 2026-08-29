@@ -14,7 +14,7 @@ import { KeyRound, Save, UserRound } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { useToast } from "@/components/toast";
-import { Button, Field, Input } from "@/components/ui";
+import { Button, Field, Input, PasswordInput } from "@/components/ui";
 import { patch, post } from "@/lib/api";
 import { AUTH_CONFIGURED, validatePassword } from "@/lib/auth";
 import { cn } from "@/lib/cn";
@@ -150,16 +150,14 @@ export function AccountClient() {
         <form onSubmit={updatePassword}>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Current password" error={passwordError}>
-              <Input
-                type="password"
+              <PasswordInput
                 autoComplete="current-password"
                 value={passwords.current}
                 onChange={(event) => setPasswords((current) => ({ ...current, current: event.target.value }))}
               />
             </Field>
             <Field label="New password" hint="At least 8 characters">
-              <Input
-                type="password"
+              <PasswordInput
                 autoComplete="new-password"
                 value={passwords.next}
                 onChange={(event) => setPasswords((current) => ({ ...current, next: event.target.value }))}

@@ -1,13 +1,14 @@
 "use client";
 
 import { cn } from "@/lib/cn";
-import { TriangleAlert, Check, ChevronLeft, ChevronRight, Info, LoaderCircle, X } from "lucide-react";
+import { TriangleAlert, Check, ChevronLeft, ChevronRight, Eye, EyeOff, Info, LoaderCircle, X } from "lucide-react";
 import Link from "next/link";
 import {
   createContext,
   useContext,
   useEffect,
   useId,
+  useState,
   type AnchorHTMLAttributes,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
@@ -192,6 +193,45 @@ const CONTROL =
 
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={cn(CONTROL, "h-9.5", className)} />;
+}
+
+/**
+ * Every password field in the app — login, signup, reset, the forced
+ * temp-password change, account settings — should look and behave
+ * identically, so this is the one place "show/hide" lives rather than each
+ * page hand-rolling its own `reveal` state and eye button (three pages did,
+ * independently, before this existed).
+ */
+export function PasswordInput({
+  className,
+  autoComplete = "current-password",
+  ...props
+}: InputHTMLAttributes<HTMLInputElement>) {
+  const [revealed, setRevealed] = useState(false);
+  return (
+    <div className="relative">
+      <input
+        {...props}
+        type={revealed ? "text" : "password"}
+        autoComplete={autoComplete}
+        className={cn(CONTROL, "h-9.5 pr-10", className)}
+      />
+      <button
+        type="button"
+        onClick={() => setRevealed((value) => !value)}
+        aria-label={revealed ? "Hide password" : "Show password"}
+        aria-pressed={revealed}
+        className="absolute inset-y-0 right-0 grid w-10 place-items-center rounded-r-lg text-muted transition hover:text-brand active:scale-90"
+      >
+        {/* Re-keying on `revealed` re-triggers the pop-in each toggle, rather
+            than a static icon swap — `.animate-scale` already backs off under
+            prefers-reduced-motion (globals.css), so this stays a no-op there. */}
+        <span key={revealed ? "hide" : "show"} className="animate-scale inline-flex">
+          {revealed ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+        </span>
+      </button>
+    </div>
+  );
 }
 
 export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
