@@ -12,6 +12,7 @@
  * `settings` JSONB (already exists for exactly this kind of extra field).
  */
 
+import { usePathname } from "next/navigation";
 import {
   createContext,
   useContext,
@@ -133,16 +134,21 @@ const BrandingContext = createContext<{
 export function FirmBrandingProvider({ children }: { children: ReactNode }) {
   const { me, refresh } = useSession();
   const [branding, setBrandingState] = useState<FirmBranding>(FALLBACK_BRANDING);
+  // /admin/** is the cross-tenant superadmin console — it must look the same
+  // no matter which firm the logged-in superadmin happens to own, so it never
+  // wears one tenant's logo/colours/font. Everywhere else in the (firm) group
+  // is that tenant's own staff-facing area, where its branding belongs.
+  const isProviderConsole = usePathname()?.startsWith("/admin") ?? false;
 
   useEffect(() => {
-    const next = fromTenant(me?.tenant ?? null);
+    const next = isProviderConsole ? FALLBACK_BRANDING : fromTenant(me?.tenant ?? null);
     // One-shot sync from an external store (the session's tenant fetch) the
     // server render can't see, applied immediately so the first paint on
     // this device already reflects the saved brand colours.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setBrandingState(next);
     applyBranding(next);
-  }, [me?.tenant]);
+  }, [me?.tenant, isProviderConsole]);
 
   const saveBranding = async (next: FirmBranding) => {
     const previousSettings = (me?.tenant?.settings ?? {}) as Record<string, unknown>;

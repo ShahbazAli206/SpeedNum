@@ -225,23 +225,27 @@ function FirmShellInner({ children }: { children: ReactNode }) {
         </div>
       ) : null}
 
+      {/* A tenant-less superadmin has no client book of their own — "Add
+          client" would create a record nobody's firm owns. Their equivalent
+          quick action is provisioning a new firm (tenant), which is what
+          /admin's "New tenant" flow already does. */}
       <div className={cn("border-b border-line", collapsed ? "px-3 py-3" : "px-3 py-3")}>
         {collapsed ? (
           <Link
-            href="/clients/new"
+            href={isProviderOnly ? "/admin?new=1" : "/clients/new"}
             className="brand-gradient mx-auto grid size-9 place-items-center rounded-lg text-white shadow-sm transition hover:brightness-110"
-            aria-label="Add client"
-            title="Add client"
+            aria-label={isProviderOnly ? "Add owner" : "Add client"}
+            title={isProviderOnly ? "Add owner" : "Add client"}
           >
             <Plus className="size-4.5" />
           </Link>
         ) : (
           <Link
-            href="/clients/new"
+            href={isProviderOnly ? "/admin?new=1" : "/clients/new"}
             className="brand-gradient flex items-center justify-center gap-2 rounded-lg py-2.5 text-[13.5px] font-semibold text-white shadow-sm transition hover:brightness-110"
           >
             <Plus className="size-4" />
-            Add client
+            {isProviderOnly ? "Add owner" : "Add client"}
           </Link>
         )}
       </div>

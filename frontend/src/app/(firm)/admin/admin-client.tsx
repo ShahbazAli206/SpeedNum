@@ -18,6 +18,7 @@ import {
   Users,
 } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { KpiTile } from "@/components/charts";
@@ -94,7 +95,11 @@ export function AdminClient() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const [creating, setCreating] = useState(false);
+  // The provider-only rail's "Add owner" quick action (components/firm/shell.tsx)
+  // links here with ?new=1 so it opens straight into tenant creation, the same
+  // one-click feel as a firm's "Add client" landing on /clients/new.
+  const requestedNew = useSearchParams().get("new") === "1";
+  const [creating, setCreating] = useState(requestedNew);
   const [editing, setEditing] = useState<TenantSummary | null>(null);
   const [deleting, setDeleting] = useState<TenantSummary | null>(null);
   const [credentials, setCredentials] = useState<CredentialResult | null>(null);

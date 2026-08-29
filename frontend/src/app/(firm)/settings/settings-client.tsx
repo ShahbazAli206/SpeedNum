@@ -1,8 +1,9 @@
 "use client";
 
-import { ImagePlus, Mail, Palette, Save } from "lucide-react";
+import { ImagePlus, Mail, Monitor, Palette, Save } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { ThemeToggle } from "@/components/theme-toggle";
 import { useToast } from "@/components/toast";
 import { Button, Field, Input, Select, Switch } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -185,6 +186,23 @@ export function SettingsClient() {
           <Button icon={<Save className="size-4" />} loading={saving} onClick={handleSaveBranding}>
             Save branding
           </Button>
+        </div>
+      </Section>
+
+      <Section
+        icon={<Monitor className="size-4.5" />}
+        title="Appearance"
+        description="How the portal looks on this device — separate from your firm's branding above."
+        className="mt-5"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-sm text-ink-soft">Colour theme</p>
+            <p className="mt-0.5 text-[12.5px] text-muted">
+              System follows your operating system setting.
+            </p>
+          </div>
+          <ThemeToggle />
         </div>
       </Section>
 
