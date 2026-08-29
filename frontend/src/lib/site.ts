@@ -176,63 +176,12 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
   {
     group: "Administration",
     items: [
-      {
-        label: "Accountants",
-        href: "/team",
-        icon: "network",
-        description: "Your internal team of CPAs — roster, roles and live workload",
-        hiddenFromAdmin: true,
-      },
-      {
-        label: "Roles & Permissions",
-        href: "/team/roles",
-        icon: "shield-check",
-        description: "Define staff role types and what each one can see or do",
-        ownerOnly: true,
-      },
-      {
-        label: "Users",
-        href: "/users",
-        icon: "users",
-        description: "Every platform account — staff and client-portal logins",
-        superadminOnly: true,
-        // Needs one specific tenant already impersonated to show anything —
-        // useless to a pure platform-provider account, and superseded there
-        // by /admin/accounts (search/act across every tenant with no
-        // impersonation step). Still shown to a superadmin who also owns a
-        // firm, or while impersonating one.
-        hiddenForProviderOnly: true,
-      },
-      {
-        label: "Notifications",
-        href: "/notifications",
-        icon: "bell",
-        description: "In-app feed of everything that changed",
-      },
-      {
-        label: "Integrations",
-        href: "/integrations",
-        icon: "plug",
-        description: "Email, Google Calendar, Drive and Gmail",
-      },
-      {
-        label: "Settings",
-        href: "/settings",
-        icon: "settings",
-        description: "Branding, colours, font and alert preferences",
-      },
-      {
-        label: "Custom fields",
-        href: "/custom-fields",
-        icon: "sliders-horizontal",
-        description: "Admin-defined fields on client records",
-      },
-      {
-        label: "Import",
-        href: "/import",
-        icon: "file-spreadsheet",
-        description: "CSV/XLSX import with mapping and preview",
-      },
+      // Order matters here, not just the filtering flags below: this is the
+      // literal render order for every account that can see a given item
+      // (visibleNav in components/firm/shell.tsx filters but never
+      // re-sorts). Superadmin/provider-console pages lead; the everyday
+      // firm-facing pages that survive filtering for a provider-only
+      // account (Notifications, Settings) come last on purpose.
       {
         label: "Admin console",
         href: "/admin",
@@ -245,6 +194,20 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         href: "/admin/accounts",
         icon: "users",
         description: "Superadmin: search and act on any account, across every tenant",
+        superadminOnly: true,
+      },
+      {
+        label: "Finance",
+        href: "/admin/finance",
+        icon: "wallet",
+        description: "Superadmin: income from tenants, operating expenses, and profit",
+        superadminOnly: true,
+      },
+      {
+        label: "Backup & Recovery",
+        href: "/admin/backups",
+        icon: "hard-drive",
+        description: "Superadmin: snapshots, devices, and disaster recovery",
         superadminOnly: true,
       },
       {
@@ -262,18 +225,61 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         superadminOnly: true,
       },
       {
-        label: "Backup & Recovery",
-        href: "/admin/backups",
-        icon: "hard-drive",
-        description: "Superadmin: snapshots, devices, and disaster recovery",
+        label: "Users",
+        href: "/users",
+        icon: "users",
+        description: "Every platform account — staff and client-portal logins",
         superadminOnly: true,
+        // Needs one specific tenant already impersonated to show anything —
+        // useless to a pure platform-provider account, and superseded there
+        // by /admin/accounts (search/act across every tenant with no
+        // impersonation step). Still shown to a superadmin who also owns a
+        // firm, or while impersonating one.
+        hiddenForProviderOnly: true,
       },
       {
-        label: "Finance",
-        href: "/admin/finance",
-        icon: "wallet",
-        description: "Superadmin: income from tenants, operating expenses, and profit",
-        superadminOnly: true,
+        label: "Accountants",
+        href: "/team",
+        icon: "network",
+        description: "Your internal team of CPAs — roster, roles and live workload",
+        hiddenFromAdmin: true,
+      },
+      {
+        label: "Roles & Permissions",
+        href: "/team/roles",
+        icon: "shield-check",
+        description: "Define staff role types and what each one can see or do",
+        ownerOnly: true,
+      },
+      {
+        label: "Integrations",
+        href: "/integrations",
+        icon: "plug",
+        description: "Email, Google Calendar, Drive and Gmail",
+      },
+      {
+        label: "Custom fields",
+        href: "/custom-fields",
+        icon: "sliders-horizontal",
+        description: "Admin-defined fields on client records",
+      },
+      {
+        label: "Import",
+        href: "/import",
+        icon: "file-spreadsheet",
+        description: "CSV/XLSX import with mapping and preview",
+      },
+      {
+        label: "Notifications",
+        href: "/notifications",
+        icon: "bell",
+        description: "In-app feed of everything that changed",
+      },
+      {
+        label: "Settings",
+        href: "/settings",
+        icon: "settings",
+        description: "Branding, colours, font and alert preferences",
       },
     ],
   },
