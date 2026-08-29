@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { SetupFirmForm } from "./setup-firm-form";
 
 export const metadata: Metadata = {
-  title: "Name your firm",
+  title: "Sign up",
   robots: { index: false, follow: false },
 };
 

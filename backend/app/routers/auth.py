@@ -9,17 +9,17 @@ refresh token's HttpOnly cookie.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 
 from ..config import settings
 from ..deps import CurrentUserDep, SessionDep, client_ip
-from ..models import Notification, Tenant
-from ..permissions import PERMISSION_KEYS, has_permission, seed_default_roles
+from ..models import Notification
+from ..permissions import PERMISSION_KEYS, has_permission
 from ..schemas import (
     AuthResult,
     BootstrapRequest,
@@ -377,60 +377,18 @@ async def change_password(
 
 
 @router.post("/bootstrap", response_model=MeResponse, status_code=status.HTTP_201_CREATED)
-async def bootstrap_firm(
-    payload: BootstrapRequest, session: SessionDep, user: CurrentUserDep
-) -> MeResponse:
-    """Create a firm for an account that signed up without one."""
-    if user.tenant is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "This account already belongs to a firm.")
+async def bootstrap_firm(payload: BootstrapRequest, user: CurrentUserDep) -> MeResponse:
+    """Self-serve firm creation is disabled — a company account is now only
+    ever created by a platform superadmin (POST /admin/tenants), who sets its
+    seat package deliberately at the same time. Without this, anyone signing
+    up (password or Google) got their own tenant with no seat limits at all,
+    bypassing the "sold with a package" model entirely.
 
-    slug = await session.scalar(
-        text("select public.unique_tenant_slug(:name)"), {"name": payload.firm_name}
-    )
-    tenant = Tenant(
-        name=payload.firm_name.strip(),
-        slug=slug or payload.firm_name.strip().lower().replace(" ", "-"),
-        email=user.profile.email,
-        email_from_name=payload.firm_name.strip(),
-        trial_ends_at=datetime.now(timezone.utc) + timedelta(days=14),
-    )
-    session.add(tenant)
-    await session.flush()
-
-    await session.execute(
-        text("select public.seed_default_services(:tenant_id)"), {"tenant_id": str(tenant.id)}
-    )
-    await seed_default_roles(session, tenant.id)
-
-    user.profile.tenant_id = tenant.id
-    user.profile.role = "owner"
-    if payload.full_name:
-        user.profile.full_name = payload.full_name
-
-    await audit.record(
-        session,
-        tenant_id=tenant.id,
-        actor_id=user.profile.id,
-        actor_email=user.profile.email,
-        action="created",
-        entity="tenant",
-        entity_id=tenant.id,
-        summary=f"Created firm {tenant.name}",
-    )
-    await audit.notify(
-        session,
-        tenant_id=tenant.id,
-        profile_id=user.profile.id,
-        type="welcome",
-        title="Welcome to your practice workspace",
-        body="Import your client list, assign services, and your compliance calendar builds itself.",
-        link="/clients",
-    )
-    await session.flush()
-
-    return MeResponse(
-        profile=ProfileRead.model_validate(user.profile),
-        tenant=TenantRead.model_validate(tenant),
-        unread_notifications=1,
-        permissions={key: has_permission(user, key) for key in PERMISSION_KEYS},
+    Kept as a live 403 rather than deleted outright, so the old /signup and
+    /oauth/setup-firm flows (also since disabled — see their own frontend
+    changes) get a clear, explained rejection if they're ever reached
+    directly, instead of a bare 404."""
+    raise HTTPException(
+        status.HTTP_403_FORBIDDEN,
+        "Self-serve firm creation is disabled. Ask your platform provider to create your company account.",
     )

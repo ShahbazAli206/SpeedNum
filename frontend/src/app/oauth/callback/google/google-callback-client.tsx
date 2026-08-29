@@ -40,11 +40,21 @@ export function GoogleCallbackClient() {
     oauthCallback("google", code, state)
       .then((result) => {
         if (cancelled) return;
+        // A brand-new Google account used to land on /oauth/setup-firm to
+        // create its own company on the spot — self-serve firm creation is
+        // disabled now (see PLATFORM_IMPLEMENTATION_LOG.md), so there's
+        // nothing to send them to instead. This only fires for a genuinely
+        // new email; an invited staff member's account already exists by
+        // the time they'd reach Google sign-in.
+        if (result.is_new_account) {
+          setStatus("error");
+          setErrorMessage(
+            "There's no account for this Google email yet. Ask your platform provider or firm owner for an invitation, then use that link.",
+          );
+          return;
+        }
         setStatus("success");
-        const destination = result.is_new_account
-          ? "/oauth/setup-firm"
-          : (result.next_path ?? (result.profile.client_id ? PORTAL_HOME : FIRM_HOME));
-        router.replace(destination);
+        router.replace(result.next_path ?? (result.profile.client_id ? PORTAL_HOME : FIRM_HOME));
         router.refresh();
       })
       .catch((error: unknown) => {

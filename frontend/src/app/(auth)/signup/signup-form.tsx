@@ -1,58 +1,44 @@
 "use client";
 
-import { ArrowRight, TriangleAlert } from "lucide-react";
+import { ArrowRight, ShieldOff, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
-import { GoogleSignInButton } from "@/components/auth/google-signin-button";
-import { Alert, Button, Checkbox, Field, Input, PasswordInput } from "@/components/ui";
+import { Alert, Button, ButtonLink, Checkbox, EmptyState, Field, Input, PasswordInput } from "@/components/ui";
 import { post } from "@/lib/api";
 import { register } from "@/lib/auth-client";
-import {
-  AUTH_CONFIGURED,
-  passwordStrength,
-  validateEmail,
-  validatePassword,
-} from "@/lib/auth";
+import { AUTH_CONFIGURED, passwordStrength, validateEmail, validatePassword } from "@/lib/auth";
 import { cn } from "@/lib/cn";
-import { PRICING } from "@/lib/site";
 
 interface Errors {
   firstName?: string;
   lastName?: string;
-  business?: string;
   email?: string;
   password?: string;
   terms?: string;
 }
 
-const STRENGTH_BAR = [
-  "bg-danger",
-  "bg-danger",
-  "bg-warn",
-  "bg-info",
-  "bg-success",
-];
+const STRENGTH_BAR = ["bg-danger", "bg-danger", "bg-warn", "bg-info", "bg-success"];
 
+/**
+ * This page now handles exactly one case: finishing a staff invitation
+ * (`/signup?invite=<token>`) someone already received. Self-serve "create
+ * your own company" signup is gone — a company account is only ever
+ * created by a platform superadmin (POST /admin/tenants), who sets its
+ * seat package deliberately at the same time. Letting anyone create their
+ * own firm from this page bypassed that entirely (POST /auth/bootstrap
+ * gave a brand-new tenant no seat limits at all — see
+ * PLATFORM_IMPLEMENTATION_LOG.md). The backend endpoint that used to do
+ * that now always rejects with 403, so this isn't just a hidden link —
+ * the capability itself is gone.
+ */
 export function SignupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  /**
-   * Set when the visitor arrived from a "You have been invited" email
-   * (`/signup?invite=<token>`). They are joining an existing firm, so the form
-   * must NOT create a second one — see the two branches in `submit` below.
-   */
   const inviteToken = searchParams.get("invite");
-  const isInvited = Boolean(inviteToken);
 
-  const [values, setValues] = useState({
-    firstName: "",
-    lastName: "",
-    business: "",
-    email: "",
-    password: "",
-  });
+  const [values, setValues] = useState({ firstName: "", lastName: "", email: "", password: "" });
   const [agreed, setAgreed] = useState(false);
   const [pending, setPending] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -63,6 +49,21 @@ export function SignupForm() {
 
   const strength = passwordStrength(values.password);
 
+  if (!inviteToken) {
+    return (
+      <EmptyState
+        icon={<ShieldOff className="size-6" />}
+        title="Accounts are provisioned by your provider"
+        description="There's no open sign-up — your platform provider creates your company account and its first login. If you were sent an invitation link, use that link directly rather than this page."
+        action={
+          <ButtonLink href="/login" trailingIcon={<ArrowRight className="size-4" />}>
+            Go to sign in
+          </ButtonLink>
+        }
+      />
+    );
+  }
+
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setFormError(null);
@@ -70,8 +71,6 @@ export function SignupForm() {
     const next: Errors = {
       firstName: values.firstName.trim() ? undefined : "Enter your first name.",
       lastName: values.lastName.trim() ? undefined : "Enter your last name.",
-      business:
-        isInvited || values.business.trim() ? undefined : "Enter your firm's name.",
       email: validateEmail(values.email),
       password: validatePassword(values.password, 8),
       terms: agreed ? undefined : "Please accept the terms to continue.",
@@ -90,35 +89,19 @@ export function SignupForm() {
     try {
       await register(values.email.trim(), values.password, fullName);
 
-      if (isInvited) {
-        // Attaches the brand-new profile to the inviting firm with the role the
-        // invitation carried. Until this lands the account has no tenant, so
-        // every firm page would refuse it.
-        try {
-          await post("/team/invitations/accept", { token: inviteToken, full_name: fullName });
-        } catch (caught) {
-          setFormError(
-            caught instanceof Error
-              ? `Your account was created, but the invitation could not be applied: ${caught.message}`
-              : "Your account was created, but the invitation could not be applied.",
-          );
-          setPending(false);
-          return;
-        }
-      } else {
-        // Not joining an existing firm — create one and become its owner.
-        // A signup with no tenant would have every firm page refuse it.
-        try {
-          await post("/auth/bootstrap", { firm_name: values.business.trim(), full_name: fullName });
-        } catch (caught) {
-          setFormError(
-            caught instanceof Error
-              ? `Your account was created, but your firm could not be set up: ${caught.message}`
-              : "Your account was created, but your firm could not be set up.",
-          );
-          setPending(false);
-          return;
-        }
+      // Attaches the brand-new profile to the inviting firm with the role the
+      // invitation carried. Until this lands the account has no tenant, so
+      // every firm page would refuse it.
+      try {
+        await post("/team/invitations/accept", { token: inviteToken, full_name: fullName });
+      } catch (caught) {
+        setFormError(
+          caught instanceof Error
+            ? `Your account was created, but the invitation could not be applied: ${caught.message}`
+            : "Your account was created, but the invitation could not be applied.",
+        );
+        setPending(false);
+        return;
       }
 
       router.push("/overview");
@@ -131,20 +114,16 @@ export function SignupForm() {
 
   return (
     <div>
-      <h1 className="text-[1.75rem] font-extrabold tracking-tight text-ink">
-        {isInvited ? "Accept your invitation" : "Create your account"}
-      </h1>
+      <h1 className="text-[1.75rem] font-extrabold tracking-tight text-ink">Accept your invitation</h1>
       <p className="mt-1.5 text-[14.5px] text-muted">
-        {isInvited
-          ? "Set a password and you'll join your firm's workspace with the role you were invited for."
-          : `Start your ${PRICING.trialDays}-day free trial — no credit card required.`}
+        Set a password and you&apos;ll join your firm&apos;s workspace with the role you were invited for.
       </p>
 
       {!AUTH_CONFIGURED ? (
         <div className="mt-5">
           <Alert tone="info" title="Demo mode">
-            No backend is configured, so this creates no real account — it opens the portal
-            with sample data.
+            No backend is configured, so this creates no real account — it opens the portal with sample
+            data.
           </Alert>
         </div>
       ) : null}
@@ -176,22 +155,6 @@ export function SignupForm() {
             />
           </Field>
         </div>
-
-        {isInvited ? null : (
-          <Field
-            label="Firm name"
-            hint="Creates your practice workspace — you become its owner."
-            error={errors.business}
-            className="mt-4"
-          >
-            <Input
-              autoComplete="organization"
-              placeholder="Harrison CPA Professional Corporation"
-              value={values.business}
-              onChange={set("business")}
-            />
-          </Field>
-        )}
 
         <Field label="Work email" error={errors.email} className="mt-4">
           <Input
@@ -273,11 +236,6 @@ export function SignupForm() {
           Create account
         </Button>
       </form>
-
-      {/* Google can't accept a pending firm invitation on its own — an invited
-          visitor still sets a password so /team/invitations/accept has a
-          normal account to attach the role to. */}
-      {!isInvited && AUTH_CONFIGURED ? <GoogleSignInButton /> : null}
 
       <p className="mt-6 text-center text-[14px] text-muted">
         Already have an account?{" "}

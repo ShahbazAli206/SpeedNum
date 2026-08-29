@@ -172,12 +172,10 @@ export function LoginForm() {
 
       {AUTH_CONFIGURED ? <GoogleSignInButton next={requested} /> : null}
 
-      <p className="mt-6 text-center text-[14px] text-muted">
-        Don&apos;t have an account?{" "}
-        <Link href="/signup" className="font-semibold text-brand hover:underline">
-          Sign up
-        </Link>
-      </p>
+      {/* No "Sign up" link — a company account is only ever created by a
+          platform superadmin (POST /admin/tenants), who sets its seat
+          package deliberately. Self-serve firm creation is disabled server-side
+          too (POST /auth/bootstrap always 403s now) — see PLATFORM_IMPLEMENTATION_LOG.md. */}
 
       <p className="mt-8 text-center text-[12.5px] text-muted lg:hidden">
         Bank-grade security · CRA-compliant

@@ -6,8 +6,8 @@ import { Skeleton } from "@/components/ui";
 import { SignupForm } from "./signup-form";
 
 export const metadata: Metadata = {
-  title: "Create your account",
-  description: "Start your free SpeedNum trial — no credit card required.",
+  title: "Sign up",
+  description: "Accept a staff invitation to join your firm's workspace on SpeedNum.",
   robots: { index: false, follow: false },
 };
 
