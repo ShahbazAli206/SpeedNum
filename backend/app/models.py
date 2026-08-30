@@ -438,7 +438,7 @@ class EngagementLetter(Base):
     )
     currency: Mapped[str] = mapped_column(Text, default="CAD")
     subtotal: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
-    tax_rate: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=0)
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(6, 2), default=0)
     tax_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
     total: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
     period_start: Mapped[date | None] = mapped_column(Date)

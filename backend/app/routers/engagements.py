@@ -46,8 +46,11 @@ def _share_url(token: str) -> str:
 
 
 def _totals(items: list[EngagementLetterItem], tax_rate: float) -> tuple[float, float, float]:
+    # tax_rate is a plain percentage (13 means 13%), matching every place that
+    # displays it back ("{tax_rate}%" in the letter view, PDF, DOCX) — divide
+    # by 100 here rather than expecting callers to pre-convert it to a fraction.
     subtotal = round(sum(float(item.amount) for item in items), 2)
-    tax = round(subtotal * float(tax_rate or 0), 2)
+    tax = round(subtotal * float(tax_rate or 0) / 100, 2)
     return subtotal, tax, round(subtotal + tax, 2)
 
 
