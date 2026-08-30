@@ -52,6 +52,9 @@ REMINDER_STATUSES = ("open", "acknowledged", "snoozed", "done", "dismissed")
 REMINDER_SEVERITIES = ("info", "warning", "critical")
 REMINDER_KINDS = ("deadline", "task", "letter", "portal")
 
+# Plan change requests (db/migrations/0020_plan_change_requests.sql)
+PLAN_REQUEST_STATUSES = ("pending", "approved", "rejected", "cancelled")
+
 # Client-portal "books" (db/migrations/0004_client_books.sql)
 INVOICE_STATUSES = ("draft", "sent", "paid", "overdue", "void")
 EXPENSE_STATUSES = ("pending", "approved", "rejected")
@@ -827,6 +830,33 @@ class AuditLog(Base):
     summary: Mapped[str | None] = mapped_column(Text)
     audit_metadata: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
     ip_address: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PlanChangeRequest(Base):
+    """An owner's request to move their firm to a different plan tier —
+    reviewed and applied by the platform superadmin, never self-serve. See
+    app/routers/plan_requests.py and db/migrations/0020_plan_change_requests.sql.
+    """
+
+    __tablename__ = "plan_change_requests"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL")
+    )
+    current_plan: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_plan: Mapped[str] = mapped_column(Text, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(pg_enum("plan_request_status", *PLAN_REQUEST_STATUSES), default="pending")
+    resolution_note: Mapped[str | None] = mapped_column(Text)
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL")
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

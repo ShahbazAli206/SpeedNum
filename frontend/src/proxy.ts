@@ -14,6 +14,7 @@ import { ACCESS_COOKIE, REFRESH_COOKIE } from "@/lib/session-server";
  */
 const FIRM_ROUTES = [
   "/overview",
+  "/billing",
   "/clients",
   "/workflows",
   "/deadlines",

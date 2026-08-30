@@ -204,6 +204,13 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         superadminOnly: true,
       },
       {
+        label: "Plan requests",
+        href: "/admin/plan-requests",
+        icon: "arrow-left-right",
+        description: "Superadmin: review and apply firms' upgrade/downgrade requests",
+        superadminOnly: true,
+      },
+      {
         label: "Backup & Recovery",
         href: "/admin/backups",
         icon: "hard-drive",
@@ -250,6 +257,12 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         icon: "shield-check",
         description: "Define staff role types and what each one can see or do",
         ownerOnly: true,
+      },
+      {
+        label: "Billing",
+        href: "/billing",
+        icon: "credit-card",
+        description: "Your active package, seat usage, and upgrade/downgrade requests",
       },
       {
         label: "Integrations",

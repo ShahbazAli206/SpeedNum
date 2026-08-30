@@ -1,4 +1,5 @@
 import {
+  ArrowLeftRight,
   ArrowRight,
   Bell,
   BellRing,
@@ -6,6 +7,7 @@ import {
   CalendarClock,
   ChartColumn,
   ChartLine,
+  CreditCard,
   FileSpreadsheet,
   FileText,
   Folder,
@@ -41,6 +43,7 @@ import {
  * those live in `SocialIcon` below as inline paths rather than in this map.
  */
 const ICONS: Record<string, LucideIcon> = {
+  "arrow-left-right": ArrowLeftRight,
   "arrow-right": ArrowRight,
   "bar-chart-3": ChartColumn,
   "line-chart": ChartLine,
@@ -48,6 +51,7 @@ const ICONS: Record<string, LucideIcon> = {
   "bell-ring": BellRing,
   "calendar-check": CalendarCheck,
   "calendar-clock": CalendarClock,
+  "credit-card": CreditCard,
   "file-signature": Signature,
   "file-spreadsheet": FileSpreadsheet,
   "file-text": FileText,

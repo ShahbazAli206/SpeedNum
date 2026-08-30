@@ -18,7 +18,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, true
 
 from ..config import settings as app_settings
 from ..deps import SessionDep, SuperadminDep, client_ip
@@ -60,6 +60,14 @@ def _caps(tenant: Tenant) -> tuple[int | None, int | None, bool, bool]:
         bool(s.get("is_demo")),
         bool(s.get("is_platform")),
     )
+
+
+def _is_platform(tenant: Tenant) -> bool:
+    """The platform operator's own internal workspace, flagged via
+    Tenant.settings.is_platform (see provision_tenant/edit_tenant below) — not
+    a customer firm, so it's excluded from the "Firms" list/stats and can't be
+    deleted from here like a real tenant could be."""
+    return bool((tenant.settings or {}).get("is_platform"))
 
 
 async def _firm_admin(session: SessionDep, tenant_id: uuid.UUID) -> Profile | None:
@@ -151,7 +159,11 @@ async def _unique_slug(session: SessionDep, name: str) -> str:
 # --- read --------------------------------------------------------------------
 @router.get("/tenants", response_model=list[TenantAdminSummary])
 async def list_tenants(session: SessionDep, user: SuperadminDep) -> list[dict[str, Any]]:
-    tenants = (await session.scalars(select(Tenant).order_by(Tenant.created_at.desc()))).all()
+    tenants = [
+        t
+        for t in (await session.scalars(select(Tenant).order_by(Tenant.created_at.desc()))).all()
+        if not _is_platform(t)
+    ]
 
     client_counts = dict((await session.execute(
         select(Client.tenant_id, func.count(Client.id)).group_by(Client.tenant_id)
@@ -308,18 +320,13 @@ async def create_tenant(
 
 
 # --- edit / suspend ----------------------------------------------------------
-@router.patch("/tenants/{tenant_id}", response_model=TenantAdminDetail)
-async def update_tenant(
-    tenant_id: uuid.UUID,
-    payload: TenantAdminEdit,
-    session: SessionDep,
-    user: SuperadminDep,
-    request: Request,
-) -> dict[str, Any]:
-    tenant = await session.get(Tenant, tenant_id)
-    ensure_found(tenant, "Tenant")
-
-    data = payload.model_dump(exclude_unset=True)
+async def apply_tenant_edit(session: SessionDep, tenant: Tenant, data: dict[str, Any]) -> list[str]:
+    """The field-by-field diff/apply behind PATCH /admin/tenants/{id} — pulled
+    out so a plan-change approval (routers/plan_requests.py) can apply the
+    same plan/cap fields through the same code path rather than a second,
+    possibly-diverging copy. `data` is expected to already be
+    `payload.model_dump(exclude_unset=True)`-shaped: only keys the caller
+    actually means to change should be present at all."""
     changed: list[str] = []
 
     if "slug" in data and data["slug"]:
@@ -367,6 +374,21 @@ async def update_tenant(
     tenant.settings = new_settings
 
     await session.flush()
+    return changed
+
+
+@router.patch("/tenants/{tenant_id}", response_model=TenantAdminDetail)
+async def update_tenant(
+    tenant_id: uuid.UUID,
+    payload: TenantAdminEdit,
+    session: SessionDep,
+    user: SuperadminDep,
+    request: Request,
+) -> dict[str, Any]:
+    tenant = await session.get(Tenant, tenant_id)
+    ensure_found(tenant, "Tenant")
+
+    changed = await apply_tenant_edit(session, tenant, payload.model_dump(exclude_unset=True))
 
     if changed:
         await audit.record(
@@ -426,6 +448,8 @@ async def delete_tenant(
     (tenant_id null) so it survives the cascade."""
     tenant = await session.get(Tenant, tenant_id)
     ensure_found(tenant, "Tenant")
+    if _is_platform(tenant):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "The platform's own workspace can't be deleted.")
 
     name, slug = tenant.name, tenant.slug
     await session.delete(tenant)
@@ -647,17 +671,26 @@ async def platform_reach(session: SessionDep, user: SuperadminDep) -> dict[str, 
 
 @router.get("/stats")
 async def platform_stats(session: SessionDep, user: SuperadminDep) -> dict[str, Any]:
+    # Same exclusion as list_tenants — the platform's own workspace isn't one
+    # of "the firms" these counts are about.
+    platform_ids = {
+        tid
+        for tid, s in (await session.execute(select(Tenant.id, Tenant.settings))).all()
+        if bool((s or {}).get("is_platform"))
+    }
+    not_platform = Tenant.id.notin_(platform_ids) if platform_ids else true()
+
     return {
-        "tenants": await session.scalar(select(func.count(Tenant.id))) or 0,
+        "tenants": await session.scalar(select(func.count(Tenant.id)).where(not_platform)) or 0,
         "active_tenants": await session.scalar(
-            select(func.count(Tenant.id)).where(Tenant.is_active.is_(True))
+            select(func.count(Tenant.id)).where(Tenant.is_active.is_(True), not_platform)
         ) or 0,
         "suspended_tenants": await session.scalar(
-            select(func.count(Tenant.id)).where(Tenant.is_active.is_(False))
+            select(func.count(Tenant.id)).where(Tenant.is_active.is_(False), not_platform)
         ) or 0,
         "trialing_tenants": await session.scalar(
             select(func.count(Tenant.id)).where(
-                Tenant.is_active.is_(True), Tenant.plan == "trial"
+                Tenant.is_active.is_(True), Tenant.plan == "trial", not_platform
             )
         ) or 0,
         "users": await session.scalar(select(func.count(Profile.id))) or 0,

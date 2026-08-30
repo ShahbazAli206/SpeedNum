@@ -140,6 +140,49 @@ export interface SeatUsage {
   client_seats: number | null;
 }
 
+/** One entry in the suggested plan catalog — see backend/app/plans.py.
+ * A null max_* means unlimited. Suggested numbers only: the superadmin can
+ * still grant different caps when approving a request. */
+export interface PlanTier {
+  key: string;
+  label: string;
+  max_clients: number | null;
+  max_staff: number | null;
+  blurb: string;
+}
+
+/** GET /billing/plans — the firm's own plan/usage plus the catalog to pick
+ * an upgrade/downgrade target from. */
+export interface BillingOverview {
+  current_plan: string;
+  max_clients: number | null;
+  max_users: number | null;
+  staff_used: number;
+  client_used: number;
+  catalog: PlanTier[];
+  has_pending_request: boolean;
+}
+
+export type PlanRequestStatus = "pending" | "approved" | "rejected" | "cancelled";
+
+/** GET/POST /billing/requests — a firm's own plan-change request history. */
+export interface PlanRequest {
+  id: string;
+  tenant_id: string;
+  current_plan: string;
+  requested_plan: string;
+  note: string | null;
+  status: PlanRequestStatus;
+  resolution_note: string | null;
+  resolved_at: string | null;
+  created_at: string | null;
+}
+
+/** GET /admin/plan-requests — every firm's requests, superadmin-only. */
+export interface PlanRequestAdmin extends PlanRequest {
+  tenant_name: string;
+}
+
 export interface RoleRow {
   id: string;
   tenant_id: string;

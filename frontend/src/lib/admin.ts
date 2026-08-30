@@ -7,6 +7,7 @@
  */
 
 import { del, get, patch, post } from "./api";
+import type { PlanRequestAdmin } from "./types";
 
 export interface PlatformStats {
   tenants: number;
@@ -156,3 +157,13 @@ export const deleteTenant = (id: string) =>
   del<{ ok: boolean; message: string }>(`/admin/tenants/${id}`);
 export const resendTenantInvite = (id: string) =>
   post<CredentialResult>(`/admin/tenants/${id}/resend-invite`);
+
+export const listPlanRequests = (status?: string) =>
+  get<PlanRequestAdmin[]>(status ? `/admin/plan-requests?status=${status}` : "/admin/plan-requests");
+export const approvePlanRequest = (id: string, maxClients: number | null, maxUsers: number | null) =>
+  post<PlanRequestAdmin>(`/admin/plan-requests/${id}/approve`, {
+    max_clients: maxClients,
+    max_users: maxUsers,
+  });
+export const rejectPlanRequest = (id: string, note?: string) =>
+  post<PlanRequestAdmin>(`/admin/plan-requests/${id}/reject`, { note: note || null });
