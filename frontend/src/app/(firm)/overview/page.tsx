@@ -15,13 +15,28 @@ import { apiServer } from "@/lib/api-server";
 import { cn } from "@/lib/cn";
 import { getRecurringRevenueTrend } from "@/lib/firm-demo";
 import { formatDate, formatMoney } from "@/lib/format";
-import type { Dashboard, Letter, Task } from "@/lib/types";
+import type { Dashboard, Letter, Me, Task } from "@/lib/types";
 
+import { PlatformOverviewClient } from "./platform-overview";
 import { RevenueTrendChart } from "./revenue-chart";
 
 export const metadata: Metadata = { title: "Overview" };
 
 export default async function FirmOverviewPage() {
+  // A provider-only login (no company of their own, or their one tenant is
+  // the platform's own workspace — see firm/shell.tsx's isProviderOnly) has
+  // no dashboard to fetch below; give them the platform-wide view instead of
+  // a dead end. Checked here rather than only in the shell so this route can
+  // render the right thing directly, same as any other page decides its own
+  // content.
+  const me = await apiServer<Me>("/auth/me");
+  const isProviderOnly =
+    Boolean(me?.profile.is_superadmin) &&
+    (me?.tenant === null || Boolean(me?.tenant?.settings.is_platform));
+  if (isProviderOnly) {
+    return <PlatformOverviewClient />;
+  }
+
   const [dashboard, blockedTasks, declinedLetters] = await Promise.all([
     apiServer<Dashboard>("/dashboard"),
     apiServer<Task[]>("/tasks?status=blocked"),

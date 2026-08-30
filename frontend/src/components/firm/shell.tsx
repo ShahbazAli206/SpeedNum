@@ -159,14 +159,17 @@ function FirmShellInner({ children }: { children: ReactNode }) {
   // one shared check here, since every firm-only route had the same gap).
   // /admin/** and /users are exempt: they're exactly the pages a provider-only
   // account is meant to use. /account is exempt too — editing your own name/
-  // password (CurrentUserDep) needs no tenant at all. /settings and
-  // /notifications join the exemption only when there's a real platform
-  // tenant to back them — a truly tenant-less account still has nothing for
-  // either page to show.
+  // password (CurrentUserDep) needs no tenant at all. /overview is exempt
+  // unconditionally too — its own page.tsx renders the platform-wide
+  // dashboard for exactly this account instead of the tenant-scoped one, so
+  // there's no dead end to guard against there. /settings and /notifications
+  // join the exemption only when there's a real platform tenant to back them
+  // — a truly tenant-less account still has nothing for either page to show.
   const PROVIDER_ALLOWED_ROUTES = [
     "/admin",
     "/users",
     "/account",
+    "/overview",
     ...(isPlatformTenant ? ["/settings", "/notifications"] : []),
   ];
   const isBlockedForProviderOnly =
@@ -261,9 +264,14 @@ function FirmShellInner({ children }: { children: ReactNode }) {
       {/* A tenant-less superadmin has no client book of their own — "Add
           client" would create a record nobody's firm owns. Their equivalent
           quick action is provisioning a new firm (tenant), which is what
-          /admin's "New tenant" flow already does. */}
+          /admin's "New tenant" flow already does. Which of the two this
+          account gets depends on `isProviderOnly`, which isn't known until
+          the session loads — a skeleton stands in rather than committing to
+          either label and relabeling underneath the pointer. */}
       <div className={cn("border-b border-line", collapsed ? "px-3 py-3" : "px-3 py-3")}>
-        {collapsed ? (
+        {session.isLoading ? (
+          <Skeleton className={collapsed ? "mx-auto size-9" : "h-[42px] w-full"} />
+        ) : collapsed ? (
           <Link
             href={isProviderOnly ? "/admin?new=1" : "/clients/new"}
             className="brand-gradient mx-auto grid size-9 place-items-center rounded-lg text-white shadow-sm transition hover:brightness-110"
@@ -284,63 +292,86 @@ function FirmShellInner({ children }: { children: ReactNode }) {
       </div>
 
       <nav className="scroll-thin flex-1 overflow-y-auto px-3 py-4" aria-label="Practice">
-        {visibleNav.map((group) => (
-          <div key={group.group} className="mb-5 last:mb-0">
-            {collapsed ? (
-              <div className="mx-auto mb-2 h-px w-6 bg-line" aria-hidden />
-            ) : (
-              <p className="mb-1.5 px-2.5 text-[10.5px] font-bold tracking-[0.14em] text-muted uppercase">
-                {group.group}
-              </p>
-            )}
-            <ul className="space-y-0.5">
-              {group.items.map((item) => {
-                const active = pathname.startsWith(item.href);
-                const badge = badgeFor(item.href);
-                // Alert counts blink; a plain "3 clients" style count would not.
-                const alerting = badge > 0 && item.href !== "/clients";
-
-                return (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      title={collapsed ? item.label : undefined}
-                      aria-current={active ? "page" : undefined}
-                      className={cn(
-                        "flex items-center gap-3 rounded-lg text-[14.5px] font-medium transition",
-                        collapsed ? "justify-center px-2 py-2.5" : "px-2.5 py-2.5",
-                        active
-                          ? "bg-brand text-white shadow-sm"
-                          : "text-ink-soft hover:bg-surface-2 hover:text-ink",
-                      )}
-                    >
-                      <span className="relative">
-                        <Icon name={item.icon} className="size-4.5 shrink-0" />
-                        <UnreadDot show={collapsed && alerting} />
-                      </span>
-                      {!collapsed ? (
-                        <>
-                          <span className="flex-1 truncate">{item.label}</span>
-                          {badge > 0 ? (
-                            <span
-                              className={cn(
-                                "rounded-full px-1.5 py-0.5 text-[10.5px] font-bold tabular-nums",
-                                active ? "bg-white/20 text-white" : "bg-danger text-white",
-                                alerting && !active && "animate-blink",
-                              )}
-                            >
-                              {badge}
-                            </span>
-                          ) : null}
-                        </>
-                      ) : null}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
+        {session.isLoading ? (
+          // Which nav shape is correct — an ordinary firm's, or the
+          // superadminOnly subset for a provider-only account — depends on
+          // `isProviderOnly`/`isSuperadmin`, both of which default to false
+          // until the session loads. Rendering `visibleNav` before then would
+          // commit to the ordinary-firm shape and flash the superadmin one in
+          // right after, for the accounts where that guess is wrong. A
+          // skeleton is neutral about which shape is coming.
+          <div className="space-y-5" aria-hidden>
+            {[3, 2].map((count, group) => (
+              <div key={group} className="space-y-0.5">
+                {!collapsed ? <Skeleton className="mb-1.5 ml-2.5 h-2.5 w-16" /> : null}
+                {Array.from({ length: count }).map((_, row) => (
+                  <Skeleton
+                    key={row}
+                    className={collapsed ? "mx-auto my-0.5 size-9" : "my-0.5 h-9 w-full"}
+                  />
+                ))}
+              </div>
+            ))}
           </div>
-        ))}
+        ) : (
+          visibleNav.map((group) => (
+            <div key={group.group} className="mb-5 last:mb-0">
+              {collapsed ? (
+                <div className="mx-auto mb-2 h-px w-6 bg-line" aria-hidden />
+              ) : (
+                <p className="mb-1.5 px-2.5 text-[10.5px] font-bold tracking-[0.14em] text-muted uppercase">
+                  {group.group}
+                </p>
+              )}
+              <ul className="space-y-0.5">
+                {group.items.map((item) => {
+                  const active = pathname.startsWith(item.href);
+                  const badge = badgeFor(item.href);
+                  // Alert counts blink; a plain "3 clients" style count would not.
+                  const alerting = badge > 0 && item.href !== "/clients";
+
+                  return (
+                    <li key={item.href}>
+                      <Link
+                        href={item.href}
+                        title={collapsed ? item.label : undefined}
+                        aria-current={active ? "page" : undefined}
+                        className={cn(
+                          "flex items-center gap-3 rounded-lg text-[14.5px] font-medium transition",
+                          collapsed ? "justify-center px-2 py-2.5" : "px-2.5 py-2.5",
+                          active
+                            ? "bg-brand text-white shadow-sm"
+                            : "text-ink-soft hover:bg-surface-2 hover:text-ink",
+                        )}
+                      >
+                        <span className="relative">
+                          <Icon name={item.icon} className="size-4.5 shrink-0" />
+                          <UnreadDot show={collapsed && alerting} />
+                        </span>
+                        {!collapsed ? (
+                          <>
+                            <span className="flex-1 truncate">{item.label}</span>
+                            {badge > 0 ? (
+                              <span
+                                className={cn(
+                                  "rounded-full px-1.5 py-0.5 text-[10.5px] font-bold tabular-nums",
+                                  active ? "bg-white/20 text-white" : "bg-danger text-white",
+                                  alerting && !active && "animate-blink",
+                                )}
+                              >
+                                {badge}
+                              </span>
+                            ) : null}
+                          </>
+                        ) : null}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))
+        )}
       </nav>
 
       <div className="border-t border-line p-3">
