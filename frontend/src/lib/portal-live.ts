@@ -18,6 +18,7 @@
  */
 
 import { apiServer } from "./api-server";
+import type { PortalLetter } from "./types";
 import type {
   DocumentFile,
   Employee,
@@ -267,6 +268,17 @@ export async function fetchLiveDocumentTotals(): Promise<DocumentTotals | null> 
   const totals = await apiServer<LiveDocumentTotals>("/client-portal/documents/totals");
   if (!totals) return null;
   return { count: totals.count, bytes: totals.bytes, shared: totals.shared };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Engagement letters awaiting (or already carrying) the client's signature   */
+/* -------------------------------------------------------------------------- */
+
+/** No demo.ts equivalent (a new view, like fetchLiveClientServices below) —
+ * the real PortalLetter shape is already what the client-portal engagements
+ * page needs, so no remapping. */
+export async function fetchLiveClientEngagements(): Promise<PortalLetter[] | null> {
+  return apiServer<PortalLetter[]>("/client-portal/engagements");
 }
 
 /* -------------------------------------------------------------------------- */

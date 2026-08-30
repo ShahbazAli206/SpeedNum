@@ -11,9 +11,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { RichTextEditor } from "@/components/editor/rich-text-editor";
+import { ExportMenu } from "@/components/engagement/export-menu";
 import { LetterDocument } from "@/components/engagement/letter-document";
 import { SignaturePad } from "@/components/engagement/signature-pad";
 import { useConfirm } from "@/components/confirm";
@@ -99,6 +100,7 @@ export function EngagementDetailClient({
   const [saving, setSaving] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const documentRef = useRef<HTMLDivElement>(null);
 
   const client = clients.find((c) => c.id === letter.client_id);
 
@@ -377,16 +379,18 @@ export function EngagementDetailClient({
 
           <div>
             <h2 className="mb-2 text-[15px] font-semibold text-ink">Letter preview</h2>
-            <LetterDocument
-              firmName={firmName}
-              firmLogoUrl={firmLogoUrl}
-              letter={{ ...letter, terms_html: editable ? termsHtml : letter.terms_html }}
-              firmSignatureSlot={
-                !letter.firm_signature_data ? (
-                  <InlineFirmSign onApply={onFirmSign} pending={busyAction === "firm-sign"} />
-                ) : undefined
-              }
-            />
+            <div ref={documentRef}>
+              <LetterDocument
+                firmName={firmName}
+                firmLogoUrl={firmLogoUrl}
+                letter={{ ...letter, terms_html: editable ? termsHtml : letter.terms_html }}
+                firmSignatureSlot={
+                  !letter.firm_signature_data ? (
+                    <InlineFirmSign onApply={onFirmSign} pending={busyAction === "firm-sign"} />
+                  ) : undefined
+                }
+              />
+            </div>
           </div>
         </div>
 
@@ -397,6 +401,17 @@ export function EngagementDetailClient({
               <p className="mt-0.5 text-[13px] text-muted">Send, sign, or remove this letter.</p>
             </div>
             <div className="space-y-2 p-5">
+              {letter.status === "signed" ? (
+                <ExportMenu
+                  letter={letter}
+                  firmName={firmName}
+                  firmLogoUrl={firmLogoUrl}
+                  filenameHint={`${letter.title}-${letter.client_name ?? "client"}`}
+                  documentRef={documentRef}
+                  label="Download signed record"
+                  className="w-full justify-center"
+                />
+              ) : null}
               {letter.status !== "signed" && letter.status !== "void" ? (
                 <Button
                   className="w-full justify-center"

@@ -394,6 +394,12 @@ export const DASHBOARD_NAV: { group: string; items: DashboardNavItem[] }[] = [
         icon: "folder",
         description: "Invoices, receipts, tax forms and contracts",
       },
+      {
+        label: "Agreements",
+        href: "/dashboard/engagements",
+        icon: "file-signature",
+        description: "Engagement letters to review and sign, and ones you've already signed",
+      },
     ],
   },
   {

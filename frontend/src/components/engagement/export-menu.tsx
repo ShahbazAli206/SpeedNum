@@ -38,6 +38,7 @@ export function ExportMenu({
   filenameHint,
   documentRef,
   label = "Download",
+  className,
 }: {
   letter: LetterDocumentData;
   firmName: string;
@@ -45,6 +46,7 @@ export function ExportMenu({
   filenameHint: string;
   documentRef: React.RefObject<HTMLElement | null>;
   label?: string;
+  className?: string;
 }) {
   const [busy, setBusy] = useState<Format | null>(null);
 
@@ -70,6 +72,7 @@ export function ExportMenu({
       className={cn(
         "inline-flex h-9.5 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4",
         "text-sm font-medium text-ink transition hover:bg-surface-2 disabled:opacity-60",
+        className,
       )}
       trigger={
         <>
