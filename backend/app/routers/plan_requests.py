@@ -70,7 +70,12 @@ class PlanRequestRead(BaseModel):
 
 
 class PlanRequestAdminRead(PlanRequestRead):
-    tenant_name: str
+    # Both are layered on by read() via model_copy — but model_validate(orm_row)
+    # runs first, and the ORM PlanChangeRequest has neither attribute, so both
+    # must carry a default or that validation pass raises before the real value
+    # is applied (a 500 on the whole /admin/plan-requests queue). Same optional
+    # shape as platform_finance.IncomeRead.tenant_name for the same reason.
+    tenant_name: str | None = None
     requested_by_email: str | None = None
 
 

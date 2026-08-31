@@ -349,7 +349,7 @@ export function TeamMemberClient({
         href="/team"
         className="text-[12.5px] font-medium text-brand transition hover:underline"
       >
-        ← Back to accountants
+        ← Back to staff
       </Link>
 
       <div className="mt-3 mb-6 flex flex-wrap items-start justify-between gap-4">
@@ -659,7 +659,7 @@ export function TeamMemberClient({
         ) : null}
       </div>
 
-      <CredentialsModal result={credentials} onClose={() => setCredentials(null)} kind="accountant" />
+      <CredentialsModal result={credentials} onClose={() => setCredentials(null)} kind="staff" />
 
       <AccountantModal
         open={editOpen}

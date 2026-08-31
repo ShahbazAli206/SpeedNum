@@ -7,7 +7,7 @@ import type { TeamMember } from "@/lib/types";
 
 import { TeamClient } from "./team-client";
 
-export const metadata: Metadata = { title: "Accountants" };
+export const metadata: Metadata = { title: "Staff" };
 
 export default async function TeamPage() {
   const live = await apiServer<TeamMember[]>("/team");

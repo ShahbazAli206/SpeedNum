@@ -132,6 +132,17 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         description: "The client book — records, contacts and services",
       },
       {
+        // Everyone on the firm's team — renamed from "Accountants" and moved up
+        // next to Clients so the two "who's involved" lists sit together. Still
+        // hiddenFromAdmin: the backend's require_team_visible gates /team to the
+        // Owner and platform superadmin (a plain admin gets a 403).
+        label: "Staff",
+        href: "/team",
+        icon: "network",
+        description: "Everyone on your team — roster, roles and live workload",
+        hiddenFromAdmin: true,
+      },
+      {
         label: "Messages",
         href: "/messages",
         icon: "message-square",
@@ -250,13 +261,6 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         // impersonation step). Still shown to a superadmin who also owns a
         // firm, or while impersonating one.
         hiddenForProviderOnly: true,
-      },
-      {
-        label: "Accountants",
-        href: "/team",
-        icon: "network",
-        description: "Your internal team of CPAs — roster, roles and live workload",
-        hiddenFromAdmin: true,
       },
       {
         label: "Roles & Permissions",

@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
 from app.plans import PLAN_CATALOG, plan_tier, suggested_caps
+from app.routers.plan_requests import PlanRequestAdminRead
+from app.utils import read
 
 
 class TestPlanTier:
@@ -31,3 +37,41 @@ class TestSuggestedCaps:
         tenant (see routers/admin.py's TenantAdminEdit.plan) — that isn't in
         the catalog, so it isn't a KeyError, it's just no suggestion."""
         assert suggested_caps("custom-enterprise-deal") == (None, None)
+
+
+class TestPlanRequestAdminRead:
+    """Regression guard for the /admin/plan-requests queue 500.
+
+    read() calls model_validate(orm_row) BEFORE layering on tenant_name via
+    model_copy, and the ORM PlanChangeRequest row carries no tenant_name /
+    requested_by_email attribute. If either field is required (no default) that
+    first validation pass raises, 500-ing the whole superadmin queue the moment
+    one request exists. These fields must stay optional. See plan_requests.py.
+    """
+
+    def _orm_row(self) -> SimpleNamespace:
+        # Mirrors a PlanChangeRequest ORM row: note the deliberate absence of
+        # tenant_name and requested_by_email, exactly as SQLAlchemy hands it over.
+        return SimpleNamespace(
+            id=uuid.uuid4(),
+            tenant_id=uuid.uuid4(),
+            current_plan="trial",
+            requested_plan="starter",
+            note="please upgrade",
+            status="pending",
+            resolution_note=None,
+            resolved_at=None,
+            created_at=datetime.now(timezone.utc),
+        )
+
+    def test_read_serialises_an_orm_row_with_layered_tenant_name(self):
+        result = read(PlanRequestAdminRead, self._orm_row(), tenant_name="Acme Ltd")
+        assert result.tenant_name == "Acme Ltd"
+        assert result.requested_plan == "starter"
+        assert result.requested_by_email is None
+
+    def test_computed_fields_are_optional_on_the_schema(self):
+        # The two fields the ORM row cannot supply must both default, or
+        # model_validate raises before read() can fill them in.
+        for field_name in ("tenant_name", "requested_by_email"):
+            assert not PlanRequestAdminRead.model_fields[field_name].is_required()

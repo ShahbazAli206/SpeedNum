@@ -414,7 +414,7 @@ export function TeamClient({
       <EmptyState
         icon={<ShieldCheck className="size-6" />}
         title="Owner access required"
-        description="The accountant roster is restricted to the firm's owner and the platform superadmin."
+        description="The staff roster is restricted to the firm's owner and the platform superadmin."
       />
     );
   }
@@ -422,15 +422,15 @@ export function TeamClient({
   return (
     <>
       <DashboardHeader
-        title="Accountants"
-        subtitle="Your internal team of CPAs serving your clients."
+        title="Staff"
+        subtitle="Everyone on your team serving your clients."
         actions={
           <>
             <ButtonLink href="/import?mode=users" variant="secondary" icon={<Upload className="size-4" />}>
               Import
             </ButtonLink>
             <Button icon={<UserPlus className="size-4" />} onClick={openAdd}>
-              Add accountant
+              Add staff
             </Button>
           </>
         }
@@ -541,7 +541,7 @@ export function TeamClient({
           ]}
           emptyTitle="No team members match"
           emptyDescription="Try clearing the search or the filters above."
-          exportName="speednum-accountants"
+          exportName="speednum-staff"
         />
       </section>
 
@@ -571,13 +571,13 @@ export function TeamClient({
       <CredentialsModal
         result={credentials}
         onClose={() => setCredentials(null)}
-        kind="accountant"
+        kind="staff"
       />
 
       <Modal
         open={removing !== null}
         onClose={() => setRemoving(null)}
-        title="Remove accountant"
+        title="Remove staff member"
         description="They lose access immediately. Their work stays on record."
         footer={
           <>

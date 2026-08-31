@@ -8,6 +8,7 @@ import type { TeamStatus } from "@/lib/firm-demo";
 import type { RoleRow, UserRole } from "@/lib/types";
 
 const ROLE_TITLES = [
+  "Admin",
   "Partner",
   "Senior CPA",
   "CPA",
@@ -15,6 +16,11 @@ const ROLE_TITLES = [
   "Bookkeeper",
   "Payroll Specialist",
 ];
+
+// Default job title for a brand-new member. Named rather than ROLE_TITLES[n] so
+// reordering the list above (e.g. adding "Admin" at the top) can't silently
+// shift which title new members start on.
+const DEFAULT_TITLE = "CPA";
 
 const STATUS_OPTIONS: { value: TeamStatus; label: string }[] = [
   { value: "active", label: "Active" },
@@ -76,7 +82,7 @@ export function AccountantModal({
   const isEdit = Boolean(initial);
 
   const [fullName, setFullName] = useState(initial?.fullName ?? "");
-  const [title, setTitle] = useState(initial?.title ?? ROLE_TITLES[2]);
+  const [title, setTitle] = useState(initial?.title ?? DEFAULT_TITLE);
   const [status, setStatus] = useState<TeamStatus>(initial?.status ?? "active");
   const [email, setEmail] = useState(initial?.email ?? "");
   const [phone, setPhone] = useState(initial?.phone ?? "");
@@ -94,7 +100,7 @@ export function AccountantModal({
     // by this effect once the user starts typing.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setFullName(initial?.fullName ?? "");
-    setTitle(initial?.title ?? ROLE_TITLES[2]);
+    setTitle(initial?.title ?? DEFAULT_TITLE);
     setStatus(initial?.status ?? "active");
     setEmail(initial?.email ?? "");
     setPhone(initial?.phone ?? "");
@@ -144,7 +150,7 @@ export function AccountantModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={isEdit ? "Edit accountant" : "Add accountant"}
+      title={isEdit ? "Edit staff member" : "Add staff"}
       description={
         isEdit
           ? "Update this team member's details and access level."
