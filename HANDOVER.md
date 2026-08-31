@@ -45,7 +45,7 @@ switch could disrupt.
 
 Vercel's standard GitHub integration auto-deploys on a push to its connected production
 branch. **This environment has no Vercel dashboard/CLI credentials**, so the exact
-deployed commit SHA on `https://speed-num.vercel.app` could not be independently
+deployed commit SHA on `https://syedi.spidnums.com` could not be independently
 confirmed — the live bundle's asset hashes did change after the push (consistent with a
 new build having run), which is corroborating evidence, not proof. Confirm in the
 Vercel dashboard that Production shows a deployment from this commit before treating
@@ -58,7 +58,7 @@ the frontend as caught up.
 | Backend API | `srv1904640.hstgr.cloud` (`2.25.108.16`) via Caddy, `https://test.spidnums.com` | Up, healthy, migrations current |
 | Postgres 16 | Docker on the same VPS | Up, healthy |
 | MinIO (documents, backups) | Docker on the same VPS | Up, healthy |
-| Frontend | Vercel, `https://speed-num.vercel.app` | Deployed from `main`; `main` now matches the complete project — see above. Exact deployed commit not independently confirmable (no Vercel credentials in this environment) |
+| Frontend | Vercel, `https://syedi.spidnums.com` | Deployed from `main`; `main` now matches the complete project — see above. Exact deployed commit not independently confirmable (no Vercel credentials in this environment) |
 | Desktop app | Not distributed yet — build with `npm run dist` in `desktop/` | Functional, unsigned (see Known gaps) |
 
 VPS access: `ssh deploy@srv1904640.hstgr.cloud`, passwordless `sudo`. Root login and

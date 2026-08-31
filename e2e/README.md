@@ -17,8 +17,8 @@ Credentials and URLs for automated testing against the live QA deployment.
 ## Environments
 | What | URL |
 |---|---|
-| Web app (Vercel) | https://speed-num.vercel.app |
-| Login | https://speed-num.vercel.app/login |
+| Web app (Vercel) | https://syedi.spidnums.com |
+| Login | https://syedi.spidnums.com/login |
 | Backend API | https://test.spidnums.com |
 
 ## Accounts (roles)

@@ -18,7 +18,7 @@
  */
 
 import { apiServer } from "./api-server";
-import type { PortalLetter } from "./types";
+import type { FirmInvoice, FirmInvoiceTotals, PortalLetter } from "./types";
 import type {
   DocumentFile,
   Employee,
@@ -279,6 +279,20 @@ export async function fetchLiveDocumentTotals(): Promise<DocumentTotals | null> 
  * page needs, so no remapping. */
 export async function fetchLiveClientEngagements(): Promise<PortalLetter[] | null> {
   return apiServer<PortalLetter[]>("/client-portal/engagements");
+}
+
+/* -------------------------------------------------------------------------- */
+/* Firm invoices — the accountant's own invoices to this client, read-only.   */
+/* No demo.ts equivalent: brand-new surface, same treatment as               */
+/* fetchLiveClientEngagements above.                                          */
+/* -------------------------------------------------------------------------- */
+
+export async function fetchLiveFirmInvoices(): Promise<FirmInvoice[] | null> {
+  return apiServer<FirmInvoice[]>("/client-portal/firm-invoices");
+}
+
+export async function fetchLiveFirmInvoiceTotals(): Promise<FirmInvoiceTotals | null> {
+  return apiServer<FirmInvoiceTotals>("/client-portal/firm-invoices/totals");
 }
 
 /* -------------------------------------------------------------------------- */

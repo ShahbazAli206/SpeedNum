@@ -1,7 +1,7 @@
 {
   "_comment": "Template for e2e test credentials. Copy to test-accounts.local.json (gitignored) and fill in the real passwords. Never put real passwords in THIS committed file.",
-  "baseUrl": "https://speed-num.vercel.app",
-  "loginUrl": "https://speed-num.vercel.app/login",
+  "baseUrl": "https://syedi.spidnums.com",
+  "loginUrl": "https://syedi.spidnums.com/login",
   "apiUrl": "https://test.spidnums.com",
   "accounts": {
     "superadmin": {

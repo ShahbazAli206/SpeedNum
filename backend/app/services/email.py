@@ -396,6 +396,48 @@ def letter_invite_html(
 """
 
 
+def invoice_email_html(
+    *,
+    from_name: str,
+    recipient_name: str,
+    invoice_number: str,
+    invoice_title: str,
+    total: float,
+    currency: str,
+    due_on: str,
+    brand_color: str = "#1d4ed8",
+    message: str | None = None,
+) -> str:
+    """Shared by both invoicing paths — a firm billing its client
+    (routers/firm_invoices.py) and the platform billing a tenant firm
+    (routers/platform_invoices.py). No signing/payment link (unlike
+    letter_invite_html) and no attachment: send_email has no attachment
+    support, and there is no payment processor wired up (see
+    PLATFORM_IMPLEMENTATION_LOG.md's Phase 2 notes) — this is a notice, not an
+    action. The recipient downloads the PDF from their own portal instead."""
+    intro = message or f"{from_name} has issued invoice {invoice_number} to you."
+    return f"""
+<div style="font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+            background:#f8fafc;padding:32px">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:14px;
+              border:1px solid #e2e8f0;overflow:hidden">
+    <div style="background:{brand_color};padding:20px 28px;color:#fff;font-weight:600;font-size:18px">
+      {from_name}
+    </div>
+    <div style="padding:28px;color:#0f172a;line-height:1.6">
+      <p style="margin:0 0 12px">Hello {recipient_name},</p>
+      <p style="margin:0 0 20px">{intro}</p>
+      <p style="margin:0 0 4px;font-size:15px">
+        <strong>{invoice_title}</strong> &middot; {invoice_number}<br />
+        Total: {currency} {total:,.2f}<br />
+        Due: {due_on}
+      </p>
+    </div>
+  </div>
+</div>
+"""
+
+
 def task_assigned_html(
     *,
     firm_name: str,

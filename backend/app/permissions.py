@@ -36,6 +36,8 @@ PERMISSION_KEYS: tuple[str, ...] = (
     "services.manage",
     "tasks.view_all",
     "tasks.manage",
+    "invoices.view_all",
+    "invoices.manage",
 )
 
 
@@ -82,6 +84,16 @@ PERMISSION_CATALOG: tuple[PermissionInfo, ...] = (
         "Create and edit tasks",
         "Off means this role cannot create, edit, or move tasks/projects.",
     ),
+    PermissionInfo(
+        "invoices.view_all",
+        "See invoices for every client",
+        "Off restricts this role to invoices for only the clients assigned to them (Client.owner_id).",
+    ),
+    PermissionInfo(
+        "invoices.manage",
+        "Create, send and record payments on invoices",
+        "Off means this role can only view invoices, not create, edit, send, void or record a payment on one.",
+    ),
 )
 
 # Reproduces exactly what the hardcoded 4-role enum did before this system
@@ -98,6 +110,8 @@ _LEGACY_DEFAULTS: dict[str, dict[str, bool]] = {
         "services.manage": True,
         "tasks.view_all": True,
         "tasks.manage": True,
+        "invoices.view_all": False,
+        "invoices.manage": True,
     },
     "member": {
         "clients.view_all": True,
@@ -107,6 +121,8 @@ _LEGACY_DEFAULTS: dict[str, dict[str, bool]] = {
         "services.manage": True,
         "tasks.view_all": True,
         "tasks.manage": True,
+        "invoices.view_all": True,
+        "invoices.manage": True,
     },
     "viewer": {
         "clients.view_all": True,
@@ -116,6 +132,8 @@ _LEGACY_DEFAULTS: dict[str, dict[str, bool]] = {
         "services.manage": True,
         "tasks.view_all": True,
         "tasks.manage": True,
+        "invoices.view_all": True,
+        "invoices.manage": True,
     },
 }
 
@@ -188,5 +206,18 @@ def client_owner_clause(user):
     real gap: a restricted admin could still see every client's
     service-assignments and tasks through those other two routers."""
     if has_permission(user, "clients.view_all"):
+        return None
+    return Client.owner_id == user.profile.id
+
+
+def invoice_owner_clause(user):
+    """Same idea as client_owner_clause, for firm_invoices.py: restricting a
+    query to invoices for clients owned by this user (a join on
+    FirmInvoice.client_id -> Client.owner_id), or None when invoices.view_all
+    lets them see every client's invoices. Callers join Client in themselves
+    (firm_invoices.py already joins Client for client_name) rather than this
+    clause doing an implicit subquery, so it composes with the rest of the
+    query's filters without a second join."""
+    if has_permission(user, "invoices.view_all"):
         return None
     return Client.owner_id == user.profile.id

@@ -7,7 +7,15 @@
  */
 
 import { del, get, patch, post } from "./api";
-import type { ExpiryAlert, ExpiryTarget, PlanRequestAdmin } from "./types";
+import type {
+  ExpiryAlert,
+  ExpiryTarget,
+  PlanAdmin,
+  PlanInput,
+  PlanRequestAdmin,
+  PlatformInvoice,
+  PlatformInvoiceTotals,
+} from "./types";
 
 export interface PlatformStats {
   tenants: number;
@@ -179,3 +187,53 @@ export const approvePlanRequest = (id: string, maxClients: number | null, maxUse
   });
 export const rejectPlanRequest = (id: string, note?: string) =>
   post<PlanRequestAdmin>(`/admin/plan-requests/${id}/reject`, { note: note || null });
+
+/** Editable plan catalog — superadmin manages, company owners see the active
+ * subset on /billing. See backend/app/routers/plans_admin.py. */
+export const listAdminPlans = () => get<PlanAdmin[]>("/admin/plans");
+export const createPlan = (input: PlanInput) => post<PlanAdmin>("/admin/plans", input);
+export const updatePlan = (id: string, input: Partial<PlanInput> & { position?: number }) =>
+  patch<PlanAdmin>(`/admin/plans/${id}`, input);
+export const deletePlan = (id: string) =>
+  del<{ ok: boolean; message: string }>(`/admin/plans/${id}`);
+
+/** Invoice documents the platform sends tenant firms — layered on top of the
+ * platform_income ledger in the Finance page above. See app/routers/
+ * platform_invoices.py. A recorded payment writes a platform_income row, so
+ * it also surfaces in the Income table and on the firm's own /bills page. */
+export interface PlatformInvoiceItemInput {
+  description: string;
+  quantity: number;
+  unit_price: number;
+}
+
+export interface PlatformInvoiceCreateInput {
+  tenant_id: string;
+  number: string;
+  title?: string;
+  issued_on?: string | null;
+  due_on: string;
+  currency?: string;
+  tax_rate?: number;
+  notes?: string | null;
+  items: PlatformInvoiceItemInput[];
+}
+
+export type PlatformInvoiceUpdateInput = Partial<Omit<PlatformInvoiceCreateInput, "tenant_id">>;
+
+export const listPlatformInvoices = (tenantId?: string) =>
+  get<PlatformInvoice[]>(tenantId ? `/admin/finance/invoices?tenant_id=${tenantId}` : "/admin/finance/invoices");
+export const getPlatformInvoiceTotals = () => get<PlatformInvoiceTotals>("/admin/finance/invoices/totals");
+export const createPlatformInvoice = (input: PlatformInvoiceCreateInput) =>
+  post<PlatformInvoice>("/admin/finance/invoices", input);
+export const updatePlatformInvoice = (id: string, input: PlatformInvoiceUpdateInput) =>
+  patch<PlatformInvoice>(`/admin/finance/invoices/${id}`, input);
+export const sendPlatformInvoice = (id: string, message?: string) =>
+  post<PlatformInvoice>(`/admin/finance/invoices/${id}/send`, { message: message?.trim() || null });
+export const recordPlatformInvoicePayment = (
+  id: string,
+  input: { amount: number; received_date?: string | null; method?: string; notes?: string | null },
+) => post<PlatformInvoice>(`/admin/finance/invoices/${id}/record-payment`, input);
+export const voidPlatformInvoice = (id: string) => post<PlatformInvoice>(`/admin/finance/invoices/${id}/void`);
+export const deletePlatformInvoice = (id: string) =>
+  del<{ ok: boolean; message: string }>(`/admin/finance/invoices/${id}`);

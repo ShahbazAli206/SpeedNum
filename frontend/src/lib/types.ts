@@ -158,8 +158,33 @@ export interface PlanTier {
   max_clients: number | null;
   max_staff: number | null;
   blurb: string;
-  /** Monthly list price in whole dollars; null = quoted per firm (Enterprise). */
+  /** Monthly list price in whole USD dollars; null = quoted per firm (Enterprise). */
   price: number | null;
+}
+
+/** GET/POST/PATCH/DELETE /admin/plans — the editable plan catalog, superadmin-only.
+ * Company owners see the active subset (as PlanTier) via GET /billing/plans. */
+export interface PlanAdmin {
+  id: string;
+  key: string;
+  label: string;
+  price: number | null;
+  max_clients: number | null;
+  max_staff: number | null;
+  blurb: string;
+  position: number;
+  is_active: boolean;
+  created_at: string | null;
+}
+
+/** Payload for creating/updating a plan. null price = quoted; null seats = unlimited. */
+export interface PlanInput {
+  label: string;
+  price: number | null;
+  max_clients: number | null;
+  max_staff: number | null;
+  blurb: string;
+  is_active?: boolean;
 }
 
 /** GET /billing/plans — the firm's own plan/usage plus the catalog to pick
@@ -814,6 +839,12 @@ export interface SupportUnreadCount {
   unread: number;
 }
 
+/** GET /admin/support/companies — a firm the super-admin can start a thread with. */
+export interface SupportCompanyOption {
+  tenant_id: string;
+  name: string;
+}
+
 /** POST .../attachments/upload-url — a signed slot the browser PUTs into. */
 export interface SupportUploadSlot {
   storage_path: string;
@@ -985,4 +1016,159 @@ export interface DesktopRelease {
   sha256: string;
   released_at: string;
   release_notes: string | null;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Invoicing & bills (db/migrations/0026_invoicing_and_bills.sql)             */
+/* -------------------------------------------------------------------------- */
+
+/** The firm's own accounts-receivable invoice lifecycle — same values as
+ * PortalInvoiceStatus, kept as a distinct alias since the two ledgers are
+ * unrelated (see backend/app/schemas.py's InvoiceStatus, reused by both). */
+export type InvoiceStatus = "draft" | "sent" | "paid" | "overdue" | "void";
+export type BillStatus = "unpaid" | "paid";
+
+export interface FirmInvoiceItem {
+  id: string;
+  service_id: string | null;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  amount: number;
+  position: number;
+}
+
+export interface FirmInvoicePayment {
+  id: string;
+  amount: number;
+  paid_on: string;
+  method: string | null;
+  notes: string | null;
+  created_at: string | null;
+}
+
+/** GET/POST /invoices — the firm's own invoices to its clients. See
+ * app/routers/firm_invoices.py. Distinct from ClientInvoice above (the
+ * client's own sales invoices to ITS customers) and from Letter (a signable
+ * fee quote with no payment state). */
+export interface FirmInvoice {
+  id: string;
+  client_id: string;
+  client_name: string | null;
+  number: string;
+  title: string;
+  description: string | null;
+  issued_on: string;
+  due_on: string;
+  currency: string;
+  subtotal: number;
+  tax_rate: number;
+  tax_amount: number;
+  total: number;
+  amount_paid: number;
+  status: InvoiceStatus;
+  paid_on: string | null;
+  recipient_name: string | null;
+  recipient_email: string | null;
+  sent_at: string | null;
+  notes: string | null;
+  created_at: string | null;
+  items: FirmInvoiceItem[];
+  payments: FirmInvoicePayment[];
+}
+
+export interface FirmInvoiceTotals {
+  billed: number;
+  collected: number;
+  outstanding: number;
+  overdue: number;
+  count: number;
+  overdue_count: number;
+}
+
+/** GET/POST /bills — the firm's own accounts-payable ledger, merged at read
+ * time with what it has paid SpeedNum (source: "subscription", read-only).
+ * See app/routers/firm_bills.py. */
+export interface FirmBill {
+  id: string;
+  category: string;
+  vendor: string | null;
+  amount: number;
+  currency: string;
+  bill_date: string;
+  due_date: string | null;
+  status: BillStatus;
+  paid_on: string | null;
+  is_recurring: boolean;
+  notes: string | null;
+  source: "manual" | "subscription";
+  created_at: string | null;
+}
+
+export interface FirmBillTotals {
+  paid: number;
+  unpaid: number;
+  count: number;
+}
+
+export interface PlatformInvoiceItem {
+  id: string;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  amount: number;
+  position: number;
+}
+
+/** GET/POST /admin/finance/invoices — superadmin-only invoice documents to
+ * tenant firms. See app/routers/platform_invoices.py. */
+export interface PlatformInvoice {
+  id: string;
+  tenant_id: string | null;
+  tenant_name: string | null;
+  number: string;
+  title: string;
+  issued_on: string;
+  due_on: string;
+  currency: string;
+  subtotal: number;
+  tax_rate: number;
+  tax_amount: number;
+  total: number;
+  amount_paid: number;
+  status: InvoiceStatus;
+  paid_on: string | null;
+  notes: string | null;
+  created_at: string | null;
+  items: PlatformInvoiceItem[];
+}
+
+export interface PlatformInvoiceTotals {
+  billed: number;
+  collected: number;
+  outstanding: number;
+  overdue: number;
+  count: number;
+  overdue_count: number;
+}
+
+/** GET /billing/invoices — a company's read-only view of PlatformInvoice
+ * (no tenant_name: it is always their own). See routers/plan_requests.py. */
+export interface CompanyInvoice {
+  id: string;
+  number: string;
+  title: string;
+  issued_on: string;
+  due_on: string;
+  currency: string;
+  subtotal: number;
+  tax_rate: number;
+  tax_amount: number;
+  total: number;
+  amount_paid: number;
+  status: InvoiceStatus;
+  paid_on: string | null;
+  notes: string | null;
+  created_at: string | null;
+  items: PlatformInvoiceItem[];
 }

@@ -36,7 +36,7 @@ includeSubDomains`) is set on every response from the app's Caddy site block.
 ## CORS
 
 **Verified**: `CORS_ORIGINS` in the deployed `api.env` is the exact Vercel origin
-(`https://speed-num.vercel.app`), not `*`. `backend/app/config.py`'s `cors_origin_list`
+(`https://syedi.spidnums.com`), not `*`. `backend/app/config.py`'s `cors_origin_list`
 already refuses to silently widen this — the only way to add an origin is to list it
 explicitly, or scope `CORS_ORIGIN_REGEX` to this project's own preview-hostname pattern (never
 a bare `vercel.app` wildcard, which a prior session already found and removed).

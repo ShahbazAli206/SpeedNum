@@ -11,7 +11,7 @@ session history of how this came to be, see [`PROGRESS.md`](PROGRESS.md).
                                  │
                                  ▼
                     ┌────────────────────────┐
-                    │   Vercel (Next.js)      │  https://speed-num.vercel.app
+                    │   Vercel (Next.js)      │  https://syedi.spidnums.com
                     │   frontend, unchanged   │  (spidnums.com/www planned, not yet cut over)
                     └────────────┬───────────-┘
                                  │ bearer JWT (this app's own, EdDSA-signed) +
@@ -48,7 +48,7 @@ documented, inactive-by-default rollback paths — see [`SECURITY.md`](SECURITY.
 
 | Service | Where | Public? | Notes |
 |---|---|---|---|
-| Frontend (Next.js) | Vercel | Yes (`speed-num.vercel.app`) | Also hosts the auth BFF routes under `/api/auth/*` — see below |
+| Frontend (Next.js) | Vercel | Yes (`syedi.spidnums.com`) | Also hosts the auth BFF routes under `/api/auth/*` — see below |
 | Reverse proxy (Caddy) | VPS, Docker | Yes (80/443, auto TLS) | Predates this app; shared `web` network |
 | Backend API (FastAPI) | VPS, Docker (`speednum-api`) | No — reached only via Caddy | 4 workers (`WEB_CONCURRENCY=4`), no host port; owns authentication |
 | Database (Postgres 16) | VPS, Docker (`speednum-postgres`) | No | `internal` network only, connects as a non-superuser app role |

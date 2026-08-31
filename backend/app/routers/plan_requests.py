@@ -12,19 +12,19 @@ are provider-controlled, so a request is not the same thing as a change.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from ..deps import AdminUserDep, SessionDep, SuperadminDep, TenantUserDep, client_ip
-from ..models import PlanChangeRequest, Tenant
+from ..models import Plan, PlanChangeRequest, PlatformInvoice, Tenant
 from ..plans import PLAN_CATALOG
 from ..schemas import Ok
 from ..seats import seat_usage
 from ..services import audit
-from ..utils import ensure_found, read
+from ..utils import ensure_found, read, today_utc
 from .admin import apply_tenant_edit
 
 router = APIRouter(prefix="/billing", tags=["billing"])
@@ -58,6 +58,42 @@ class BillingOverview(BaseModel):
 
 class RenewalRequest(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
+
+
+class CompanyInvoiceItemRead(BaseModel):
+    id: uuid.UUID
+    description: str
+    quantity: float
+    unit_price: float
+    amount: float
+    position: int
+
+    model_config = {"from_attributes": True}
+
+
+class CompanyInvoiceRead(BaseModel):
+    """Read-only view of a PlatformInvoice from the paying company's side —
+    the counterpart of platform_invoices.py's InvoiceRead, shown on the
+    company's own /billing page. See db/migrations/0026."""
+
+    id: uuid.UUID
+    number: str
+    title: str
+    issued_on: date
+    due_on: date
+    currency: str
+    subtotal: float
+    tax_rate: float
+    tax_amount: float
+    total: float
+    amount_paid: float
+    status: str
+    paid_on: date | None = None
+    notes: str | None = None
+    created_at: datetime | None = None
+    items: list[CompanyInvoiceItemRead] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
 
 
 class PlanRequestCreate(BaseModel):
@@ -136,13 +172,36 @@ async def get_billing_overview(session: SessionDep, user: TenantUserDep) -> Bill
             PlanChangeRequest.tenant_id == tenant.id, PlanChangeRequest.status == "pending"
         )
     )
+    # The catalog is DB-backed and superadmin-editable (/admin/plans); read the
+    # active plans in display order. Fall back to app/plans.py's PLAN_CATALOG
+    # only if the table is empty (a fresh DB not yet seeded / a test fixture).
+    plan_rows = (
+        await session.scalars(
+            select(Plan).where(Plan.is_active.is_(True)).order_by(Plan.position, Plan.created_at)
+        )
+    ).all()
+    catalog = (
+        [
+            PlanTierRead(
+                key=p.key,
+                label=p.label,
+                max_clients=p.max_clients,
+                max_staff=p.max_staff,
+                blurb=p.blurb,
+                price=p.price,
+            )
+            for p in plan_rows
+        ]
+        if plan_rows
+        else [PlanTierRead(**tier) for tier in PLAN_CATALOG]
+    )
     return BillingOverview(
         current_plan=tenant.plan,
         max_clients=usage["client_seats"],
         max_users=usage["staff_seats"],
         staff_used=usage["staff_used"],
         client_used=usage["client_used"],
-        catalog=[PlanTierRead(**tier) for tier in PLAN_CATALOG],
+        catalog=catalog,
         has_pending_request=bool(pending),
         plan_expires_at=tenant.plan_expires_at,
         service_expires_at=tenant.service_expires_at,
@@ -159,6 +218,52 @@ async def list_own_plan_requests(session: SessionDep, user: TenantUserDep) -> li
         )
     ).all()
     return [PlanRequestRead.model_validate(row) for row in rows]
+
+
+def _company_invoice_status(row: PlatformInvoice, today: date) -> str:
+    if row.status == "sent" and row.due_on < today:
+        return "overdue"
+    return row.status
+
+
+def _to_company_invoice_read(row: PlatformInvoice, today: date) -> CompanyInvoiceRead:
+    base = CompanyInvoiceRead.model_validate(row)
+    return base.model_copy(
+        update={
+            "status": _company_invoice_status(row, today),
+            "items": [CompanyInvoiceItemRead.model_validate(item) for item in row.items],
+        }
+    )
+
+
+@router.get("/invoices", response_model=list[CompanyInvoiceRead])
+async def list_company_invoices(session: SessionDep, user: TenantUserDep) -> list[CompanyInvoiceRead]:
+    """Invoices SpeedNum has sent this firm — the read-only counterpart of
+    platform_invoices.py's superadmin-side router. "draft" invoices are
+    invisible here, same as firm_invoices.py's own client-facing view."""
+    stmt = (
+        select(PlatformInvoice)
+        .where(PlatformInvoice.tenant_id == user.tenant_id, PlatformInvoice.status != "draft")
+        .order_by(PlatformInvoice.issued_on.desc())
+    )
+    rows = (await session.scalars(stmt)).all()
+    today = today_utc()
+    return [_to_company_invoice_read(row, today) for row in rows]
+
+
+@router.get("/invoices/{invoice_id}", response_model=CompanyInvoiceRead)
+async def get_company_invoice(
+    invoice_id: uuid.UUID, session: SessionDep, user: TenantUserDep
+) -> CompanyInvoiceRead:
+    row = await session.scalar(
+        select(PlatformInvoice).where(
+            PlatformInvoice.id == invoice_id,
+            PlatformInvoice.tenant_id == user.tenant_id,
+            PlatformInvoice.status != "draft",
+        )
+    )
+    ensure_found(row, "Invoice")
+    return _to_company_invoice_read(row, today_utc())
 
 
 @router.post("/requests", response_model=PlanRequestRead, status_code=status.HTTP_201_CREATED)

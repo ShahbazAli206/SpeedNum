@@ -58,6 +58,8 @@ PLAN_REQUEST_STATUSES = ("pending", "approved", "rejected", "cancelled")
 # Client-portal "books" (db/migrations/0004_client_books.sql)
 INVOICE_STATUSES = ("draft", "sent", "paid", "overdue", "void")
 EXPENSE_STATUSES = ("pending", "approved", "rejected")
+# Firm & platform bills (db/migrations/0026_invoicing_and_bills.sql)
+BILL_STATUSES = ("unpaid", "paid")
 EMPLOYMENT_TYPES = ("full_time", "part_time", "contract")
 PAY_RUN_STATUSES = ("draft", "scheduled", "processed")
 TAX_FILING_STATUSES = ("open", "filed", "overdue")
@@ -191,6 +193,13 @@ class PlatformIncome(Base):
     received_date: Mapped[date] = mapped_column(Date, server_default=func.current_date())
     method: Mapped[str] = mapped_column(Text, default="manual")
     notes: Mapped[str | None] = mapped_column(Text)
+    # Set when this income row is the payment recorded against a platform_invoice
+    # (see routers/platform_invoices.py). Null for a hand-logged, invoice-less
+    # receipt. SET NULL (not cascade) so deleting an invoice never loses the
+    # money that really changed hands. See db/migrations/0026.
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("platform_invoices.id", ondelete="SET NULL")
+    )
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -901,6 +910,31 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class Plan(Base):
+    """The editable billing plan catalog (db/migrations/0025_plans.sql).
+
+    DB-backed so the platform superadmin can change prices, names and seat caps
+    and add/remove plans from /admin/plans without a deploy. Company owners read
+    the active rows via GET /billing/plans. app/plans.py's PLAN_CATALOG is the
+    seed + empty-table fallback only. price = whole USD dollars/month, null =
+    quoted per firm; max_clients/max_staff null = unlimited.
+    """
+
+    __tablename__ = "plans"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    price: Mapped[int | None] = mapped_column(Integer)
+    max_clients: Mapped[int | None] = mapped_column(Integer)
+    max_staff: Mapped[int | None] = mapped_column(Integer)
+    blurb: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class PlanChangeRequest(Base):
     """An owner's request to move their firm to a different plan tier —
     reviewed and applied by the platform superadmin, never self-serve. See
@@ -951,6 +985,176 @@ class Lead(Base):
     message: Mapped[str | None] = mapped_column(Text)
     source: Mapped[str] = mapped_column(String, default="website")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# -----------------------------------------------------------------------------
+# Firm invoicing & bills (db/migrations/0026_invoicing_and_bills.sql)
+#
+# The firm's own side of the money, distinct from 0004's client books:
+#   * FirmInvoice / FirmInvoiceItem / FirmInvoicePayment — accounts receivable,
+#     invoices the firm issues its clients (line items + partial payments).
+#     Modelled on EngagementLetter, but a payable document rather than a signable
+#     letter — reuses the invoice_status lifecycle from ClientInvoice.
+#   * FirmBill — accounts payable, the firm's own operating bills. Modelled on
+#     PlatformExpense but tenant-scoped and with a paid/unpaid status.
+# -----------------------------------------------------------------------------
+class FirmInvoice(Base):
+    __tablename__ = "firm_invoices"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False
+    )
+    number: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, default="Invoice")
+    description: Mapped[str | None] = mapped_column(Text)
+    issued_on: Mapped[date] = mapped_column(Date, server_default=func.current_date())
+    due_on: Mapped[date] = mapped_column(Date, nullable=False)
+    currency: Mapped[str] = mapped_column(Text, default="CAD")
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    # Plain percentage (13 == 13%), same convention as EngagementLetter.tax_rate.
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(6, 2), default=0)
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    total: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    # Sum of payments; maintained by the API when a payment is added/removed.
+    amount_paid: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    status: Mapped[str] = mapped_column(pg_enum("invoice_status", *INVOICE_STATUSES), default="draft")
+    paid_on: Mapped[date | None] = mapped_column(Date)
+    recipient_name: Mapped[str | None] = mapped_column(Text)
+    recipient_email: Mapped[str | None] = mapped_column(Text)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    items: Mapped[list["FirmInvoiceItem"]] = relationship(
+        back_populates="invoice", cascade="all, delete-orphan", lazy="selectin",
+        order_by="FirmInvoiceItem.position",
+    )
+    payments: Mapped[list["FirmInvoicePayment"]] = relationship(
+        back_populates="invoice", cascade="all, delete-orphan", lazy="selectin",
+        order_by="FirmInvoicePayment.paid_on",
+    )
+    client: Mapped[Client] = relationship(lazy="joined")
+
+
+class FirmInvoiceItem(Base):
+    __tablename__ = "firm_invoice_items"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    invoice_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("firm_invoices.id", ondelete="CASCADE"), nullable=False
+    )
+    service_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("services.id", ondelete="SET NULL")
+    )
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(8, 2), default=1)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+    invoice: Mapped[FirmInvoice] = relationship(back_populates="items")
+
+
+class FirmInvoicePayment(Base):
+    __tablename__ = "firm_invoice_payments"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    invoice_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("firm_invoices.id", ondelete="CASCADE"), nullable=False
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    paid_on: Mapped[date] = mapped_column(Date, server_default=func.current_date())
+    method: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    invoice: Mapped[FirmInvoice] = relationship(back_populates="payments")
+
+
+class FirmBill(Base):
+    __tablename__ = "firm_bills"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    category: Mapped[str] = mapped_column(Text, default="other")
+    vendor: Mapped[str | None] = mapped_column(Text)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    currency: Mapped[str] = mapped_column(Text, default="CAD")
+    bill_date: Mapped[date] = mapped_column(Date, server_default=func.current_date())
+    due_date: Mapped[date | None] = mapped_column(Date)
+    status: Mapped[str] = mapped_column(pg_enum("bill_status", *BILL_STATUSES), default="unpaid")
+    paid_on: Mapped[date | None] = mapped_column(Date)
+    is_recurring: Mapped[bool] = mapped_column(Boolean, default=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PlatformInvoice(Base):
+    """Invoice document the provider sends a tenant firm — superadmin-only,
+    layered on top of PlatformIncome (the money received). A recorded payment
+    writes a PlatformIncome row carrying invoice_id, so the profit dashboard is
+    unchanged and the firm's Bills page sees it. See db/migrations/0026."""
+
+    __tablename__ = "platform_invoices"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="SET NULL")
+    )
+    number: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, default="Invoice")
+    issued_on: Mapped[date] = mapped_column(Date, server_default=func.current_date())
+    due_on: Mapped[date] = mapped_column(Date, nullable=False)
+    currency: Mapped[str] = mapped_column(Text, default="USD")
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(6, 2), default=0)
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    total: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    amount_paid: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    status: Mapped[str] = mapped_column(pg_enum("invoice_status", *INVOICE_STATUSES), default="draft")
+    paid_on: Mapped[date | None] = mapped_column(Date)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    items: Mapped[list["PlatformInvoiceItem"]] = relationship(
+        back_populates="invoice", cascade="all, delete-orphan", lazy="selectin",
+        order_by="PlatformInvoiceItem.position",
+    )
+
+
+class PlatformInvoiceItem(Base):
+    __tablename__ = "platform_invoice_items"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    invoice_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("platform_invoices.id", ondelete="CASCADE"), nullable=False
+    )
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(8, 2), default=1)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+    invoice: Mapped[PlatformInvoice] = relationship(back_populates="items")
 
 
 class DesktopRelease(Base):

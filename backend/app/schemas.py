@@ -1450,6 +1450,163 @@ class CategoryTotal(BaseModel):
     value: float
 
 
+# --- Firm invoicing & bills (db/migrations/0026_invoicing_and_bills.sql) ------
+# The firm's own accounts receivable/payable — distinct from ClientInvoice/
+# ClientExpense above (the client's own books) and from LetterRead (a signable
+# fee quote with no payment state). See app/routers/firm_invoices.py,
+# app/routers/firm_bills.py.
+class FirmInvoiceItemInput(BaseModel):
+    service_id: uuid.UUID | None = None
+    description: str = Field(min_length=1, max_length=300)
+    quantity: float = 1
+    unit_price: float = 0
+
+
+class FirmInvoiceItemRead(ORMModel):
+    id: uuid.UUID
+    service_id: uuid.UUID | None = None
+    description: str
+    quantity: float
+    unit_price: float
+    amount: float
+    position: int
+
+
+class FirmInvoiceCreate(BaseModel):
+    client_id: uuid.UUID
+    number: str = Field(min_length=1, max_length=40)
+    title: str = "Invoice"
+    description: str | None = None
+    issued_on: date | None = None
+    due_on: date
+    currency: str = "CAD"
+    tax_rate: float = 0
+    recipient_name: str | None = None
+    recipient_email: str | None = None
+    notes: str | None = None
+    items: list[FirmInvoiceItemInput] = Field(default_factory=list)
+
+
+class FirmInvoiceUpdate(BaseModel):
+    number: str | None = None
+    title: str | None = None
+    description: str | None = None
+    issued_on: date | None = None
+    due_on: date | None = None
+    currency: str | None = None
+    tax_rate: float | None = None
+    recipient_name: str | None = None
+    recipient_email: str | None = None
+    notes: str | None = None
+    items: list[FirmInvoiceItemInput] | None = None
+
+
+class FirmInvoicePaymentCreate(BaseModel):
+    amount: float = Field(gt=0)
+    paid_on: date | None = None
+    method: str | None = None
+    notes: str | None = None
+
+
+class FirmInvoicePaymentRead(ORMModel):
+    id: uuid.UUID
+    amount: float
+    paid_on: date
+    method: str | None = None
+    notes: str | None = None
+    created_at: datetime | None = None
+
+
+class FirmInvoiceSendRequest(BaseModel):
+    recipient_email: EmailStr | None = None
+    recipient_name: str | None = None
+    message: str | None = None
+
+
+class FirmInvoiceRead(ORMModel):
+    id: uuid.UUID
+    client_id: uuid.UUID
+    client_name: str | None = None
+    number: str
+    title: str
+    description: str | None = None
+    issued_on: date
+    due_on: date
+    currency: str
+    subtotal: float
+    tax_rate: float
+    tax_amount: float
+    total: float
+    amount_paid: float
+    status: InvoiceStatus
+    paid_on: date | None = None
+    recipient_name: str | None = None
+    recipient_email: str | None = None
+    sent_at: datetime | None = None
+    notes: str | None = None
+    created_at: datetime | None = None
+    items: list[FirmInvoiceItemRead] = Field(default_factory=list)
+    payments: list[FirmInvoicePaymentRead] = Field(default_factory=list)
+
+
+class FirmInvoiceTotals(BaseModel):
+    billed: float = 0
+    collected: float = 0
+    outstanding: float = 0
+    overdue: float = 0
+    count: int = 0
+    overdue_count: int = 0
+
+
+class FirmBillCreate(BaseModel):
+    category: str = "other"
+    vendor: str | None = None
+    amount: float = Field(gt=0)
+    currency: str = "CAD"
+    bill_date: date | None = None
+    due_date: date | None = None
+    is_recurring: bool = False
+    notes: str | None = None
+
+
+class FirmBillUpdate(BaseModel):
+    category: str | None = None
+    vendor: str | None = None
+    amount: float | None = None
+    currency: str | None = None
+    bill_date: date | None = None
+    due_date: date | None = None
+    is_recurring: bool | None = None
+    notes: str | None = None
+
+
+class FirmBillRead(BaseModel):
+    id: uuid.UUID
+    category: str
+    vendor: str | None = None
+    amount: float
+    currency: str
+    bill_date: date
+    due_date: date | None = None
+    status: str
+    paid_on: date | None = None
+    is_recurring: bool
+    notes: str | None = None
+    # "manual" = a firm_bills row (editable); "subscription" = a read-only row
+    # synthesized from platform_income (what the firm paid SpeedNum). See
+    # app/routers/firm_bills.py.
+    source: str = "manual"
+    created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class FirmBillTotals(BaseModel):
+    paid: float = 0
+    unpaid: float = 0
+    count: int = 0
+
+
 # --- Client-portal messages -----------------------------------------------------
 class ClientMessageCreate(BaseModel):
     subject: str | None = Field(default=None, max_length=200)
@@ -1537,6 +1694,14 @@ class SupportThreadDetail(BaseModel):
 
 class SupportUnreadCount(BaseModel):
     unread: int = 0
+
+
+class SupportCompanyOption(BaseModel):
+    """A firm the super-admin can open a support thread with — for the inbox's
+    "New message" picker."""
+
+    tenant_id: uuid.UUID
+    name: str
 
 
 class ClientExpenseTotals(BaseModel):

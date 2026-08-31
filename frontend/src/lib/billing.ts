@@ -8,7 +8,7 @@
  */
 
 import { del, get, post } from "./api";
-import type { BillingOverview, PlanRequest } from "./types";
+import type { BillingOverview, CompanyInvoice, PlanRequest } from "./types";
 
 export interface PlanChangeInput {
   /** A catalog key ("starter"…) or "custom" for a bespoke request. */
@@ -37,3 +37,9 @@ export const cancelPlanRequest = (id: string) =>
  * a tier change; deduped to once per 24h server-side. */
 export const requestRenewal = (note?: string) =>
   post<{ ok: boolean; message: string }>("/billing/renewal-request", { note: note?.trim() || null });
+
+/** Read-only: invoices SpeedNum has sent this firm (backend/app/routers/
+ * plan_requests.py's extension of /billing). No write path — there is no
+ * payment processor wired up; the platform records payments on its side. */
+export const listCompanyInvoices = () => get<CompanyInvoice[]>("/billing/invoices");
+export const getCompanyInvoice = (id: string) => get<CompanyInvoice>(`/billing/invoices/${id}`);

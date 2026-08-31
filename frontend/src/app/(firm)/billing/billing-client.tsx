@@ -1,6 +1,19 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Ban, Check, Clock, History, ImagePlus, Paperclip, Sparkles, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Ban,
+  Check,
+  Clock,
+  Download,
+  History,
+  ImagePlus,
+  Paperclip,
+  Receipt,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { useRef, useState } from "react";
 
 import {
@@ -16,13 +29,15 @@ import {
   Textarea,
   type Tone,
 } from "@/components/ui";
+import { InvoiceStatusBadge } from "@/components/dashboard/badges";
+import { downloadInvoicePdf } from "@/components/invoice/invoice-pdf";
 import { useToast } from "@/components/toast";
 import { cancelPlanRequest, requestPlanChange, requestRenewal, type PlanChangeInput } from "@/lib/billing";
 import { cn } from "@/lib/cn";
 import { formatDate, formatDateTime, formatMoney, parseDate } from "@/lib/format";
 import { useAction, useApi } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
-import type { BillingOverview, PlanRequest, PlanRequestStatus, PlanTier } from "@/lib/types";
+import type { BillingOverview, CompanyInvoice, PlanRequest, PlanRequestStatus, PlanTier } from "@/lib/types";
 
 const cap = (n: number | null) => (n === null ? "Unlimited" : String(n));
 
@@ -38,7 +53,7 @@ function daysUntil(value: string | null): number | null {
 
 /** Card price line: Free / $49/mo / Custom pricing. */
 const priceLabel = (price: number | null) =>
-  price === null ? "Custom pricing" : price === 0 ? "Free" : `${formatMoney(price)}/mo`;
+  price === null ? "Custom pricing" : price === 0 ? "Free" : `${formatMoney(price, "USD")}/mo`;
 
 const STATUS_TONE: Record<PlanRequestStatus, Tone> = {
   pending: "warn",
@@ -54,6 +69,7 @@ export function BillingClient() {
   const session = useSession();
   const overview = useApi<BillingOverview>("/billing/plans");
   const requests = useApi<PlanRequest[]>("/billing/requests");
+  const companyInvoices = useApi<CompanyInvoice[]>("/billing/invoices");
   const mutate = useAction();
 
   const [requestTarget, setRequestTarget] = useState<RequestTarget>(null);
@@ -348,6 +364,48 @@ export function BillingClient() {
                 <span className="flex items-center gap-2">
                   <Badge tone={STATUS_TONE[r.status]}>{r.status}</Badge>
                   <span className="text-muted">{r.created_at ? formatDateTime(r.created_at) : ""}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="mt-6 rounded-xl border border-line bg-surface shadow-card">
+        <div className="flex items-center gap-2 border-b border-line px-5 py-4">
+          <Receipt className="size-4 text-muted" />
+          <h3 className="text-[15px] font-semibold text-ink">Invoices from SpeedNum</h3>
+        </div>
+        {companyInvoices.isLoading ? (
+          <LoadingBlock />
+        ) : !companyInvoices.data || companyInvoices.data.length === 0 ? (
+          <p className="px-5 py-8 text-center text-[13px] text-muted">No invoices from SpeedNum yet.</p>
+        ) : (
+          <ul className="divide-y divide-line">
+            {companyInvoices.data.map((invoice) => (
+              <li key={invoice.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 text-[13.5px]">
+                <span>
+                  <span className="font-medium text-ink">{invoice.number}</span>
+                  <span className="ml-2 text-muted">Due {formatDate(invoice.due_on)}</span>
+                </span>
+                <span className="flex items-center gap-3">
+                  <span className="font-medium tabular-nums text-ink">{formatMoney(invoice.total, invoice.currency)}</span>
+                  <InvoiceStatusBadge status={invoice.status} />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      downloadInvoicePdf({
+                        fromName: "SpeedNum",
+                        billToName: null,
+                        invoice: { ...invoice, description: null, payments: [] },
+                        filenameHint: invoice.number,
+                      })
+                    }
+                    className="text-muted transition hover:text-ink"
+                    aria-label="Download PDF"
+                  >
+                    <Download className="size-4" />
+                  </button>
                 </span>
               </li>
             ))}

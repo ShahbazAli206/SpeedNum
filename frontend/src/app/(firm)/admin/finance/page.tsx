@@ -22,6 +22,8 @@ import { del, patch, post } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
 import { useAction, useApi } from "@/lib/hooks";
 
+import { AdminInvoicesSection } from "./admin-invoices-section";
+
 /**
  * Real data only, like admin/backups — every call hits a superadmin-only
  * backend endpoint (backend/app/routers/platform_finance.py). A non-superadmin
@@ -203,6 +205,8 @@ export default function FinancePage() {
           icon={<Wallet className="size-5" />}
         />
       </div>
+
+      <AdminInvoicesSection tenants={tenants.data ?? []} />
 
       <section className="mb-6 rounded-xl border border-line bg-surface shadow-card">
         <div className="flex items-center justify-between border-b border-line px-5 py-4">

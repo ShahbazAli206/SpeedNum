@@ -184,6 +184,18 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         description: "Letters, signatures and scope on record",
       },
       {
+        label: "Invoices",
+        href: "/invoices",
+        icon: "file-text",
+        description: "Invoices you and your team send clients, tracked to payment",
+      },
+      {
+        label: "Bills",
+        href: "/bills",
+        icon: "receipt",
+        description: "What the firm spends running the practice, including your SpeedNum subscription",
+      },
+      {
         label: "Reporting",
         href: "/reporting",
         icon: "bar-chart-3",
@@ -218,7 +230,7 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         label: "Finance",
         href: "/admin/finance",
         icon: "wallet",
-        description: "Superadmin: income from tenants, operating expenses, and profit",
+        description: "Superadmin: invoices to companies, income, operating expenses, and profit",
         superadminOnly: true,
       },
       {
@@ -226,6 +238,13 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         href: "/admin/plan-requests",
         icon: "arrow-left-right",
         description: "Superadmin: review and apply firms' upgrade/downgrade requests",
+        superadminOnly: true,
+      },
+      {
+        label: "Plans",
+        href: "/admin/plans",
+        icon: "receipt",
+        description: "Superadmin: edit plan names, prices and seat caps, or add new plans",
         superadminOnly: true,
       },
       {
@@ -380,6 +399,12 @@ export const DASHBOARD_NAV: { group: string; items: DashboardNavItem[] }[] = [
         href: "/dashboard/invoices",
         icon: "file-text",
         description: "Billing issued to your account",
+      },
+      {
+        label: "Accountant invoices",
+        href: "/dashboard/accountant-invoices",
+        icon: "credit-card",
+        description: "Invoices your accountant has sent you, tracked to payment",
       },
       {
         label: "Expenses",

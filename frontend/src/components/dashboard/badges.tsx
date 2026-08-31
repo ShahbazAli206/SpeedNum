@@ -29,6 +29,7 @@ const INVOICE: Record<string, { tone: Tone; label: string }> = {
   sent: { tone: "info", label: "Sent" },
   overdue: { tone: "danger", label: "Overdue" },
   draft: { tone: "neutral", label: "Draft" },
+  void: { tone: "neutral", label: "Void" },
 };
 
 export function InvoiceStatusBadge({ status }: { status: string }) {

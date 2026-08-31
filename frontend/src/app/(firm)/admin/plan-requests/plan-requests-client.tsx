@@ -24,20 +24,7 @@ import { approvePlanRequest, rejectPlanRequest, remindTenant } from "@/lib/admin
 import { cn } from "@/lib/cn";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { useAction, useApi } from "@/lib/hooks";
-import type { ExpiryAlert, ExpiryTarget, PlanRequestAdmin, PlanRequestStatus } from "@/lib/types";
-
-/** Suggested seat caps per plan tier — mirrors backend/app/plans.py's
- * PLAN_CATALOG. Kept in sync by hand rather than fetched: this is only a
- * prefill hint for the approve dialog below, which the superadmin can always
- * override before confirming, so a stale duplicate here is never a
- * correctness problem, just a slightly-off suggestion. */
-const SUGGESTED_CAPS: Record<string, { max_clients: number | null; max_staff: number | null }> = {
-  trial: { max_clients: 10, max_staff: 2 },
-  starter: { max_clients: 25, max_staff: 3 },
-  growth: { max_clients: 100, max_staff: 10 },
-  pro: { max_clients: 500, max_staff: 25 },
-  enterprise: { max_clients: null, max_staff: null },
-};
+import type { ExpiryAlert, ExpiryTarget, PlanAdmin, PlanRequestAdmin, PlanRequestStatus } from "@/lib/types";
 
 const STATUS_TONE: Record<PlanRequestStatus, Tone> = {
   pending: "warn",
@@ -52,6 +39,7 @@ export function PlanRequestsClient() {
     statusFilter === "all" ? "/admin/plan-requests" : `/admin/plan-requests?status=${statusFilter}`,
     [statusFilter],
   );
+  const plans = useApi<PlanAdmin[]>("/admin/plans");
   const mutate = useAction();
 
   const [approving, setApproving] = useState<PlanRequestAdmin | null>(null);
@@ -87,6 +75,13 @@ export function PlanRequestsClient() {
 
   const pendingCount = (requests.data ?? []).filter((r) => r.status === "pending").length;
 
+  // Suggested caps come from the live, superadmin-editable catalog (/admin/plans)
+  // so a renamed / repriced / resized plan prefills correctly. Only a hint — the
+  // fields in the approve dialog stay editable before confirming.
+  const capByKey = new Map(
+    (plans.data ?? []).map((p) => [p.key, { max_clients: p.max_clients, max_staff: p.max_staff }] as const),
+  );
+
   const openApprove = (row: PlanRequestAdmin) => {
     if (row.requested_plan === "custom") {
       // A custom request carries the firm's own asked-for numbers; prefill from
@@ -94,7 +89,7 @@ export function PlanRequestsClient() {
       setMaxClients(row.custom_clients != null ? String(row.custom_clients) : "");
       setMaxUsers(row.custom_seats != null ? String(row.custom_seats) : "");
     } else {
-      const suggested = SUGGESTED_CAPS[row.requested_plan];
+      const suggested = capByKey.get(row.requested_plan);
       setMaxClients(suggested?.max_clients != null ? String(suggested.max_clients) : "");
       setMaxUsers(suggested?.max_staff != null ? String(suggested.max_staff) : "");
     }

@@ -822,7 +822,7 @@ infrastructure changes of this shape again.
 
 Items 2 and 3 from Session 5's "still open" list above are now resolved: self-hosted auth (not
 Supabase) is the live default and was live-tested end to end, and `NEXT_PUBLIC_API_URL` is
-confirmed working (`speed-num.vercel.app` → `test.spidnums.com`). Item 4 (no offsite backup) is
+confirmed working (`syedi.spidnums.com` → `test.spidnums.com`). Item 4 (no offsite backup) is
 now partially addressed by the desktop sync app below, though it downloads on demand/interval
 rather than continuously.
 

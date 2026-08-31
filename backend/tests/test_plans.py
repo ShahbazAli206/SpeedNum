@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 from app.plans import PLAN_CATALOG, plan_tier, suggested_caps
 from app.routers.plan_requests import PlanRequestAdminRead
+from app.routers.plans_admin import PlanRead, _slugify
 from app.utils import read
 
 
@@ -148,3 +149,50 @@ class TestPlanRequestCustomAndAttachment:
     def test_new_fields_are_optional_on_the_schema(self):
         for field_name in ("custom_clients", "custom_seats", "attachment"):
             assert not PlanRequestAdminRead.model_fields[field_name].is_required()
+
+
+class TestPlanCatalogAdmin:
+    """The catalog is now DB-backed and superadmin-editable (/admin/plans)."""
+
+    def test_slugify_makes_a_url_safe_immutable_key(self):
+        assert _slugify("Growth Plus!") == "growth-plus"
+        assert _slugify("  Pro / 2026  ") == "pro-2026"
+        # Never empty — a label of only punctuation still yields a usable key.
+        assert _slugify("!!!") == "plan"
+
+    def test_planread_serialises_an_orm_row(self):
+        row = SimpleNamespace(
+            id=uuid.uuid4(),
+            key="growth",
+            label="Growth",
+            price=149,
+            max_clients=100,
+            max_staff=10,
+            blurb="Growing practices.",
+            position=2,
+            is_active=True,
+            created_at=datetime.now(timezone.utc),
+        )
+        result = PlanRead.model_validate(row)
+        assert result.key == "growth"
+        assert result.price == 149
+        assert result.max_clients == 100
+        assert result.is_active is True
+
+    def test_price_and_seats_may_be_null(self):
+        row = SimpleNamespace(
+            id=uuid.uuid4(),
+            key="enterprise",
+            label="Enterprise",
+            price=None,
+            max_clients=None,
+            max_staff=None,
+            blurb="",
+            position=9,
+            is_active=True,
+            created_at=datetime.now(timezone.utc),
+        )
+        result = PlanRead.model_validate(row)
+        assert result.price is None
+        assert result.max_clients is None
+        assert result.max_staff is None

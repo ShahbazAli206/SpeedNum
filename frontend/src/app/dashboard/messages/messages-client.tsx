@@ -1,8 +1,8 @@
 "use client";
 
-import { CheckCheck, MessageSquare, Send } from "lucide-react";
+import { MessageSquare, Send } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DashboardHeader } from "@/components/dashboard/page-shell";
 import { useToast } from "@/components/toast";
@@ -19,15 +19,33 @@ export function MessagesClient({ messages }: { messages: ClientMessage[] }) {
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
+  const markedRef = useRef(false);
+
+  // Oldest → newest so the conversation reads top to bottom.
+  const thread = useMemo(
+    () => [...messages].sort((a, b) => a.created_at.localeCompare(b.created_at)),
+    [messages],
+  );
+
+  // Mark the firm's messages read once, on open, so the portal bell badge clears.
+  useEffect(() => {
+    if (!AUTH_CONFIGURED || markedRef.current) return;
+    const unread = messages.filter((m) => !m.is_from_client && !m.is_read);
+    if (unread.length === 0) return;
+    markedRef.current = true;
+    Promise.all(unread.map((m) => post(`/client-portal/messages/${m.id}/read`)))
+      .then(() => router.refresh())
+      .catch(() => {
+        markedRef.current = false;
+      });
+  }, [messages, router]);
 
   const send = async () => {
     if (!body.trim()) return;
-
     if (!AUTH_CONFIGURED) {
       toast.info("Demo mode", "Connect a backend to send a real message to your accountant.");
       return;
     }
-
     setSending(true);
     try {
       await post("/client-portal/messages", {
@@ -49,7 +67,7 @@ export function MessagesClient({ messages }: { messages: ClientMessage[] }) {
     <>
       <DashboardHeader
         title="Messages"
-        subtitle="A question, a complaint, anything you want your accountant to see"
+        subtitle="A two-way line to your accountant — ask a question, or reply to theirs"
       />
 
       <section className="rounded-xl border border-line bg-surface p-5 shadow-[var(--shadow-card)]">
@@ -79,40 +97,47 @@ export function MessagesClient({ messages }: { messages: ClientMessage[] }) {
 
       <section className="mt-6 rounded-xl border border-line bg-surface shadow-[var(--shadow-card)]">
         <div className="border-b border-line px-5 py-4">
-          <h2 className="text-[15px] font-semibold text-ink">Sent messages</h2>
-          <p className="mt-0.5 text-[13px] text-muted">Everything you&apos;ve sent your accountant</p>
+          <h2 className="text-[15px] font-semibold text-ink">Conversation</h2>
+          <p className="mt-0.5 text-[13px] text-muted">Everything you and your accountant have exchanged</p>
         </div>
-        {messages.length === 0 ? (
+        {thread.length === 0 ? (
           <EmptyState
             title="No messages yet"
-            description="Anything you send here goes straight to your accountant&apos;s notification feed."
+            description="Anything you send here goes straight to your accountant, and their replies show up here."
           />
         ) : (
-          <ul className="divide-y divide-line">
-            {messages.map((item) => (
-              <li key={item.id} className="flex items-start gap-3.5 px-5 py-4">
-                <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-brand-soft text-brand">
-                  <MessageSquare className="size-4" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  {item.subject ? (
-                    <span className="block text-[13.5px] font-semibold text-ink">{item.subject}</span>
+          <div className="space-y-3 px-5 py-4">
+            {thread.map((item) => (
+              <div
+                key={item.id}
+                className={cn("flex flex-col", item.is_from_client ? "items-end" : "items-start")}
+              >
+                <div
+                  className={cn(
+                    "flex max-w-[80%] gap-2.5 rounded-2xl px-3.5 py-2 text-[13px]",
+                    item.is_from_client
+                      ? "rounded-tr-sm bg-brand text-white"
+                      : "rounded-tl-sm bg-surface-2 text-ink",
+                  )}
+                >
+                  {!item.is_from_client ? (
+                    <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-lg bg-brand-soft text-brand">
+                      <MessageSquare className="size-3.5" />
+                    </span>
                   ) : null}
-                  <span className="mt-0.5 block whitespace-pre-wrap text-[13px] text-ink-soft">{item.body}</span>
-                  <span className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-muted">
-                    {relativeTime(item.created_at)}
-                    {item.is_read ? (
-                      <span className={cn("inline-flex items-center gap-1 font-medium text-success")}>
-                        <CheckCheck className="size-3" /> Seen by your accountant
-                      </span>
-                    ) : (
-                      <span>· Sent</span>
-                    )}
+                  <span className="min-w-0">
+                    {item.subject ? (
+                      <span className="mb-0.5 block font-semibold">{item.subject}</span>
+                    ) : null}
+                    <span className="block whitespace-pre-wrap">{item.body}</span>
                   </span>
+                </div>
+                <span className="mt-1 px-1 text-[11px] text-muted">
+                  {item.is_from_client ? "You" : item.sender_name} · {relativeTime(item.created_at)}
                 </span>
-              </li>
+              </div>
             ))}
-          </ul>
+          </div>
         )}
       </section>
     </>

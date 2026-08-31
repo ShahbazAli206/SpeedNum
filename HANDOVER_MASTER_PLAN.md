@@ -162,7 +162,7 @@ All live-checked directly (not assumed): HTTPS valid cert (auto-renewed, Aug 15�
 2026 window observed), HTTP→HTTPS 308 redirect, HSTS/X-Content-Type-Options/X-Frame-
 Options/Referrer-Policy present on every response, CORS correctly rejects an untrusted
 origin with no leaked `Access-Control-Allow-Origin` while allowing the real
-`speed-num.vercel.app` origin exactly, 12MB request-body cap, Postgres/MinIO have no
+`syedi.spidnums.com` origin exactly, 12MB request-body cap, Postgres/MinIO have no
 host port bindings (confirmed via `docker ps`), MinIO console explicitly disabled
 (`MINIO_BROWSER: off`, no `ports:` entry, buckets `anonymous set none`), all 4 containers
 healthy, UFW still exactly 22/80/443 v4+v6, `migrate status` reports schema up to date.
@@ -407,7 +407,7 @@ unaffected. Full suite 267/267.
 ## CRITICAL, HEADLINE FINDING — production frontend is not running this branch's code at all
 
 The import/export audit tested directly against the real production URL,
-`https://speed-num.vercel.app` (not a staging environment), and found CSV/XLSX
+`https://syedi.spidnums.com` (not a staging environment), and found CSV/XLSX
 exports there **still vulnerable to formula injection** even though that exact fix
 (commit `bc940eb`, "Neutralize spreadsheet formula injection in CSV/XLSX exports")
 has been on this branch for a while. Investigated and independently confirmed via

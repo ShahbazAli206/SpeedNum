@@ -32,8 +32,8 @@ On a fresh PC:
    ```
    DATABASE_URL=postgresql://postgres.xftnqkmakeaqaandxyei:<db-password>@aws-0-ca-central-1.pooler.supabase.com:6543/postgres
    SUPABASE_URL=https://xftnqkmakeaqaandxyei.supabase.co
-   PUBLIC_APP_URL=https://speed-num.vercel.app
-   CORS_ORIGINS=https://speed-num.vercel.app
+   PUBLIC_APP_URL=https://syedi.spidnums.com
+   CORS_ORIGINS=https://syedi.spidnums.com
    ENVIRONMENT=production
    ```
 5. For the final Vercel wiring (Step 4) you'll also need the Supabase **anon** key (public-safe):
@@ -95,7 +95,7 @@ Rollback path (unchanged code, config-only): `DATABASE_URL` back to the Supabase
 
 | Layer | Status | URL / location |
 |---|---|---|
-| Frontend (Vercel) | ✅ **Deployed** (demo mode until env vars added) | https://speed-num.vercel.app |
+| Frontend (Vercel) | ✅ **Deployed** (demo mode until env vars added) | https://syedi.spidnums.com |
 | Database (VPS Postgres) | ⬜ pending first deploy — compose service ready in [`deploy/`](deploy/); migrations run clean from empty (see below) | Docker-internal only, via the `api`/`migrate` services |
 | Database (Supabase, rollback target) | 🔴 **BLOCKER if used directly — migrations `0005`–`0007` not applied there.** `0005` adds `profiles.must_change_password`, which `deps.py` reads on *every authenticated request*: until it is applied, every signed-in request against this database 500s. Apply with the runner below. (`0001`–`0004` done: 22 tables, trigger + RLS; auth configured, ES256 signing) | `https://xftnqkmakeaqaandxyei.supabase.co` · Canada Central (`ca-central-1`) |
 | Object storage (VPS MinIO) | ⬜ pending first deploy — compose service ready in [`deploy/`](deploy/) | Docker-internal + Caddy-proxied `/storage-api/*` only |
@@ -112,7 +112,7 @@ Rollback path (unchanged code, config-only): `DATABASE_URL` back to the Supabase
 |---|---|
 | Team | `sasuperlinecer206-2232s-projects` (Hobby) |
 | Project name | `speed-num` |
-| Production URL | `https://speed-num.vercel.app` |
+| Production URL | `https://syedi.spidnums.com` |
 | **Root Directory** | **`frontend`** ← critical (monorepo; do NOT deploy the backend on Vercel) |
 | Framework preset | Next.js |
 | Build / Output | defaults (`next build`) |
@@ -127,7 +127,7 @@ then redeploy. Template: [`frontend/.env.example`](frontend/.env.example). All a
 | `NEXT_PUBLIC_SUPABASE_URL` | `https://xftnqkmakeaqaandxyei.supabase.co` | from Supabase |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon key (see secrets file) | from Supabase |
 | `NEXT_PUBLIC_API_URL` | `https://<service>.onrender.com` | Render service root, **no** trailing `/api/v1` |
-| `NEXT_PUBLIC_SITE_URL` | `https://speed-num.vercel.app` | this Vercel domain |
+| `NEXT_PUBLIC_SITE_URL` | `https://syedi.spidnums.com` | this Vercel domain |
 
 > ⚠️ If `NEXT_PUBLIC_API_URL` is left unset in production the app silently falls back to
 > `http://localhost:8000` (dead in prod) and degrades to demo data — no error is shown.
@@ -141,7 +141,7 @@ then redeploy. Template: [`frontend/.env.example`](frontend/.env.example). All a
 | Region | Canada Central (`ca-central-1`) |
 | Data API | enabled · auto-expose new tables **off** · auto-RLS **off** |
 | JWT signing | ES256 asymmetric (JWKS) — backend verifies via `SUPABASE_URL`, no JWT secret needed |
-| Auth URLs | Site URL + redirect `https://speed-num.vercel.app/**` set; Confirm-email OFF for testing |
+| Auth URLs | Site URL + redirect `https://syedi.spidnums.com/**` set; Confirm-email OFF for testing |
 | Keys / DB password / connection string | → `DEPLOYMENT.secrets.local.md` |
 
 Extensions (both default-on in Supabase, created by `0001`): `pgcrypto`, `citext`.
@@ -166,8 +166,8 @@ Extensions (both default-on in Supabase, created by `0001`): `pgcrypto`, `citext
 |---|---|---|
 | `DATABASE_URL` | transaction-pooler string, **port 6543** (format below) | ✅ **fatal if missing** |
 | `SUPABASE_URL` | `https://xftnqkmakeaqaandxyei.supabase.co` | ✅ (JWT verification via JWKS) |
-| `PUBLIC_APP_URL` | `https://speed-num.vercel.app` | ✅ (else email/sign links point at localhost) |
-| `CORS_ORIGINS` | `https://speed-num.vercel.app` | ✅ **required** (see note) |
+| `PUBLIC_APP_URL` | `https://syedi.spidnums.com` | ✅ (else email/sign links point at localhost) |
+| `CORS_ORIGINS` | `https://syedi.spidnums.com` | ✅ **required** (see note) |
 | `CORS_ORIGIN_REGEX` | blank, or `https://speed-num[a-z0-9-]*\.vercel\.app` | only if Vercel **preview** deploys must reach the API |
 | `ENVIRONMENT` | `production` | recommended |
 | `LOG_LEVEL` | `INFO` | optional |
@@ -228,7 +228,7 @@ postgresql://postgres.xftnqkmakeaqaandxyei:<db-password>@aws-0-ca-central-1.pool
 
 There's a dependency cycle; this order breaks it:
 
-1. **Vercel first** → produces `speed-num.vercel.app`, needed by Supabase (redirect URLs) and the backend (CORS). ✅ done
+1. **Vercel first** → produces `syedi.spidnums.com`, needed by Supabase (redirect URLs) and the backend (CORS). ✅ done
 2. **Supabase** → produces project URL, anon key, DB connection string. Blocks the backend (can't
    boot without `DATABASE_URL`) and the frontend's auth. ✅ done
 3. **Backend host** (Hostinger VPS — see the runbook below; or Render) → needs Supabase's
@@ -247,7 +247,7 @@ There's a dependency cycle; this order breaks it:
 ## Step-by-step
 
 ### 1. Vercel — ✅ done
-Imported repo, Root Directory = `frontend`, deployed. Live at `speed-num.vercel.app` (demo mode).
+Imported repo, Root Directory = `frontend`, deployed. Live at `syedi.spidnums.com` (demo mode).
 
 ### 2. Supabase — ⚠️ partially done
 Project created; migrations `0001`–`0004` applied via SQL (22 tables, RLS, `on_auth_user_created`
@@ -302,7 +302,7 @@ Prereq: the port-agnostic `backend/Dockerfile` must be pushed to `main` on GitHu
 1. Project → Settings → Environment Variables → add the 4 `NEXT_PUBLIC_*` vars (values now known;
    `NEXT_PUBLIC_API_URL` = the Render URL).
 2. **Redeploy** (Deployments → ⋯ → Redeploy). Env vars only take effect on a new build.
-3. Sign up at `https://speed-num.vercel.app/signup` with a firm name → the trigger provisions your tenant.
+3. Sign up at `https://syedi.spidnums.com/signup` with a firm name → the trigger provisions your tenant.
 
 ### 5. First superadmin (manual — undocumented in repo)
 No migration/seed grants superadmin. After signing up, find your user UUID in

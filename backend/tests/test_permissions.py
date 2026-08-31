@@ -22,6 +22,7 @@ from app.permissions import (
     PERMISSION_KEYS,
     client_owner_clause,
     has_permission,
+    invoice_owner_clause,
     resolve_permission,
 )
 from app.security import TokenClaims
@@ -133,6 +134,38 @@ class TestClientOwnerClause:
         clause = client_owner_clause(user)
         assert clause.left.table is Client.__table__
         assert clause.left.name == "owner_id"
+
+
+class TestInvoicePermissions:
+    """invoices.view_all/invoices.manage (0026) — the legacy-fallback defaults
+    mirror clients.view_all's admin/member split exactly (see the migration's
+    backfill, which copies clients.view_all's grant onto invoices.view_all for
+    every existing role), while invoices.manage is granted to all three
+    starter roles since the capability is brand new."""
+
+    def test_plain_admin_is_restricted_to_assigned_clients_invoices(self):
+        user = _user(role="admin", role_permissions=None)
+        assert has_permission(user, "invoices.view_all") is False
+        assert has_permission(user, "invoices.manage") is True
+
+    def test_member_and_viewer_see_every_clients_invoices(self):
+        member = _user(role="member", role_permissions=None)
+        viewer = _user(role="viewer", role_permissions=None)
+        for key in ("invoices.view_all", "invoices.manage"):
+            assert has_permission(member, key) is True
+            assert has_permission(viewer, key) is True
+
+    def test_invoice_owner_clause_mirrors_client_owner_clause(self):
+        user = _user(role="admin", role_permissions={"invoices.view_all": False})
+        clause = invoice_owner_clause(user)
+        assert clause is not None
+        assert clause.left.table is Client.__table__
+        assert clause.left.name == "owner_id"
+        assert clause.right.value == user.profile.id
+
+    def test_invoice_owner_clause_none_when_view_all_granted(self):
+        user = _user(role="member", role_permissions={"invoices.view_all": True})
+        assert invoice_owner_clause(user) is None
 
 
 class TestPermissionCatalogIntegrity:
