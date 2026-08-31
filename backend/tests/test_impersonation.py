@@ -95,8 +95,12 @@ class TestGetCurrentUserImpersonation:
         assert user.is_admin is True
 
     def test_a_non_superadmin_cannot_impersonate_even_with_the_claim(self):
-        own = Tenant(id=uuid.uuid4(), name="Own Firm", slug="own")
-        other = Tenant(id=uuid.uuid4(), name="Someone Else", slug="other")
+        # is_active must be explicit — the column default isn't applied until a
+        # flush, and get_current_user now refuses an inactive firm (the suspend
+        # lock-out). Without it this transient tenant reads is_active=None and
+        # 403s before the impersonation assertion is even reached.
+        own = Tenant(id=uuid.uuid4(), name="Own Firm", slug="own", is_active=True)
+        other = Tenant(id=uuid.uuid4(), name="Someone Else", slug="other", is_active=True)
         profile = _profile(superadmin=False, tenant_id=own.id)
         claims = TokenClaims(
             user_id=str(profile.id), email=profile.email, role=None,
