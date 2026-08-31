@@ -17,7 +17,7 @@ from .db import get_session
 from .models import Profile, RolePermission, Tenant
 from .permissions import has_permission, seed_default_roles
 from .security import TokenClaims, verify_token
-from .services.local_auth import SUSPENDED_FIRM_MESSAGE
+from .services.local_auth import SUSPENDED_FIRM_MESSAGE, firm_expiry_block
 
 log = logging.getLogger(__name__)
 
@@ -154,6 +154,14 @@ async def get_current_user(
         raise HTTPException(status.HTTP_403_FORBIDDEN, SUSPENDED_FIRM_MESSAGE)
 
     now = datetime.now(timezone.utc)
+
+    # Same lock-out for a firm past a plan / server-domain expiry date (0024).
+    # Superadmins stay exempt (including while impersonating) so they can still
+    # extend the date; pushing it past `now` clears this on the very next request.
+    if not profile.is_superadmin:
+        expired = firm_expiry_block(tenant, now)
+        if expired is not None:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, expired)
     if profile.last_seen_at is None or (now - profile.last_seen_at) > timedelta(minutes=10):
         profile.last_seen_at = now
 

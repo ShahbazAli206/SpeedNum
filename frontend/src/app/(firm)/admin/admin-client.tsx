@@ -12,6 +12,7 @@ import {
   Pencil,
   Play,
   Plus,
+  Send,
   Signature,
   Trash2,
   Upload,
@@ -41,6 +42,7 @@ import {
 import {
   createTenant,
   deleteTenant,
+  remindTenant,
   suspendTenant,
   updateTenant,
   type CredentialResult,
@@ -51,7 +53,8 @@ import { startImpersonation } from "@/lib/auth-client";
 import { cn } from "@/lib/cn";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { ApiError } from "@/lib/api";
-import { useApi } from "@/lib/hooks";
+import { useAction, useApi } from "@/lib/hooks";
+import type { ExpiryTarget } from "@/lib/types";
 import { useSpreadsheetExport } from "@/lib/spreadsheet-export";
 
 interface PlatformStats {
@@ -78,6 +81,32 @@ interface PlatformAuditEntry {
 
 const PLAN_OPTIONS = ["trial", "starter", "growth", "pro", "enterprise"];
 const cap = (n: number | null | undefined) => (n === null || n === undefined ? "∞" : String(n));
+
+/** ISO datetime -> the YYYY-MM-DD an <input type="date"> wants ("" if none). */
+function toDateInput(value: string | null | undefined): string {
+  return value ? value.slice(0, 10) : "";
+}
+
+/** YYYY-MM-DD -> an end-of-day UTC ISO datetime for the API (null if blank), so
+ * "expires on the 15th" stays valid through that whole day. */
+function toExpiryIso(value: string): string | null {
+  return value ? `${value}T23:59:59Z` : null;
+}
+
+/** Add whole months to the later of today / the current date, as YYYY-MM-DD —
+ * the "+3mo" quick buttons extend from a future expiry, or from today if it's
+ * already past/empty. */
+function addMonths(value: string, months: number): string {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const current = value ? new Date(`${value}T00:00:00`) : today;
+  const base = current > today ? current : today;
+  const next = new Date(base.getFullYear(), base.getMonth() + months, base.getDate());
+  const y = next.getFullYear();
+  const m = String(next.getMonth() + 1).padStart(2, "0");
+  const d = String(next.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
 
 /**
  * The platform superadmin's tenants console — every firm on the platform, with
@@ -719,6 +748,10 @@ export function EditTenantModal({
   const [isActive, setIsActive] = useState(tenant.is_active);
   const [maxClients, setMaxClients] = useState(tenant.max_clients === null ? "" : String(tenant.max_clients));
   const [maxUsers, setMaxUsers] = useState(tenant.max_users === null ? "" : String(tenant.max_users));
+  const initialPlanExpiry = toDateInput(tenant.plan_expires_at);
+  const initialServiceExpiry = toDateInput(tenant.service_expires_at);
+  const [planExpires, setPlanExpires] = useState(initialPlanExpiry);
+  const [serviceExpires, setServiceExpires] = useState(initialServiceExpiry);
   const [isDemo, setIsDemo] = useState(tenant.is_demo);
   const [isPlatform, setIsPlatform] = useState(tenant.is_platform);
   const [pending, setPending] = useState(false);
@@ -739,6 +772,10 @@ export function EditTenantModal({
       is_demo: isDemo,
       is_platform: isPlatform,
     };
+    // Only send a date when it actually changed, so an untouched save neither
+    // clears it nor spuriously resets its reminder ladder.
+    if (planExpires !== initialPlanExpiry) payload.plan_expires_at = toExpiryIso(planExpires);
+    if (serviceExpires !== initialServiceExpiry) payload.service_expires_at = toExpiryIso(serviceExpires);
     try {
       await updateTenant(tenant.id, payload);
       onSaved();
@@ -811,6 +848,26 @@ export function EditTenantModal({
             <Input value={maxUsers} onChange={(e) => setMaxUsers(e.target.value)} placeholder="∞" inputMode="numeric" />
           </Field>
         </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <ExpiryField
+            label="Plan expiry"
+            target="plan"
+            tenantId={tenant.id}
+            value={planExpires}
+            onChange={setPlanExpires}
+          />
+          <ExpiryField
+            label="Server / domain expiry"
+            target="service"
+            tenantId={tenant.id}
+            value={serviceExpires}
+            onChange={setServiceExpires}
+          />
+        </div>
+        <p className="-mt-1 text-[12px] text-muted">
+          Past either date the firm is locked out until it&apos;s extended. Use the quick buttons to
+          renew for the coming months, or &ldquo;Remind&rdquo; to nudge the company now.
+        </p>
         <Checkbox
           checked={isDemo}
           onChange={(e) => setIsDemo(e.target.checked)}
@@ -836,6 +893,64 @@ export function EditTenantModal({
         />
       </div>
     </Modal>
+  );
+}
+
+/** One expiry date in the edit modal: a date input, quick "+N months" buttons
+ * that renew from the later of today / the current date, a clear, and a manual
+ * "Remind" that drops a renewal notice into the company's bell immediately. */
+function ExpiryField({
+  label,
+  target,
+  tenantId,
+  value,
+  onChange,
+}: {
+  label: string;
+  target: ExpiryTarget;
+  tenantId: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const { run, pending } = useAction();
+  const toast = useToast();
+  return (
+    <Field label={label} hint="Blank = no expiry">
+      <Input type="date" value={value} onChange={(e) => onChange(e.target.value)} />
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        {[1, 3, 6, 12].map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => onChange(addMonths(value, m))}
+            className="rounded-md border border-line px-2 py-0.5 text-[11.5px] font-medium text-ink-soft transition hover:bg-surface-2"
+          >
+            +{m}mo
+          </button>
+        ))}
+        {value ? (
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            className="rounded-md px-2 py-0.5 text-[11.5px] font-medium text-muted transition hover:text-danger"
+          >
+            Clear
+          </button>
+        ) : null}
+        <button
+          type="button"
+          disabled={pending}
+          onClick={async () => {
+            const ok = await run(() => remindTenant(tenantId, target));
+            if (ok) toast.success("Reminder sent to the company");
+          }}
+          className="ml-auto inline-flex items-center gap-1 rounded-md border border-line px-2 py-0.5 text-[11.5px] font-medium text-ink-soft transition hover:bg-surface-2 disabled:opacity-50"
+        >
+          <Send className="size-3" />
+          Remind
+        </button>
+      </div>
+    </Field>
   );
 }
 

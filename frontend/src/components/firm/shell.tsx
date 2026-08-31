@@ -23,14 +23,18 @@ import { ForcePasswordModal } from "@/components/dashboard/force-password-modal"
 import { ImpersonationBanner } from "@/components/dashboard/impersonation-banner";
 import { SignOutButton, useSignOut } from "@/components/dashboard/sign-out-button";
 import { UrgentDeadlineBanner } from "@/components/dashboard/urgent-deadline-banner";
+import { ExpiryAlertBell } from "@/components/firm/expiry-alert-bell";
+import { PlanExpiryBanner } from "@/components/firm/plan-expiry-banner";
 import { Icon } from "@/components/icon";
 import { Logo } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge, ButtonLink, EmptyState, Menu, Skeleton, type Tone } from "@/components/ui";
+import { get } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { getFirmOverview } from "@/lib/firm-demo";
 import { SessionProvider, useSession } from "@/lib/session";
 import { FIRM_NAV, FIRM_NAV_FLAT } from "@/lib/site";
+import { SUPPORT_UNREAD_EVENT } from "@/lib/support-events";
 
 import { FirmBrandingProvider, useBranding } from "./branding";
 
@@ -74,6 +78,10 @@ function FirmShellInner({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // Unread support messages, for the nav badge. Which side's count depends on
+  // the role: the platform super-admin sees firm→platform unread across every
+  // company; a firm Owner sees platform→firm unread on their own thread.
+  const [supportUnread, setSupportUnread] = useState(0);
 
   useEffect(() => {
     try {
@@ -202,6 +210,40 @@ function FirmShellInner({ children }: { children: ReactNode }) {
     [visibleNav],
   );
 
+  // Poll the support unread count from whichever endpoint fits this role, and
+  // refetch on navigation and on the SUPPORT_UNREAD_EVENT a support page fires
+  // after marking a thread read — so the badge clears without a full reload.
+  useEffect(() => {
+    if (!session.isLive || session.isLoading) return;
+    const endpoint = isSuperadmin
+      ? "/admin/support/unread-count"
+      : isOwner
+        ? "/support/unread-count"
+        : null;
+    if (endpoint === null) return;
+
+    let cancelled = false;
+    const load = () => {
+      get<{ unread: number }>(endpoint)
+        .then((result) => {
+          if (!cancelled) setSupportUnread(result.unread);
+        })
+        .catch(() => {
+          // 403 for a role that shouldn't have it, or the API asleep — leave
+          // the last known count rather than flap the badge to zero.
+        });
+    };
+    load();
+    const onChanged = () => load();
+    window.addEventListener(SUPPORT_UNREAD_EVENT, onChanged);
+    const timer = setInterval(load, 60_000);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(SUPPORT_UNREAD_EVENT, onChanged);
+      clearInterval(timer);
+    };
+  }, [session.isLive, session.isLoading, isSuperadmin, isOwner, pathname]);
+
   const badgeFor = (href: string): number => {
     switch (href) {
       case "/deadlines":
@@ -210,6 +252,9 @@ function FirmShellInner({ children }: { children: ReactNode }) {
         return session.isLive ? session.reminders.unacknowledged : 0;
       case "/notifications":
         return session.isLive ? session.unread : overview.unread_notifications;
+      case "/support":
+      case "/admin/support":
+        return session.isLive ? supportUnread : 0;
       default:
         return 0;
     }
@@ -480,6 +525,10 @@ function FirmShellInner({ children }: { children: ReactNode }) {
 
             <ThemeToggle className="hidden md:inline-flex" />
 
+            {/* Superadmin-only: the blinking "expiries" bell for companies whose
+                plan / server-domain access is due or overdue. */}
+            {isSuperadmin ? <ExpiryAlertBell /> : null}
+
             <AlertBell />
 
             {/* Was a static chip with no menu — the only way to reach settings
@@ -525,6 +574,8 @@ function FirmShellInner({ children }: { children: ReactNode }) {
         </header>
 
         <ImpersonationBanner />
+
+        <PlanExpiryBanner />
 
         <UrgentDeadlineBanner />
 

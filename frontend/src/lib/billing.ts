@@ -33,3 +33,7 @@ export const requestPlanChange = (input: PlanChangeInput) =>
   });
 export const cancelPlanRequest = (id: string) =>
   del<{ ok: boolean; message: string }>(`/billing/requests/${id}`);
+/** Ask the platform to renew / reactivate the current plan — a lighter ping than
+ * a tier change; deduped to once per 24h server-side. */
+export const requestRenewal = (note?: string) =>
+  post<{ ok: boolean; message: string }>("/billing/renewal-request", { note: note?.trim() || null });

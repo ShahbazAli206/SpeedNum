@@ -43,6 +43,11 @@ export interface Tenant {
   plan: string;
   seats: number;
   trial_ends_at: string | null;
+  /** Date-driven expiry (0024). Past either, the firm is locked out until a
+   * superadmin extends it. Null = not tracked. The company portal reads these
+   * off /auth/me to render the expiry banner. */
+  plan_expires_at: string | null;
+  service_expires_at: string | null;
   is_active: boolean;
   settings: Record<string, unknown>;
   created_at: string | null;
@@ -167,6 +172,23 @@ export interface BillingOverview {
   client_used: number;
   catalog: PlanTier[];
   has_pending_request: boolean;
+  /** Expiry dates (0024) — drive the "Request renewal" prompt on the billing page. */
+  plan_expires_at: string | null;
+  service_expires_at: string | null;
+}
+
+/** Which of a firm's two expiry dates an alert / reminder / extend concerns. */
+export type ExpiryTarget = "plan" | "service";
+
+/** GET /admin/expiry-alerts — a firm's upcoming/overdue expiry, superadmin-only.
+ * One firm can produce two rows (plan + service). */
+export interface ExpiryAlert {
+  tenant_id: string;
+  tenant_name: string;
+  target: ExpiryTarget;
+  expires_at: string;
+  days_remaining: number;
+  severity: "info" | "warning" | "critical";
 }
 
 export type PlanRequestStatus = "pending" | "approved" | "rejected" | "cancelled";
@@ -739,6 +761,64 @@ export interface ClientMessage {
   body: string;
   is_read: boolean;
   created_at: string;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Support — company-owner ↔ platform threaded messaging.                      */
+/* Firm side: /support/*  ·  Platform side: /admin/support/*                   */
+/* -------------------------------------------------------------------------- */
+export interface SupportAttachment {
+  id: string;
+  name: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  created_at: string | null;
+}
+
+export interface SupportMessage {
+  id: string;
+  /** true = sent by the platform super-admin; false = sent by the company. */
+  from_platform: boolean;
+  sender_name: string;
+  body: string;
+  read_at: string | null;
+  created_at: string | null;
+  attachments: SupportAttachment[];
+}
+
+/** GET /support/thread — the firm's own conversation. */
+export interface SupportThread {
+  thread_id: string;
+  messages: SupportMessage[];
+}
+
+/** One row in the super-admin's inbox — GET /admin/support/threads. */
+export interface SupportThreadSummary {
+  tenant_id: string;
+  tenant_name: string;
+  last_message_at: string | null;
+  last_message_preview: string | null;
+  last_from_platform: boolean | null;
+  unread: number;
+  total: number;
+}
+
+/** GET /admin/support/threads/{tenant_id} — one company's conversation. */
+export interface SupportThreadDetail {
+  tenant_id: string;
+  tenant_name: string;
+  messages: SupportMessage[];
+}
+
+export interface SupportUnreadCount {
+  unread: number;
+}
+
+/** POST .../attachments/upload-url — a signed slot the browser PUTs into. */
+export interface SupportUploadSlot {
+  storage_path: string;
+  token: string;
+  url: string;
 }
 
 export interface ClientExpenseTotals {

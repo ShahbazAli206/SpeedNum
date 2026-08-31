@@ -7,7 +7,7 @@
  */
 
 import { del, get, patch, post } from "./api";
-import type { PlanRequestAdmin } from "./types";
+import type { ExpiryAlert, ExpiryTarget, PlanRequestAdmin } from "./types";
 
 export interface PlatformStats {
   tenants: number;
@@ -34,6 +34,9 @@ export interface TenantSummary {
   custom_domain: string | null;
   admin_email: string | null;
   trial_ends_at: string | null;
+  /** Date-driven expiry (0024). Null = not tracked. */
+  plan_expires_at: string | null;
+  service_expires_at: string | null;
   created_at: string | null;
   clients: number;
   users: number;
@@ -93,6 +96,9 @@ export interface TenantEditInput {
   custom_domain?: string | null;
   plan?: string;
   is_active?: boolean;
+  /** ISO datetimes. Pass null to clear (untracked); omit to leave unchanged. */
+  plan_expires_at?: string | null;
+  service_expires_at?: string | null;
   max_clients?: number | null;
   max_users?: number | null;
   is_demo?: boolean;
@@ -157,6 +163,12 @@ export const deleteTenant = (id: string) =>
   del<{ ok: boolean; message: string }>(`/admin/tenants/${id}`);
 export const resendTenantInvite = (id: string) =>
   post<CredentialResult>(`/admin/tenants/${id}/resend-invite`);
+
+/** Every firm with a plan/server-domain date expiring soon or already past. */
+export const listExpiryAlerts = () => get<ExpiryAlert[]>("/admin/expiry-alerts");
+/** Manually drop an expiry reminder into a company's bell ("Send reminder now"). */
+export const remindTenant = (id: string, target: ExpiryTarget, message?: string) =>
+  post<TenantDetail>(`/admin/tenants/${id}/remind`, { target, message: message || null });
 
 export const listPlanRequests = (status?: string) =>
   get<PlanRequestAdmin[]>(status ? `/admin/plan-requests?status=${status}` : "/admin/plan-requests");

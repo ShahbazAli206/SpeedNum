@@ -30,7 +30,7 @@ from ..schemas import (
     ReminderSnoozeRequest,
     ReminderSweepResult,
 )
-from ..services import audit, reminders as engine
+from ..services import audit, plan_expiry, reminders as engine
 from ..services.email import reminder_digest_html, send_email, sender_name
 from ..utils import ensure_found, now_utc, profile_names, read, today_utc
 
@@ -349,6 +349,10 @@ async def sweep_tenant(
 ) -> engine.SweepResult:
     """Shared by POST /reminders/run and the cross-tenant superadmin sweep."""
     today = today_utc()
+    # Company-level plan / server-domain expiry reminders (0024) ride the same
+    # per-tenant sweep — independent of whether any work-item reminders fire, so
+    # it must run before the early return below.
+    await plan_expiry.sweep_tenant_expiry(session, tenant, today=today)
     planned = await engine.collect(session, tenant, today=today)
     created = await engine.persist(session, tenant.id, planned)
 

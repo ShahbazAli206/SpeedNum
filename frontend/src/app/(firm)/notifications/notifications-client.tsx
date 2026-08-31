@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, CheckCheck, Kanban, Mail, Signature, Users, Zap } from "lucide-react";
+import { CalendarClock, CheckCheck, Kanban, LifeBuoy, Mail, Signature, Users, Zap } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { ComponentType } from "react";
@@ -27,6 +27,7 @@ const TYPE_META: Record<string, { icon: ComponentType<{ className?: string }>; t
   letter: { icon: Signature, tone: "bg-brand-soft text-brand", label: "Letter" },
   task: { icon: Kanban, tone: "bg-warn-soft text-warn", label: "Task" },
   client: { icon: Users, tone: "bg-info-soft text-info", label: "Client" },
+  support: { icon: LifeBuoy, tone: "bg-info-soft text-info", label: "Support" },
   email: { icon: Mail, tone: "bg-danger-soft text-danger", label: "Email" },
   system: { icon: Zap, tone: "bg-surface-2 text-muted", label: "System" },
 };
@@ -38,7 +39,7 @@ function metaFor(type: string) {
   return TYPE_META[key ?? "system"];
 }
 
-const FILTERS = ["All", "Unread", "Deadline", "Letter", "Task", "Client", "Email", "System"] as const;
+const FILTERS = ["All", "Unread", "Deadline", "Letter", "Task", "Client", "Support", "Email", "System"] as const;
 
 /** Pull a human-readable reason out of an ApiError without leaking `[object]`. */
 function message(error: unknown, fallback: string) {

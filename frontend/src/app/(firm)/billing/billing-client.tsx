@@ -16,13 +16,25 @@ import {
   Textarea,
   type Tone,
 } from "@/components/ui";
-import { cancelPlanRequest, requestPlanChange, type PlanChangeInput } from "@/lib/billing";
-import { formatDateTime, formatMoney } from "@/lib/format";
+import { useToast } from "@/components/toast";
+import { cancelPlanRequest, requestPlanChange, requestRenewal, type PlanChangeInput } from "@/lib/billing";
+import { cn } from "@/lib/cn";
+import { formatDate, formatDateTime, formatMoney, parseDate } from "@/lib/format";
 import { useAction, useApi } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import type { BillingOverview, PlanRequest, PlanRequestStatus, PlanTier } from "@/lib/types";
 
 const cap = (n: number | null) => (n === null ? "Unlimited" : String(n));
+
+/** Whole days from today to an ISO datetime (negative = past), or null if unset. */
+function daysUntil(value: string | null): number | null {
+  const date = parseDate(value);
+  if (!date) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  date.setHours(0, 0, 0, 0);
+  return Math.round((date.getTime() - today.getTime()) / 86_400_000);
+}
 
 /** Card price line: Free / $49/mo / Custom pricing. */
 const priceLabel = (price: number | null) =>
@@ -51,6 +63,8 @@ export function BillingClient() {
   const [customSeats, setCustomSeats] = useState("");
   const [cancelling, setCancelling] = useState<PlanRequest | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [renewing, setRenewing] = useState(false);
+  const toast = useToast();
 
   if (overview.error?.status === 403) {
     return (
@@ -145,6 +159,25 @@ export function BillingClient() {
   const planLabel = (r: PlanRequest) =>
     r.requested_plan === "custom" ? `Custom · ${r.custom_clients} clients / ${r.custom_seats} staff` : r.requested_plan;
 
+  const submitRenewal = async () => {
+    setRenewing(true);
+    try {
+      await requestRenewal();
+      toast.success("Renewal request sent to your provider");
+      await overview.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't send the request");
+    } finally {
+      setRenewing(false);
+    }
+  };
+
+  const planDays = daysUntil(data.plan_expires_at);
+  const serviceDays = daysUntil(data.service_expires_at);
+  const hasExpiry = data.plan_expires_at !== null || data.service_expires_at !== null;
+  const soonestDays = [planDays, serviceDays].filter((d): d is number => d !== null).sort((a, b) => a - b)[0];
+  const renewalNeeded = soonestDays !== undefined && soonestDays <= 14;
+
   return (
     <>
       <Card className="p-5">
@@ -158,7 +191,43 @@ export function BillingClient() {
             <UsageStat label="client seats" used={data.client_used} capValue={data.max_clients} />
           </div>
         </div>
+
+        {hasExpiry ? (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-[13px]">
+              {data.plan_expires_at ? (
+                <span className="text-muted">
+                  Plan expires{" "}
+                  <span className={cn("font-medium", planDays !== null && planDays <= 14 ? "text-danger" : "text-ink")}>
+                    {formatDate(data.plan_expires_at)}
+                  </span>
+                </span>
+              ) : null}
+              {data.service_expires_at ? (
+                <span className="text-muted">
+                  Server/domain expires{" "}
+                  <span className={cn("font-medium", serviceDays !== null && serviceDays <= 14 ? "text-danger" : "text-ink")}>
+                    {formatDate(data.service_expires_at)}
+                  </span>
+                </span>
+              ) : null}
+            </div>
+            {canManage ? (
+              <Button size="sm" variant="secondary" loading={renewing} onClick={() => void submitRenewal()}>
+                Request renewal
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
       </Card>
+
+      {renewalNeeded ? (
+        <Alert tone={soonestDays !== undefined && soonestDays < 0 ? "danger" : "warn"} className="mt-4">
+          {soonestDays !== undefined && soonestDays < 0
+            ? "Your plan or server/domain access has lapsed — request a renewal now to restore your services."
+            : "Your plan or server/domain access is expiring soon. Request a renewal to avoid any interruption."}
+        </Alert>
+      ) : null}
 
       {pendingRequest ? (
         <Alert tone="warn" className="mt-4">

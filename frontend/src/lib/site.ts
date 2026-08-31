@@ -229,6 +229,13 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         superadminOnly: true,
       },
       {
+        label: "Support inbox",
+        href: "/admin/support",
+        icon: "life-buoy",
+        description: "Superadmin: messages from company owners across every firm — read and reply",
+        superadminOnly: true,
+      },
+      {
         label: "Backup & Recovery",
         href: "/admin/backups",
         icon: "hard-drive",
@@ -267,6 +274,16 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         href: "/team/roles",
         icon: "shield-check",
         description: "Define staff role types and what each one can see or do",
+        ownerOnly: true,
+      },
+      {
+        // The company owner's line to the SpeedNum platform team (the
+        // superadmin's Support inbox). ownerOnly to match the backend gate
+        // (OwnerOrSuperadminDep on /support/*) — Member/Viewer never see it.
+        label: "Platform support",
+        href: "/support",
+        icon: "life-buoy",
+        description: "Message the SpeedNum platform team about your account",
         ownerOnly: true,
       },
       {

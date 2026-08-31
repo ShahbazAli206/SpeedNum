@@ -12,7 +12,7 @@ are provider-controlled, so a request is not the same thing as a change.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -50,6 +50,14 @@ class BillingOverview(BaseModel):
     client_used: int
     catalog: list[PlanTierRead]
     has_pending_request: bool
+    # Expiry dates (0024) so the company's billing page can show them and offer
+    # "Request renewal" when either is close or past. Null = not tracked.
+    plan_expires_at: datetime | None = None
+    service_expires_at: datetime | None = None
+
+
+class RenewalRequest(BaseModel):
+    note: str | None = Field(default=None, max_length=2000)
 
 
 class PlanRequestCreate(BaseModel):
@@ -136,6 +144,8 @@ async def get_billing_overview(session: SessionDep, user: TenantUserDep) -> Bill
         client_used=usage["client_used"],
         catalog=[PlanTierRead(**tier) for tier in PLAN_CATALOG],
         has_pending_request=bool(pending),
+        plan_expires_at=tenant.plan_expires_at,
+        service_expires_at=tenant.service_expires_at,
     )
 
 
@@ -228,6 +238,55 @@ async def cancel_plan_request(request_id: uuid.UUID, session: SessionDep, user: 
     row.resolved_by = user.profile.id
     await session.flush()
     return Ok(message="Request cancelled")
+
+
+@router.post("/renewal-request", response_model=Ok, status_code=status.HTTP_201_CREATED)
+async def request_renewal(
+    payload: RenewalRequest, session: SessionDep, user: AdminUserDep, request: Request
+) -> Ok:
+    """A company owner/admin asks the platform to renew / reactivate their plan —
+    a lightweight ping into the firm-owner's bell (via _notify_platform), distinct
+    from a plan-tier change (POST /requests, which opens a reviewable queue item).
+    Deduped to once per 24h so a repeatedly-clicked expiry banner can't spam the
+    platform."""
+    tenant = user.tenant
+    now = datetime.now(timezone.utc)
+    tenant_settings = dict(tenant.settings or {})
+    last_raw = tenant_settings.get("renewal_requested_at")
+    if isinstance(last_raw, str):
+        try:
+            last = datetime.fromisoformat(last_raw)
+        except ValueError:
+            last = None
+        if last is not None and now - last < timedelta(hours=24):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "A renewal request was already sent in the last 24 hours.",
+            )
+
+    note = (payload.note or "").strip()
+    body = f"{tenant.name} asked to renew or reactivate their plan."
+    if note:
+        body += f" Note: {note}"
+    await _notify_platform(
+        session,
+        title=f"{tenant.name} requested a plan renewal",
+        body=body,
+        link="/admin",
+    )
+    tenant_settings["renewal_requested_at"] = now.isoformat()
+    tenant.settings = tenant_settings
+    await audit.record(
+        session,
+        tenant_id=tenant.id,
+        actor_id=user.profile.id,
+        actor_email=user.profile.email,
+        action="requested",
+        entity="renewal",
+        summary=f"{tenant.name} requested a plan renewal",
+        ip_address=client_ip(request),
+    )
+    return Ok(message="Renewal request sent")
 
 
 # --- provider side: /admin/plan-requests --------------------------------------

@@ -172,3 +172,62 @@ export async function clientDocumentUrl(clientId: string, documentId: string): P
   const { url } = await get<DownloadUrl>(`/clients/${clientId}/documents/${documentId}/download-url`);
   return url;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Support-message attachments (backend/app/routers/support.py).               */
+/* Same presigned-upload pattern; the endpoint prefix differs by side —        */
+/* the firm owner uses /support, the platform super-admin uses                 */
+/* /admin/support/threads/{tenantId}.                                          */
+/* -------------------------------------------------------------------------- */
+export type SupportScope = { kind: "firm" } | { kind: "platform"; tenantId: string };
+
+/** The reference a caller includes in the create-message payload. */
+export interface SupportAttachmentDraft {
+  name: string;
+  storage_path: string;
+  mime_type: string | null;
+  size_bytes: number;
+}
+
+async function putToStorage(url: string, file: File): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "PUT",
+      headers: file.type ? { "Content-Type": file.type } : undefined,
+      body: file,
+    });
+  } catch {
+    throw new UploadError("Could not reach storage. Check your connection and try again.");
+  }
+  if (!response.ok) {
+    throw new UploadError(
+      response.status === 400
+        ? "Storage rejected the upload — the signed link may have expired. Try again."
+        : `Upload failed (${response.status}).`,
+    );
+  }
+}
+
+export async function uploadSupportAttachment(
+  scope: SupportScope,
+  file: File,
+): Promise<SupportAttachmentDraft> {
+  const base = scope.kind === "firm" ? "/support" : `/admin/support/threads/${scope.tenantId}`;
+  const slot = await post<UploadSlot>(`${base}/attachments/upload-url`, { name: file.name });
+  await putToStorage(slot.url, file);
+  return {
+    name: file.name,
+    storage_path: slot.storage_path,
+    mime_type: file.type || null,
+    size_bytes: file.size,
+  };
+}
+
+export async function supportAttachmentUrl(scope: SupportScope, attachmentId: string): Promise<string> {
+  // Download is keyed by attachment id alone on both sides (the row already
+  // carries its tenant); only the prefix differs.
+  const prefix = scope.kind === "firm" ? "/support" : "/admin/support";
+  const { url } = await get<DownloadUrl>(`${prefix}/attachments/${attachmentId}/download-url`);
+  return url;
+}

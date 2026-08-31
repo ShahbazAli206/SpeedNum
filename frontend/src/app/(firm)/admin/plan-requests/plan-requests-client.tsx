@@ -1,10 +1,12 @@
 "use client";
 
-import { Ban, Check, Clock, X } from "lucide-react";
+import { Ban, Check, Clock, Send, X } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
 import { KpiTile } from "@/components/charts";
 import { KpiRow } from "@/components/dashboard/page-shell";
+import { useToast } from "@/components/toast";
 import {
   Alert,
   Badge,
@@ -18,10 +20,11 @@ import {
   Textarea,
   type Tone,
 } from "@/components/ui";
-import { approvePlanRequest, rejectPlanRequest } from "@/lib/admin";
-import { formatDateTime } from "@/lib/format";
+import { approvePlanRequest, rejectPlanRequest, remindTenant } from "@/lib/admin";
+import { cn } from "@/lib/cn";
+import { formatDate, formatDateTime } from "@/lib/format";
 import { useAction, useApi } from "@/lib/hooks";
-import type { PlanRequestAdmin, PlanRequestStatus } from "@/lib/types";
+import type { ExpiryAlert, ExpiryTarget, PlanRequestAdmin, PlanRequestStatus } from "@/lib/types";
 
 /** Suggested seat caps per plan tier — mirrors backend/app/plans.py's
  * PLAN_CATALOG. Kept in sync by hand rather than fetched: this is only a
@@ -131,6 +134,8 @@ export function PlanRequestsClient() {
       <KpiRow>
         <KpiTile tone="amber" value={String(pendingCount)} label="Pending requests" icon={<Clock className="size-5" />} />
       </KpiRow>
+
+      <RenewalsSection />
 
       <section className="mt-6 rounded-xl border border-line bg-surface shadow-card">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
@@ -338,5 +343,110 @@ export function PlanRequestsClient() {
         ) : null}
       </Modal>
     </>
+  );
+}
+
+const AXIS_LABEL: Record<ExpiryTarget, string> = { plan: "Plan", service: "Server / domain" };
+
+function countdownText(days: number): string {
+  if (days < 0) return `${Math.abs(days)}d overdue`;
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  return `in ${days}d`;
+}
+
+function severityTone(severity: ExpiryAlert["severity"]): string {
+  if (severity === "critical") return "text-danger";
+  if (severity === "warning") return "text-warn";
+  return "text-muted";
+}
+
+/** The "Renewals & expiry" table above the requests queue — every firm whose
+ * plan or server/domain date is due soon or overdue, with a one-click reminder
+ * and a link into the tenant editor to extend. Reads GET /admin/expiry-alerts,
+ * the same source as the header's expiry popup. */
+function RenewalsSection() {
+  const alerts = useApi<ExpiryAlert[]>("/admin/expiry-alerts");
+  const rows = alerts.data ?? [];
+
+  return (
+    <section className="mt-6 rounded-xl border border-line bg-surface shadow-card">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
+        <div>
+          <h2 className="text-[15px] font-semibold text-ink">Renewals &amp; expiry</h2>
+          <p className="mt-0.5 text-[13px] text-muted">
+            Companies whose plan or server/domain access is due soon or overdue
+          </p>
+        </div>
+        {rows.length ? <Badge tone="warn">{rows.length} to review</Badge> : null}
+      </div>
+
+      {alerts.isLoading ? (
+        <LoadingBlock label="Loading expiries…" />
+      ) : !rows.length ? (
+        <EmptyState title="Nothing expiring" description="No plans or servers are due in the next 30 days." />
+      ) : (
+        <div className="scroll-thin overflow-x-auto">
+          <table className="w-full text-[13.5px]">
+            <thead>
+              <tr className="border-b border-line text-[11.5px] tracking-wide text-muted uppercase">
+                <th className="px-5 py-2.5 text-left font-semibold">Firm</th>
+                <th className="px-5 py-2.5 text-left font-semibold">What</th>
+                <th className="px-5 py-2.5 text-left font-semibold">Expires</th>
+                <th className="px-5 py-2.5 text-right font-semibold">Countdown</th>
+                <th className="px-5 py-2.5 text-right font-semibold">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((alert) => (
+                <RenewalRow key={`${alert.tenant_id}:${alert.target}`} alert={alert} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RenewalRow({ alert }: { alert: ExpiryAlert }) {
+  const { run, pending } = useAction();
+  const toast = useToast();
+  const [sent, setSent] = useState(false);
+
+  return (
+    <tr className="border-b border-line last:border-b-0">
+      <td className="px-5 py-3 font-medium text-ink">{alert.tenant_name}</td>
+      <td className="px-5 py-3 text-ink-soft">{AXIS_LABEL[alert.target]}</td>
+      <td className="px-5 py-3 text-ink-soft">{formatDate(alert.expires_at)}</td>
+      <td className={cn("px-5 py-3 text-right font-semibold", severityTone(alert.severity))}>
+        {countdownText(alert.days_remaining)}
+      </td>
+      <td className="px-5 py-3">
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            disabled={pending || sent}
+            onClick={async () => {
+              const ok = await run(() => remindTenant(alert.tenant_id, alert.target));
+              if (ok) {
+                setSent(true);
+                toast.success(`Reminder sent to ${alert.tenant_name}`);
+              }
+            }}
+            className="inline-flex items-center gap-1 rounded-md border border-line px-2.5 py-1 text-[12px] font-semibold text-ink-soft transition hover:bg-surface-2 disabled:opacity-50"
+          >
+            <Send className="size-3" />
+            {sent ? "Sent" : "Remind"}
+          </button>
+          <Link
+            href={`/admin/tenants/${alert.tenant_id}`}
+            className="rounded-md border border-line px-2.5 py-1 text-[12px] font-semibold text-brand transition hover:bg-surface-2"
+          >
+            Extend
+          </Link>
+        </div>
+      </td>
+    </tr>
   );
 }

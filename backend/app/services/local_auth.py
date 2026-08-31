@@ -45,6 +45,34 @@ SUSPENDED_FIRM_MESSAGE = (
     "Please contact support to have it reactivated."
 )
 
+# Date-driven lock-out (0024): past either expiry date a firm is refused exactly
+# like a manual suspend, until a superadmin extends the date. Superadmins and
+# tenant-less accounts stay exempt (same as SUSPENDED_FIRM_MESSAGE).
+PLAN_EXPIRED_MESSAGE = (
+    "Your plan expired on {date}. Please contact your provider to renew it and "
+    "restore access to the portal."
+)
+SERVICE_EXPIRED_MESSAGE = (
+    "Your server/domain access expired on {date}. Please contact your provider to "
+    "reactivate it and restore service."
+)
+
+
+def firm_expiry_block(tenant: Tenant | None, now: datetime) -> str | None:
+    """The lock-out message if this firm is past a plan/service expiry date, else
+    None. Mirrors the is_active suspend check — a firm past either date is refused
+    every login and every live request until the date is extended. Callers gate on
+    is_superadmin / tenant-less separately, exactly as they do for suspend."""
+    if tenant is None:
+        return None
+    plan_at = tenant.plan_expires_at
+    if plan_at is not None and plan_at <= now:
+        return PLAN_EXPIRED_MESSAGE.format(date=plan_at.date().isoformat())
+    service_at = tenant.service_expires_at
+    if service_at is not None and service_at <= now:
+        return SERVICE_EXPIRED_MESSAGE.format(date=service_at.date().isoformat())
+    return None
+
 
 class AuthError(RuntimeError):
     """A caller-visible authentication failure."""
@@ -64,6 +92,9 @@ async def _ensure_firm_active(session: AsyncSession, profile: Profile) -> None:
     tenant = await session.get(Tenant, profile.tenant_id)
     if tenant is not None and not tenant.is_active:
         raise AuthError(SUSPENDED_FIRM_MESSAGE, status_code=403)
+    expired = firm_expiry_block(tenant, datetime.now(timezone.utc))
+    if expired is not None:
+        raise AuthError(expired, status_code=403)
 
 
 @dataclass(slots=True)

@@ -60,6 +60,10 @@ class TenantRead(ORMModel):
     plan: str = "trial"
     seats: int = 5
     trial_ends_at: datetime | None = None
+    # Date-driven expiry (0024) — surfaced here so the company's own portal can
+    # render the expiry banner off /auth/me without an extra fetch.
+    plan_expires_at: datetime | None = None
+    service_expires_at: datetime | None = None
     is_active: bool = True
     settings: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime | None = None
@@ -294,6 +298,8 @@ class TenantAdminSummary(BaseModel):
     custom_domain: str | None = None
     admin_email: str | None = None
     trial_ends_at: datetime | None = None
+    plan_expires_at: datetime | None = None
+    service_expires_at: datetime | None = None
     created_at: datetime | None = None
     clients: int = 0
     users: int = 0
@@ -343,10 +349,38 @@ class TenantAdminEdit(BaseModel):
     custom_domain: str | None = Field(default=None, max_length=200)
     plan: str | None = Field(default=None, max_length=40)
     is_active: bool | None = None
+    # Expiry dates (0024). Passing an explicit null clears the date (untracked);
+    # omitting the key leaves it unchanged (model_dump(exclude_unset=True)).
+    plan_expires_at: datetime | None = None
+    service_expires_at: datetime | None = None
     max_clients: int | None = Field(default=None, ge=0)
     max_users: int | None = Field(default=None, ge=0)
     is_demo: bool | None = None
     is_platform: bool | None = None
+
+
+# Which of a firm's two expiry dates an alert / reminder / extend is about.
+ExpiryTarget = Literal["plan", "service"]
+
+
+class ExpiryAlert(BaseModel):
+    """One firm's upcoming/overdue expiry, for the superadmin alert popup and the
+    plan-requests "Renewals" section. Urgency mirrors the reminder engine."""
+
+    tenant_id: uuid.UUID
+    tenant_name: str
+    target: ExpiryTarget
+    expires_at: datetime
+    days_remaining: int
+    severity: str
+
+
+class RemindTenantInput(BaseModel):
+    """Superadmin's manual "Send reminder now" — drops an expiry notice into the
+    company's bell."""
+
+    target: ExpiryTarget
+    message: str | None = Field(default=None, max_length=500)
 
 
 class ImpersonateResult(BaseModel):

@@ -18,22 +18,24 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import func, select, text, true
+from sqlalchemy import func, or_, select, text, true
 
 from ..config import settings as app_settings
 from ..deps import SessionDep, SuperadminDep, client_ip
 from ..models import AuditLog, Client, Deadline, EngagementLetter, Profile, Tenant
 from ..permissions import seed_default_roles
 from ..schemas import (
+    ExpiryAlert,
     ImpersonateResult,
     PlatformAuditLogRead,
+    RemindTenantInput,
     TenantAdminCreate,
     TenantAdminDetail,
     TenantAdminEdit,
     TenantAdminSummary,
     TenantProvisionResult,
 )
-from ..services import accounts, audit, local_auth, vercel_analytics
+from ..services import accounts, audit, local_auth, plan_expiry, vercel_analytics
 from ..services.accounts import AccountError
 from ..services.email import deliver, email_status, test_message_html
 from ..utils import ensure_found
@@ -104,6 +106,8 @@ def _summary(tenant: Tenant, *, clients: int, users: int, letters: int, admin_em
         "custom_domain": tenant.custom_domain,
         "admin_email": admin_email or tenant.email,
         "trial_ends_at": tenant.trial_ends_at,
+        "plan_expires_at": tenant.plan_expires_at,
+        "service_expires_at": tenant.service_expires_at,
         "created_at": tenant.created_at,
         "clients": clients,
         "users": users,
@@ -363,12 +367,29 @@ async def apply_tenant_edit(session: SessionDep, tenant: Tenant, data: dict[str,
         tenant.is_active = data["is_active"]
         changed.append("is_active")
 
+    # Expiry dates (0024). A present key with a datetime sets it; an explicit null
+    # clears it (untracked). Moving a date resets that axis's reminder marker
+    # below so the daily sweep re-notifies from the top rung.
+    expiry_reset: list[str] = []
+    for field, target in (("plan_expires_at", "plan"), ("service_expires_at", "service")):
+        if field not in data:
+            continue
+        value = data[field]
+        if isinstance(value, datetime) and value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        if getattr(tenant, field) != value:
+            setattr(tenant, field, value)
+            changed.append(field)
+            expiry_reset.append(target)
+
     # settings-backed caps and the demo/platform flags — merge, don't clobber other keys.
     new_settings = dict(tenant.settings or {})
     for key in ("max_clients", "max_users", "is_demo", "is_platform"):
         if key in data:
             new_settings[key] = data[key]
             changed.append(key)
+    for target in expiry_reset:
+        plan_expiry.reset_marker(new_settings, target)
     if data.get("max_users") is not None:
         tenant.seats = data["max_users"]
     tenant.settings = new_settings
@@ -433,6 +454,104 @@ async def suspend_tenant(
             summary=f"{'Re-activated' if active else 'Suspended'} firm {tenant.name}",
             ip_address=client_ip(request),
         )
+    return await _detail(session, tenant)
+
+
+# --- plan / server-domain expiry (0024) --------------------------------------
+@router.get("/expiry-alerts", response_model=list[ExpiryAlert])
+async def expiry_alerts(session: SessionDep, user: SuperadminDep) -> list[dict[str, Any]]:
+    """Every customer firm with a plan or server/domain date within the alert
+    window (or already past), soonest first — the data behind the superadmin's
+    blinking expiry popup and the plan-requests "Renewals" section. A firm can
+    contribute two rows (one per axis). The platform's own workspace is excluded."""
+    today = datetime.now(timezone.utc).date()
+    rows = (
+        (
+            await session.execute(
+                select(Tenant).where(
+                    or_(
+                        Tenant.plan_expires_at.is_not(None),
+                        Tenant.service_expires_at.is_not(None),
+                    )
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    alerts: list[dict[str, Any]] = []
+    for tenant in rows:
+        if _is_platform(tenant):
+            continue
+        for entry in plan_expiry.alert_entries(tenant, today):
+            alerts.append(
+                {
+                    "tenant_id": tenant.id,
+                    "tenant_name": tenant.name,
+                    "target": entry["target"],
+                    "expires_at": entry["expires_at"],
+                    "days_remaining": entry["days_remaining"],
+                    "severity": entry["severity"],
+                }
+            )
+    alerts.sort(key=lambda a: a["days_remaining"])
+    return alerts
+
+
+@router.post("/tenants/{tenant_id}/remind", response_model=TenantAdminDetail)
+async def remind_tenant(
+    tenant_id: uuid.UUID,
+    payload: RemindTenantInput,
+    session: SessionDep,
+    user: SuperadminDep,
+    request: Request,
+) -> dict[str, Any]:
+    """Manually drop an expiry reminder into a company's bell — the superadmin's
+    "Send reminder now" button. Independent of the daily sweep, so it can be sent
+    the moment an overdue firm is spotted in the alert popup."""
+    tenant = await session.get(Tenant, tenant_id)
+    ensure_found(tenant, "Tenant")
+
+    meta = plan_expiry.TARGETS[payload.target]
+    label = meta["label"]
+    expires_at = getattr(tenant, meta["attr"])
+    if payload.message:
+        body = payload.message
+    elif expires_at is not None:
+        on_date = expires_at.date().isoformat()
+        days = (expires_at.date() - datetime.now(timezone.utc).date()).days
+        body = (
+            f"Your {label} expired on {on_date}. Renew now to restore your SpeedNum services."
+            if days < 0
+            else f"Your {label} is set to expire on {on_date}. "
+            "Request a renewal to avoid any interruption to your SpeedNum services."
+        )
+    else:
+        body = (
+            f"Please review your {label} with your provider to keep your SpeedNum "
+            "services running without interruption."
+        )
+
+    await audit.notify(
+        session,
+        tenant_id=tenant.id,
+        type=meta["type"],
+        title=f"Reminder: renew your {label}",
+        body=body,
+        link="/billing",
+    )
+    await audit.record(
+        session,
+        tenant_id=tenant.id,
+        actor_id=user.profile.id,
+        actor_email=user.profile.email,
+        action="reminded",
+        entity="tenant",
+        entity_id=tenant.id,
+        summary=f"Sent {label} renewal reminder to {tenant.name}",
+        ip_address=client_ip(request),
+    )
     return await _detail(session, tenant)
 
 

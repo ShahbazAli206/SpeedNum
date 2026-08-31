@@ -93,6 +93,11 @@ class Tenant(Base):
     plan: Mapped[str] = mapped_column(Text, default="trial")
     seats: Mapped[int] = mapped_column(Integer, default=5)
     trial_ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Date-driven lifecycle (0024). Null = not tracked. Past either date the firm
+    # is locked out exactly like a manual suspend — see services/local_auth
+    # .firm_expiry_block and deps.get_current_user.
+    plan_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    service_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     settings: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
