@@ -19,6 +19,11 @@ class PlanTier(TypedDict):
     max_clients: int | None
     max_staff: int | None
     blurb: str
+    # Monthly list price in whole dollars, shown on the billing cards. None
+    # means "not a fixed price" (Enterprise is quoted per firm). These are a
+    # default ladder — change them here in one place if pricing changes; the
+    # frontend reads them from GET /billing/plans, it does not hardcode them.
+    price: int | None
 
 
 PLAN_CATALOG: list[PlanTier] = [
@@ -28,6 +33,7 @@ PLAN_CATALOG: list[PlanTier] = [
         "max_clients": 10,
         "max_staff": 2,
         "blurb": "14-day trial of the full product.",
+        "price": 0,
     },
     {
         "key": "starter",
@@ -35,6 +41,7 @@ PLAN_CATALOG: list[PlanTier] = [
         "max_clients": 25,
         "max_staff": 3,
         "blurb": "Solo practitioners and small teams.",
+        "price": 49,
     },
     {
         "key": "growth",
@@ -42,6 +49,7 @@ PLAN_CATALOG: list[PlanTier] = [
         "max_clients": 100,
         "max_staff": 10,
         "blurb": "Growing practices with several accountants.",
+        "price": 149,
     },
     {
         "key": "pro",
@@ -49,6 +57,7 @@ PLAN_CATALOG: list[PlanTier] = [
         "max_clients": 500,
         "max_staff": 25,
         "blurb": "Established firms with a full team.",
+        "price": 399,
     },
     {
         "key": "enterprise",
@@ -56,6 +65,7 @@ PLAN_CATALOG: list[PlanTier] = [
         "max_clients": None,
         "max_staff": None,
         "blurb": "Unlimited clients and staff, custom terms.",
+        "price": None,
     },
 ]
 

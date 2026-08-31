@@ -1,7 +1,7 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Ban, Check, Clock, History, X } from "lucide-react";
-import { useState } from "react";
+import { ArrowDown, ArrowUp, Ban, Check, Clock, History, ImagePlus, Paperclip, Sparkles, X } from "lucide-react";
+import { useRef, useState } from "react";
 
 import {
   Alert,
@@ -10,18 +10,23 @@ import {
   Card,
   EmptyState,
   Field,
+  Input,
   LoadingBlock,
   Modal,
   Textarea,
   type Tone,
 } from "@/components/ui";
-import { cancelPlanRequest, requestPlanChange } from "@/lib/billing";
-import { formatDateTime } from "@/lib/format";
+import { cancelPlanRequest, requestPlanChange, type PlanChangeInput } from "@/lib/billing";
+import { formatDateTime, formatMoney } from "@/lib/format";
 import { useAction, useApi } from "@/lib/hooks";
 import { useSession } from "@/lib/session";
 import type { BillingOverview, PlanRequest, PlanRequestStatus, PlanTier } from "@/lib/types";
 
 const cap = (n: number | null) => (n === null ? "Unlimited" : String(n));
+
+/** Card price line: Free / $49/mo / Custom pricing. */
+const priceLabel = (price: number | null) =>
+  price === null ? "Custom pricing" : price === 0 ? "Free" : `${formatMoney(price)}/mo`;
 
 const STATUS_TONE: Record<PlanRequestStatus, Tone> = {
   pending: "warn",
@@ -30,14 +35,20 @@ const STATUS_TONE: Record<PlanRequestStatus, Tone> = {
   cancelled: "neutral",
 };
 
+/** The plan the request modal is targeting: a catalog tier, or a bespoke plan. */
+type RequestTarget = PlanTier | "custom" | null;
+
 export function BillingClient() {
   const session = useSession();
   const overview = useApi<BillingOverview>("/billing/plans");
   const requests = useApi<PlanRequest[]>("/billing/requests");
   const mutate = useAction();
 
-  const [targetTier, setTargetTier] = useState<PlanTier | null>(null);
+  const [requestTarget, setRequestTarget] = useState<RequestTarget>(null);
   const [note, setNote] = useState("");
+  const [attachment, setAttachment] = useState<string | null>(null);
+  const [customClients, setCustomClients] = useState("");
+  const [customSeats, setCustomSeats] = useState("");
   const [cancelling, setCancelling] = useState<PlanRequest | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -74,18 +85,52 @@ export function BillingClient() {
   const pendingRequest = pastRequests.find((r) => r.status === "pending");
   const canManage = session.isAdmin;
 
+  const resetForm = () => {
+    setNote("");
+    setAttachment(null);
+    setCustomClients("");
+    setCustomSeats("");
+    setFormError(null);
+  };
+  const openTier = (tier: PlanTier) => {
+    resetForm();
+    setRequestTarget(tier);
+  };
+  const openCustom = () => {
+    resetForm();
+    setRequestTarget("custom");
+  };
+  const closeModal = () => {
+    setRequestTarget(null);
+    setFormError(null);
+  };
+
   const submitRequest = () =>
     mutate.run(async () => {
-      if (!targetTier) return;
+      const target = requestTarget;
+      if (!target) return;
       setFormError(null);
+
+      let payload: PlanChangeInput;
+      if (target === "custom") {
+        const clients = Number(customClients);
+        const seats = Number(customSeats);
+        if (!customClients.trim() || !customSeats.trim() || clients < 1 || seats < 1) {
+          setFormError("Enter how many clients and staff seats you need (at least 1 of each).");
+          return;
+        }
+        payload = { requested_plan: "custom", note, attachment, custom_clients: clients, custom_seats: seats };
+      } else {
+        payload = { requested_plan: target.key, note, attachment };
+      }
+
       try {
-        await requestPlanChange(targetTier.key, note.trim() || undefined);
+        await requestPlanChange(payload);
       } catch (err) {
         setFormError(err instanceof Error ? err.message : String(err));
         return;
       }
-      setTargetTier(null);
-      setNote("");
+      closeModal();
       await Promise.all([overview.refresh(), requests.reload()]);
     });
 
@@ -96,6 +141,9 @@ export function BillingClient() {
       setCancelling(null);
       await requests.reload();
     });
+
+  const planLabel = (r: PlanRequest) =>
+    r.requested_plan === "custom" ? `Custom · ${r.custom_clients} clients / ${r.custom_seats} staff` : r.requested_plan;
 
   return (
     <>
@@ -117,8 +165,14 @@ export function BillingClient() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span>
               A request to move to{" "}
-              <span className="font-semibold capitalize">{pendingRequest.requested_plan}</span> is waiting on
-              your provider.
+              <span className="font-semibold">
+                {pendingRequest.requested_plan === "custom" ? (
+                  "a custom plan"
+                ) : (
+                  <span className="capitalize">{pendingRequest.requested_plan}</span>
+                )}
+              </span>{" "}
+              is waiting on your provider.
             </span>
             {canManage ? (
               <Button size="sm" variant="secondary" onClick={() => setCancelling(pendingRequest)}>
@@ -145,6 +199,7 @@ export function BillingClient() {
                   <h4 className="text-[15px] font-semibold text-ink">{tier.label}</h4>
                   {isCurrent ? <Badge tone="brand">Current</Badge> : null}
                 </div>
+                <p className="mt-1 text-[18px] font-semibold text-ink">{priceLabel(tier.price)}</p>
                 <p className="mt-1 text-[13px] text-muted">{tier.blurb}</p>
                 <dl className="mt-3 space-y-1 text-[13px] text-ink-soft">
                   <div className="flex justify-between">
@@ -165,7 +220,7 @@ export function BillingClient() {
                     icon={
                       direction === "upgrade" ? <ArrowUp className="size-4" /> : <ArrowDown className="size-4" />
                     }
-                    onClick={() => setTargetTier(tier)}
+                    onClick={() => openTier(tier)}
                   >
                     Request {direction ?? "change"}
                   </Button>
@@ -173,6 +228,30 @@ export function BillingClient() {
               </Card>
             );
           })}
+
+          {canManage ? (
+            <Card className="border-dashed p-5">
+              <div className="flex items-center gap-2">
+                <Sparkles className="size-4 text-brand" />
+                <h4 className="text-[15px] font-semibold text-ink">Custom plan</h4>
+              </div>
+              <p className="mt-1 text-[18px] font-semibold text-ink">Priced with your provider</p>
+              <p className="mt-1 text-[13px] text-muted">
+                None of the packages fit? Ask for a tailored plan with the exact number of clients and staff
+                seats you need.
+              </p>
+              <Button
+                className="mt-4 w-full"
+                variant="secondary"
+                size="sm"
+                disabled={Boolean(pendingRequest)}
+                icon={<Sparkles className="size-4" />}
+                onClick={openCustom}
+              >
+                Request custom plan
+              </Button>
+            </Card>
+          ) : null}
         </div>
       </section>
 
@@ -191,8 +270,11 @@ export function BillingClient() {
               <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 text-[13.5px]">
                 <span className="text-ink-soft">
                   <span className="capitalize">{r.current_plan}</span> →{" "}
-                  <span className="font-medium capitalize text-ink">{r.requested_plan}</span>
+                  <span className="font-medium text-ink">{planLabel(r)}</span>
                   {r.note ? <span className="ml-2 text-muted">&ldquo;{r.note}&rdquo;</span> : null}
+                  {r.attachment ? (
+                    <Paperclip className="ml-1.5 inline size-3.5 align-text-bottom text-muted" aria-label="Has an attachment" />
+                  ) : null}
                 </span>
                 <span className="flex items-center gap-2">
                   <Badge tone={STATUS_TONE[r.status]}>{r.status}</Badge>
@@ -204,17 +286,18 @@ export function BillingClient() {
         )}
       </section>
 
-      {targetTier ? (
+      {requestTarget ? (
         <Modal
           open
-          onClose={() => {
-            setTargetTier(null);
-            setFormError(null);
-          }}
-          title={`Request the ${targetTier.label} package`}
+          onClose={closeModal}
+          title={
+            requestTarget === "custom"
+              ? "Request a custom plan"
+              : `Request the ${requestTarget.label} package`
+          }
           footer={
             <>
-              <Button variant="secondary" onClick={() => setTargetTier(null)} disabled={mutate.pending}>
+              <Button variant="secondary" onClick={closeModal} disabled={mutate.pending}>
                 Cancel
               </Button>
               <Button icon={<Check className="size-4" />} loading={mutate.pending} onClick={() => void submitRequest()}>
@@ -225,9 +308,38 @@ export function BillingClient() {
         >
           <div className="space-y-4">
             {formError ? <Alert tone="danger">{formError}</Alert> : null}
-            <p className="text-[13.5px] text-ink-soft">
-              Your provider will review this and set the final seat counts when they approve it.
-            </p>
+            {requestTarget === "custom" ? (
+              <>
+                <p className="text-[13.5px] text-ink-soft">
+                  Tell your provider the sizing you need. They&apos;ll confirm the price and set the final caps
+                  when they approve it.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Clients needed" hint="Client records">
+                    <Input
+                      type="number"
+                      min="1"
+                      value={customClients}
+                      onChange={(e) => setCustomClients(e.target.value)}
+                      placeholder="e.g. 250"
+                    />
+                  </Field>
+                  <Field label="Staff seats needed" hint="Team logins">
+                    <Input
+                      type="number"
+                      min="1"
+                      value={customSeats}
+                      onChange={(e) => setCustomSeats(e.target.value)}
+                      placeholder="e.g. 15"
+                    />
+                  </Field>
+                </div>
+              </>
+            ) : (
+              <p className="text-[13.5px] text-ink-soft">
+                Your provider will review this and set the final seat counts when they approve it.
+              </p>
+            )}
             <Field label="Note to your provider" hint="Optional">
               <Textarea
                 rows={3}
@@ -235,6 +347,9 @@ export function BillingClient() {
                 onChange={(e) => setNote(e.target.value)}
                 placeholder="Why you need this change…"
               />
+            </Field>
+            <Field label="Attach an image" hint="Optional — a screenshot, quote or anything that helps">
+              <AttachmentField value={attachment} onChange={setAttachment} />
             </Field>
           </div>
         </Modal>
@@ -277,5 +392,60 @@ function UsageStat({ label, used, capValue }: { label: string; used: number; cap
       <Clock className="size-3.5" />
       {used}/{cap(capValue)} {label}
     </span>
+  );
+}
+
+/** Reads a chosen image to a base64 data URL (like the firm-logo uploader in
+ * settings) — no file-storage infra, capped at 3 MB. */
+function AttachmentField({ value, onChange }: { value: string | null; onChange: (next: string | null) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const readFile = (file: File | undefined | null) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setError("Please choose an image file.");
+      return;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      setError("Image must be under 3 MB.");
+      return;
+    }
+    setError(null);
+    const reader = new FileReader();
+    reader.onload = () => onChange(String(reader.result));
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={(e) => readFile(e.target.files?.[0])}
+      />
+      {value ? (
+        <div className="flex items-center gap-3 rounded-lg border border-line p-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={value} alt="Attachment preview" className="size-14 rounded object-cover" />
+          <span className="flex-1 text-[13px] text-ink-soft">Image attached</span>
+          <Button size="sm" variant="ghost" icon={<X className="size-4" />} onClick={() => onChange(null)}>
+            Remove
+          </Button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-line p-4 text-[13px] text-muted transition hover:border-brand hover:text-ink"
+        >
+          <ImagePlus className="size-4" />
+          Click to attach an image
+        </button>
+      )}
+      {error ? <p className="mt-1 text-[12px] text-danger">{error}</p> : null}
+    </div>
   );
 }

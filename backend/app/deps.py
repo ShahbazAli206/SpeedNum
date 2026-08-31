@@ -17,6 +17,7 @@ from .db import get_session
 from .models import Profile, RolePermission, Tenant
 from .permissions import has_permission, seed_default_roles
 from .security import TokenClaims, verify_token
+from .services.local_auth import SUSPENDED_FIRM_MESSAGE
 
 log = logging.getLogger(__name__)
 
@@ -142,6 +143,15 @@ async def get_current_user(
         if acting is not None:
             tenant = acting
             impersonating = True
+
+    # A firm the platform has suspended (admin.suspend_tenant → tenant.is_active
+    # = False) must lock out every account under it, not just refuse new logins:
+    # local_auth blocks sign-in, this blocks the token a user was already holding
+    # when the firm was suspended, on its very next request. Superadmins are
+    # exempt (including while impersonating) so they can still act on the firm
+    # and lift the suspension. Mirrors the SUSPENDED_FIRM_MESSAGE login path.
+    if tenant is not None and not tenant.is_active and not profile.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, SUSPENDED_FIRM_MESSAGE)
 
     now = datetime.now(timezone.utc)
     if profile.last_seen_at is None or (now - profile.last_seen_at) > timedelta(minutes=10):

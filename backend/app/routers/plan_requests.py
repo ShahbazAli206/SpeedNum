@@ -38,6 +38,8 @@ class PlanTierRead(BaseModel):
     max_clients: int | None
     max_staff: int | None
     blurb: str
+    # Monthly list price in whole dollars; None = quoted per firm (Enterprise).
+    price: int | None = None
 
 
 class BillingOverview(BaseModel):
@@ -51,8 +53,15 @@ class BillingOverview(BaseModel):
 
 
 class PlanRequestCreate(BaseModel):
+    # A catalog key ("starter"…) or the sentinel "custom", in which case
+    # custom_clients/custom_seats carry the requested sizing.
     requested_plan: str = Field(min_length=1, max_length=40)
     note: str | None = Field(default=None, max_length=2000)
+    custom_clients: int | None = Field(default=None, ge=1, le=1_000_000)
+    custom_seats: int | None = Field(default=None, ge=1, le=1_000_000)
+    # Optional image data URL (data:image/...). Capped here so a runaway paste
+    # can't bloat the row — ~4M chars of base64 is roughly a 3 MB image.
+    attachment: str | None = Field(default=None, max_length=4_000_000)
 
 
 class PlanRequestRead(BaseModel):
@@ -61,6 +70,9 @@ class PlanRequestRead(BaseModel):
     current_plan: str
     requested_plan: str
     note: str | None
+    custom_clients: int | None = None
+    custom_seats: int | None = None
+    attachment: str | None = None
     status: str
     resolution_note: str | None
     resolved_at: datetime | None
@@ -144,8 +156,18 @@ async def create_plan_request(
     payload: PlanRequestCreate, session: SessionDep, user: AdminUserDep, request: Request
 ) -> PlanRequestRead:
     tenant = user.tenant
-    if payload.requested_plan == tenant.plan:
+    is_custom = payload.requested_plan == "custom"
+    if is_custom:
+        if payload.custom_clients is None or payload.custom_seats is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "A custom plan needs both a client count and a staff-seat count.",
+            )
+    elif payload.requested_plan == tenant.plan:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "This firm is already on that plan.")
+
+    if payload.attachment is not None and not payload.attachment.startswith("data:image/"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "The attachment must be an image.")
 
     existing = await session.scalar(
         select(PlanChangeRequest.id).where(
@@ -161,10 +183,18 @@ async def create_plan_request(
         current_plan=tenant.plan,
         requested_plan=payload.requested_plan,
         note=payload.note,
+        custom_clients=payload.custom_clients if is_custom else None,
+        custom_seats=payload.custom_seats if is_custom else None,
+        attachment=payload.attachment,
     )
     session.add(row)
     await session.flush()
 
+    target = (
+        f"a custom plan ({payload.custom_clients} clients / {payload.custom_seats} staff)"
+        if is_custom
+        else payload.requested_plan
+    )
     await audit.record(
         session,
         tenant_id=tenant.id,
@@ -173,13 +203,13 @@ async def create_plan_request(
         action="requested",
         entity="plan_change_request",
         entity_id=row.id,
-        summary=f"{user.profile.email} requested a move from {tenant.plan} to {payload.requested_plan}",
+        summary=f"{user.profile.email} requested a move from {tenant.plan} to {target}",
         ip_address=client_ip(request),
     )
     await _notify_platform(
         session,
         title=f"Plan change requested: {tenant.name}",
-        body=f"{tenant.name} asked to move from {tenant.plan} to {payload.requested_plan}.",
+        body=f"{tenant.name} asked to move from {tenant.plan} to {target}.",
         link="/admin/plan-requests",
     )
     return PlanRequestRead.model_validate(row)

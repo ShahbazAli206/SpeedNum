@@ -24,7 +24,7 @@ from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
-from ..models import Profile
+from ..models import Profile, Tenant
 from . import jwt_keys, oauth_google
 from .oauth_google import OAuthProviderError
 from .password_hash import hash_password, needs_rehash, verify_password
@@ -34,6 +34,17 @@ log = logging.getLogger(__name__)
 MAX_FAILED_LOGINS = 10
 LOCKOUT_MINUTES = 15
 
+# Shown when a platform superadmin has suspended a firm (admin.suspend_tenant
+# sets tenant.is_active = False). Every login under that firm — owner, staff and
+# client-portal accounts alike — is refused with this; platform superadmins stay
+# exempt so they can still sign in and lift the suspension. deps.get_current_user
+# repeats the same check for sessions that were already live when the firm was
+# suspended, so an existing token can't outlive the suspension.
+SUSPENDED_FIRM_MESSAGE = (
+    "Your firm's account has been suspended by the platform. "
+    "Please contact support to have it reactivated."
+)
+
 
 class AuthError(RuntimeError):
     """A caller-visible authentication failure."""
@@ -41,6 +52,18 @@ class AuthError(RuntimeError):
     def __init__(self, message: str, *, status_code: int = 401) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+async def _ensure_firm_active(session: AsyncSession, profile: Profile) -> None:
+    """Refuse to issue tokens for a firm the platform has suspended. Called from
+    every token-issuing path (password login, refresh, magic link, Google) so a
+    suspended firm cannot get back in by any of them. Superadmins and tenant-less
+    accounts are exempt — see SUSPENDED_FIRM_MESSAGE."""
+    if profile.is_superadmin or profile.tenant_id is None:
+        return
+    tenant = await session.get(Tenant, profile.tenant_id)
+    if tenant is not None and not tenant.is_active:
+        raise AuthError(SUSPENDED_FIRM_MESSAGE, status_code=403)
 
 
 @dataclass(slots=True)
@@ -238,6 +261,7 @@ async def login(
 
     if not profile.is_active:
         raise AuthError("This account has been deactivated.", status_code=403)
+    await _ensure_firm_active(session, profile)
 
     updates: dict[str, object] = {"failed_logins": 0, "locked_until": None}
     if needs_rehash(row["password_hash"]):
@@ -290,6 +314,7 @@ async def refresh(
     profile = await session.get(Profile, row["profile_id"])
     if profile is None or not profile.is_active:
         raise AuthError("This account has been deactivated.", status_code=403)
+    await _ensure_firm_active(session, profile)
 
     new_raw, new_expires_at = await _issue_refresh_token(
         session, profile_id=profile.id, user_agent=user_agent, ip_address=ip_address
@@ -416,6 +441,7 @@ async def consume_magic_link(
     profile = await session.get(Profile, profile_id)
     if profile is None or not profile.is_active:
         raise AuthError("This account has been deactivated.", status_code=403)
+    await _ensure_firm_active(session, profile)
     tokens = await issue_tokens(session, profile, user_agent=user_agent, ip_address=ip_address)
     return profile, tokens
 
@@ -674,6 +700,7 @@ async def complete_oauth(
 
     if not profile.is_active:
         raise AuthError("This account has been deactivated.", status_code=403)
+    await _ensure_firm_active(session, profile)
 
     tokens = await issue_tokens(session, profile, user_agent=user_agent, ip_address=ip_address)
     return OAuthResult(

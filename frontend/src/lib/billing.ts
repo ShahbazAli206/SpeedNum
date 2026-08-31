@@ -10,9 +10,26 @@
 import { del, get, post } from "./api";
 import type { BillingOverview, PlanRequest } from "./types";
 
+export interface PlanChangeInput {
+  /** A catalog key ("starter"…) or "custom" for a bespoke request. */
+  requested_plan: string;
+  note?: string | null;
+  /** Base64 image data URL (data:image/...), optional. */
+  attachment?: string | null;
+  /** Required when requested_plan === "custom". */
+  custom_clients?: number | null;
+  custom_seats?: number | null;
+}
+
 export const getBillingOverview = () => get<BillingOverview>("/billing/plans");
 export const listOwnPlanRequests = () => get<PlanRequest[]>("/billing/requests");
-export const requestPlanChange = (requested_plan: string, note?: string) =>
-  post<PlanRequest>("/billing/requests", { requested_plan, note: note || null });
+export const requestPlanChange = (input: PlanChangeInput) =>
+  post<PlanRequest>("/billing/requests", {
+    requested_plan: input.requested_plan,
+    note: input.note?.trim() || null,
+    attachment: input.attachment || null,
+    custom_clients: input.custom_clients ?? null,
+    custom_seats: input.custom_seats ?? null,
+  });
 export const cancelPlanRequest = (id: string) =>
   del<{ ok: boolean; message: string }>(`/billing/requests/${id}`);

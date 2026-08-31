@@ -153,6 +153,8 @@ export interface PlanTier {
   max_clients: number | null;
   max_staff: number | null;
   blurb: string;
+  /** Monthly list price in whole dollars; null = quoted per firm (Enterprise). */
+  price: number | null;
 }
 
 /** GET /billing/plans — the firm's own plan/usage plus the catalog to pick
@@ -174,8 +176,14 @@ export interface PlanRequest {
   id: string;
   tenant_id: string;
   current_plan: string;
+  /** A catalog key, or "custom" when custom_clients/custom_seats carry the ask. */
   requested_plan: string;
   note: string | null;
+  /** Set only when requested_plan === "custom" — the counts the firm asked for. */
+  custom_clients: number | null;
+  custom_seats: number | null;
+  /** Optional image the owner attached, as a base64 data URL. */
+  attachment: string | null;
   status: PlanRequestStatus;
   resolution_note: string | null;
   resolved_at: string | null;

@@ -75,3 +75,76 @@ class TestPlanRequestAdminRead:
         # model_validate raises before read() can fill them in.
         for field_name in ("tenant_name", "requested_by_email"):
             assert not PlanRequestAdminRead.model_fields[field_name].is_required()
+
+
+class TestPlanPricing:
+    """Cards on /billing show a price now — every tier must carry one."""
+
+    def test_every_tier_carries_a_price(self):
+        for tier in PLAN_CATALOG:
+            assert "price" in tier
+            assert tier["price"] is None or isinstance(tier["price"], int)
+
+    def test_enterprise_is_quoted_not_fixed(self):
+        tier = plan_tier("enterprise")
+        assert tier is not None
+        assert tier["price"] is None
+
+    def test_paid_tiers_have_a_nonnegative_price(self):
+        for key in ("trial", "starter", "growth", "pro"):
+            tier = plan_tier(key)
+            assert tier is not None
+            assert isinstance(tier["price"], int) and tier["price"] >= 0
+
+
+class TestPlanRequestCustomAndAttachment:
+    """Custom-plan sizing + the image attachment must serialise through read()
+    the same way, and stay optional so an older row (no such attrs) still
+    validates — the same guarantee TestPlanRequestAdminRead protects."""
+
+    def _custom_row(self) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=uuid.uuid4(),
+            tenant_id=uuid.uuid4(),
+            current_plan="growth",
+            requested_plan="custom",
+            note=None,
+            custom_clients=250,
+            custom_seats=15,
+            attachment="data:image/png;base64,iVBORw0KGgo=",
+            status="pending",
+            resolution_note=None,
+            resolved_at=None,
+            created_at=datetime.now(timezone.utc),
+        )
+
+    def test_custom_fields_round_trip(self):
+        result = read(PlanRequestAdminRead, self._custom_row(), tenant_name="Big Firm")
+        assert result.requested_plan == "custom"
+        assert result.custom_clients == 250
+        assert result.custom_seats == 15
+        assert result.attachment is not None and result.attachment.startswith("data:image/")
+
+    def test_new_fields_default_when_absent(self):
+        # A row without the custom/attachment attributes (as an old row, or the
+        # SimpleNamespace SQLAlchemy would hand over before these columns) must
+        # still validate — all three carry a default of None.
+        row = SimpleNamespace(
+            id=uuid.uuid4(),
+            tenant_id=uuid.uuid4(),
+            current_plan="trial",
+            requested_plan="starter",
+            note=None,
+            status="pending",
+            resolution_note=None,
+            resolved_at=None,
+            created_at=datetime.now(timezone.utc),
+        )
+        result = read(PlanRequestAdminRead, row, tenant_name="Acme")
+        assert result.custom_clients is None
+        assert result.custom_seats is None
+        assert result.attachment is None
+
+    def test_new_fields_are_optional_on_the_schema(self):
+        for field_name in ("custom_clients", "custom_seats", "attachment"):
+            assert not PlanRequestAdminRead.model_fields[field_name].is_required()

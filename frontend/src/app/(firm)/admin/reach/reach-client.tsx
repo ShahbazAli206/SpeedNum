@@ -5,18 +5,22 @@ import {
   Ban,
   Building2,
   CheckCircle2,
-  ExternalLink,
   Eye,
+  Gauge,
   Globe,
-  KeyRound,
+  RefreshCw,
+  Search,
+  Server,
   TriangleAlert,
   Users,
 } from "lucide-react";
 import { useMemo } from "react";
+import type { ReactNode } from "react";
 
 import { KpiTile } from "@/components/charts";
 import { KpiRow } from "@/components/dashboard/page-shell";
 import { Badge, Button, Card, EmptyState, LoadingBlock } from "@/components/ui";
+import type { Tone } from "@/components/ui";
 import type { ReachData } from "@/lib/admin";
 import { useApi } from "@/lib/hooks";
 import { searchFootprint } from "@/lib/seo";
@@ -66,20 +70,22 @@ export function ReachClient() {
     return <LoadingBlock label="Loading reach…" />;
   }
 
-  const { vercel, traffic, scale } = reach.data;
+  // The API still returns this block under a legacy key; locally it's just
+  // "does our own analytics service have live traffic to show".
+  const { vercel: analytics, traffic, scale } = reach.data;
+  const analyticsLive = analytics.web_analytics_configured;
 
   return (
     <>
       <div className="mb-4 flex justify-end">
-        <a
-          href="https://vercel.com/dashboard/analytics"
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-1.5 text-[13px] font-medium text-brand transition hover:underline"
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={<RefreshCw className="size-3.5" />}
+          onClick={() => reach.reload()}
         >
-          Open Vercel dashboard
-          <ExternalLink className="size-3.5" />
-        </a>
+          Refresh
+        </Button>
       </div>
 
       <KpiRow>
@@ -121,68 +127,75 @@ export function ReachClient() {
         />
       </KpiRow>
 
-      {/* Vercel Web Analytics connection */}
+      {/* Infrastructure & SEO — self-hosted stack, no third-party platform in the path */}
       <Card className="mt-6 p-5">
         <div className="flex items-start gap-3">
           <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-brand-soft text-brand">
-            {vercel.web_analytics_configured ? (
-              <CheckCircle2 className="size-4.5" />
-            ) : (
-              <Activity className="size-4.5" />
-            )}
+            {analyticsLive ? <CheckCircle2 className="size-4.5" /> : <Server className="size-4.5" />}
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <h2 className="text-[15px] font-semibold text-ink">Vercel Web Analytics</h2>
-              <Badge tone={vercel.web_analytics_configured ? "success" : "warn"}>
-                {vercel.web_analytics_configured ? "Connected" : "Not connected"}
+              <h2 className="text-[15px] font-semibold text-ink">Infrastructure &amp; SEO</h2>
+              <Badge tone={analyticsLive ? "success" : "warn"}>
+                {analyticsLive ? "Analytics live" : "Analytics pending"}
               </Badge>
             </div>
             <p className="mt-0.5 text-[13px] text-muted">
-              {vercel.web_analytics_configured
-                ? "Live visitor and pageview numbers are read from the Web Analytics API above."
-                : "Add the server-only environment variables below on the API, then redeploy, to show live numbers."}
+              Where the platform runs and how search finds it — our own servers, our own SEO, with no
+              third-party platform in the path.
             </p>
           </div>
         </div>
 
         <div className="mt-4 divide-y divide-line rounded-lg border border-line">
-          <EnvRow
-            name="VERCEL_API_TOKEN"
-            set={vercel.api_token_set}
-            optional={false}
-            hint="Server-only token for the Web Analytics query API. Vercel → Account Settings → Tokens."
+          <InfraRow
+            icon={<Server className="size-4" />}
+            name="Hosting"
+            detail="Self-hosted on our own VPS — the app and API run entirely on infrastructure we control."
+            status="Live"
+            tone="success"
           />
-          <EnvRow
-            name="VERCEL_PROJECT_ID"
-            set={vercel.project_id_set}
-            optional={false}
-            hint="Which project's analytics to read. Vercel → Project → Settings → General (starts with prj_)."
+          <InfraRow
+            icon={<Search className="size-4" />}
+            name="Search & SEO"
+            detail="Custom setup — every indexable page is generated straight from the sitemap, so search sees exactly what we publish."
+            status={`${footprint.total} pages`}
+            tone="brand"
           />
-          <EnvRow
-            name="VERCEL_TEAM_ID"
-            set={vercel.team_id_set}
-            optional
-            hint="Only for team-owned projects. Vercel → Team Settings → General (starts with team_)."
+          <InfraRow
+            icon={<Activity className="size-4" />}
+            name="Traffic analytics"
+            detail={
+              analyticsLive
+                ? "Connected — live visitor and pageview numbers are read into the tiles above."
+                : "Point the API server at our analytics service to light up the visitor and pageview tiles above."
+            }
+            status={analyticsLive ? "Connected" : "Not connected"}
+            tone={analyticsLive ? "success" : "neutral"}
           />
         </div>
         <p className="mt-3 text-[12px] text-muted">
-          These are server-only variables — set them on the API service, never with a{" "}
+          Analytics credentials stay on the API server only — never expose them with a{" "}
           <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-[11px]">NEXT_PUBLIC_</code>{" "}
-          prefix, or the token would ship to every visitor&apos;s browser.
+          prefix, or the key would ship to every visitor&apos;s browser.
         </p>
       </Card>
 
       {/* Core Web Vitals */}
       <Card className="mt-6">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-5 py-4">
-          <div>
-            <h2 className="text-[15px] font-semibold text-ink">Core Web Vitals</h2>
-            <p className="mt-0.5 text-[13px] text-muted">
-              Real-user performance, collected by Vercel Speed Insights
-            </p>
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg bg-brand-soft text-brand">
+              <Gauge className="size-4.5" />
+            </span>
+            <div>
+              <h2 className="text-[15px] font-semibold text-ink">Core Web Vitals</h2>
+              <p className="mt-0.5 text-[13px] text-muted">
+                Performance targets — the &ldquo;good&rdquo; threshold each metric should stay under
+              </p>
+            </div>
           </div>
-          <Badge tone="info">Collecting</Badge>
+          <Badge tone="info">Targets</Badge>
         </div>
         <ul className="divide-y divide-line">
           {VITALS.map((v) => (
@@ -195,20 +208,9 @@ export function ReachClient() {
             </li>
           ))}
         </ul>
-        <div className="border-t border-line px-5 py-3 text-right">
-          <a
-            href="https://vercel.com/dashboard/speed-insights"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-brand hover:underline"
-          >
-            View in Vercel
-            <ExternalLink className="size-3.5" />
-          </a>
-        </div>
-        <p className="px-5 pb-4 text-[12px] text-muted">
-          Speed Insights has no public read API — Vercel exposes these percentiles in its dashboard,
-          so this page links to the source of truth rather than estimating them.
+        <p className="border-t border-line px-5 py-4 text-[12px] text-muted">
+          These are Google&apos;s Core Web Vitals thresholds — the bar real visits should clear. Wire
+          field-data collection on the VPS to track how the live site measures up against them.
         </p>
       </Card>
 
@@ -218,7 +220,7 @@ export function ReachClient() {
           <div>
             <h2 className="text-[15px] font-semibold text-ink">Search footprint</h2>
             <p className="mt-0.5 text-[13px] text-muted">
-              Every public page the marketing site generates, by tier
+              Every public page our custom SEO setup publishes, by tier
             </p>
           </div>
           <Badge tone="brand">{footprint.total} in sitemap</Badge>
@@ -271,30 +273,28 @@ export function ReachClient() {
   );
 }
 
-function EnvRow({
+function InfraRow({
+  icon,
   name,
-  set,
-  optional,
-  hint,
+  detail,
+  status,
+  tone,
 }: {
+  icon: ReactNode;
   name: string;
-  set: boolean;
-  optional: boolean;
-  hint: string;
+  detail: string;
+  status: string;
+  tone: Tone;
 }) {
   return (
     <div className="flex items-start gap-3 px-4 py-3">
-      <span className="mt-0.5 text-muted">
-        <KeyRound className="size-4" />
-      </span>
+      <span className="mt-0.5 text-muted">{icon}</span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <code className="font-mono text-[12.5px] font-semibold text-ink">{name}</code>
-          <Badge tone={set ? "success" : optional ? "neutral" : "danger"}>
-            {set ? "Set" : optional ? "Optional" : "Missing"}
-          </Badge>
+          <span className="text-[13px] font-semibold text-ink">{name}</span>
+          <Badge tone={tone}>{status}</Badge>
         </div>
-        <p className="mt-0.5 text-[12px] text-muted">{hint}</p>
+        <p className="mt-0.5 text-[12px] text-muted">{detail}</p>
       </div>
     </div>
   );

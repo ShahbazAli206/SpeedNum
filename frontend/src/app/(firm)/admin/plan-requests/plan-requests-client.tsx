@@ -57,6 +57,7 @@ export function PlanRequestsClient() {
   const [maxUsers, setMaxUsers] = useState("");
   const [rejectNote, setRejectNote] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [viewingImage, setViewingImage] = useState<string | null>(null);
 
   if (requests.error?.status === 403) {
     return (
@@ -84,9 +85,16 @@ export function PlanRequestsClient() {
   const pendingCount = (requests.data ?? []).filter((r) => r.status === "pending").length;
 
   const openApprove = (row: PlanRequestAdmin) => {
-    const suggested = SUGGESTED_CAPS[row.requested_plan];
-    setMaxClients(suggested?.max_clients != null ? String(suggested.max_clients) : "");
-    setMaxUsers(suggested?.max_staff != null ? String(suggested.max_staff) : "");
+    if (row.requested_plan === "custom") {
+      // A custom request carries the firm's own asked-for numbers; prefill from
+      // those rather than a catalog suggestion. The superadmin can still adjust.
+      setMaxClients(row.custom_clients != null ? String(row.custom_clients) : "");
+      setMaxUsers(row.custom_seats != null ? String(row.custom_seats) : "");
+    } else {
+      const suggested = SUGGESTED_CAPS[row.requested_plan];
+      setMaxClients(suggested?.max_clients != null ? String(suggested.max_clients) : "");
+      setMaxUsers(suggested?.max_staff != null ? String(suggested.max_staff) : "");
+    }
     setFormError(null);
     setApproving(row);
   };
@@ -166,9 +174,34 @@ export function PlanRequestsClient() {
                     <td className="px-5 py-3 font-medium text-ink">{row.tenant_name}</td>
                     <td className="px-5 py-3 text-ink-soft">
                       <span className="capitalize">{row.current_plan}</span> →{" "}
-                      <span className="font-medium capitalize text-ink">{row.requested_plan}</span>
+                      {row.requested_plan === "custom" ? (
+                        <span className="font-medium text-ink">
+                          Custom · {row.custom_clients} clients / {row.custom_seats} staff
+                        </span>
+                      ) : (
+                        <span className="font-medium capitalize text-ink">{row.requested_plan}</span>
+                      )}
                     </td>
-                    <td className="max-w-64 truncate px-5 py-3 text-muted">{row.note ?? "—"}</td>
+                    <td className="max-w-64 px-5 py-3 text-muted">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate">{row.note ?? "—"}</span>
+                        {row.attachment ? (
+                          <button
+                            type="button"
+                            onClick={() => setViewingImage(row.attachment)}
+                            className="shrink-0"
+                            title="View attachment"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={row.attachment}
+                              alt="Attachment"
+                              className="size-8 rounded border border-line object-cover transition hover:opacity-80"
+                            />
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
                     <td className="px-5 py-3 text-center">
                       <Badge tone={STATUS_TONE[row.status]}>{row.status}</Badge>
                     </td>
@@ -203,7 +236,9 @@ export function PlanRequestsClient() {
         <Modal
           open
           onClose={() => setApproving(null)}
-          title={`Approve ${approving.tenant_name}'s move to ${approving.requested_plan}`}
+          title={`Approve ${approving.tenant_name}'s move to ${
+            approving.requested_plan === "custom" ? "a custom plan" : approving.requested_plan
+          }`}
           footer={
             <>
               <Button variant="secondary" onClick={() => setApproving(null)} disabled={mutate.pending}>
@@ -217,8 +252,16 @@ export function PlanRequestsClient() {
         >
           <div className="space-y-4">
             {formError ? <Alert tone="danger">{formError}</Alert> : null}
+            {approving.requested_plan === "custom" ? (
+              <Alert tone="info">
+                {approving.tenant_name} asked for a custom plan: {approving.custom_clients} clients and{" "}
+                {approving.custom_seats} staff seats. The fields below are prefilled from that — adjust before
+                approving.
+              </Alert>
+            ) : null}
             <p className="text-[13.5px] text-ink-soft">
-              Confirm the seat caps this firm will have on the {approving.requested_plan} plan. Leave a field
+              Confirm the seat caps this firm will have on the{" "}
+              {approving.requested_plan === "custom" ? "custom" : approving.requested_plan} plan. Leave a field
               blank for unlimited.
             </p>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -241,6 +284,24 @@ export function PlanRequestsClient() {
                 />
               </Field>
             </div>
+            {approving.note ? (
+              <Field label="Their note">
+                <p className="rounded-lg bg-surface-2 p-3 text-[13px] text-ink-soft">{approving.note}</p>
+              </Field>
+            ) : null}
+            {approving.attachment ? (
+              <div>
+                <p className="mb-1.5 text-[13px] font-medium text-ink">Attachment</p>
+                <button type="button" onClick={() => setViewingImage(approving.attachment)}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={approving.attachment}
+                    alt="Request attachment"
+                    className="max-h-48 rounded-lg border border-line object-contain transition hover:opacity-90"
+                  />
+                </button>
+              </div>
+            ) : null}
           </div>
         </Modal>
       ) : null}
@@ -268,6 +329,13 @@ export function PlanRequestsClient() {
             <Textarea rows={3} value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} placeholder="Why this isn't happening…" />
           </Field>
         </div>
+      </Modal>
+
+      <Modal open={viewingImage !== null} onClose={() => setViewingImage(null)} title="Request attachment">
+        {viewingImage ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={viewingImage} alt="Request attachment" className="mx-auto max-h-[70vh] w-auto rounded-lg" />
+        ) : null}
       </Modal>
     </>
   );

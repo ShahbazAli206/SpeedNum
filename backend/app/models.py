@@ -849,8 +849,20 @@ class PlanChangeRequest(Base):
         UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL")
     )
     current_plan: Mapped[str] = mapped_column(Text, nullable=False)
+    # "custom" when the firm asked for a bespoke plan rather than a catalog
+    # tier; the desired sizing then lives in custom_clients/custom_seats below.
     requested_plan: Mapped[str] = mapped_column(Text, nullable=False)
     note: Mapped[str | None] = mapped_column(Text)
+    # Set only for a "custom" requested_plan — the client and staff-seat counts
+    # the firm is asking for. The superadmin still confirms the final caps at
+    # approval (they prefill from these), same as a catalog tier's suggested_caps.
+    custom_clients: Mapped[int | None] = mapped_column(Integer)
+    custom_seats: Mapped[int | None] = mapped_column(Integer)
+    # Optional image the owner attached to explain the request, stored inline as
+    # a base64 data URL (data:image/...) — the same no-storage-infra convention
+    # the firm logo uses (Tenant.logo_url). Fine for a single small screenshot;
+    # not the presigned-S3 documents pipeline.
+    attachment: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(pg_enum("plan_request_status", *PLAN_REQUEST_STATUSES), default="pending")
     resolution_note: Mapped[str | None] = mapped_column(Text)
     resolved_by: Mapped[uuid.UUID | None] = mapped_column(
