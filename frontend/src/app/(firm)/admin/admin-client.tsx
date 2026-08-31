@@ -7,7 +7,6 @@ import {
   Copy,
   Eye,
   Globe,
-  LogIn,
   Pause,
   Pencil,
   Play,
@@ -47,7 +46,6 @@ import {
   type TenantEditInput,
   type TenantSummary,
 } from "@/lib/admin";
-import { startImpersonation } from "@/lib/auth-client";
 import { cn } from "@/lib/cn";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { ApiError } from "@/lib/api";
@@ -195,22 +193,6 @@ export function AdminClient() {
     );
   }
 
-  const impersonate = async (tenant: TenantSummary) => {
-    setActionError(null);
-    setBusyId(tenant.id);
-    try {
-      await startImpersonation(tenant.id);
-      // A full navigation, not router.push: the session identity just changed
-      // (new access cookie), so the proxy and the firm shell must re-run and
-      // re-read /auth/me as the impersonated firm rather than reuse this tree.
-      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.assign("/overview");
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Could not open that firm.");
-      setBusyId(null);
-    }
-  };
-
   const toggleSuspend = async (tenant: TenantSummary) => {
     setActionError(null);
     setBusyId(tenant.id);
@@ -272,7 +254,7 @@ export function AdminClient() {
             <h2 className="text-[15px] font-semibold text-ink">Firms</h2>
             <p className="mt-0.5 text-[13px] text-muted">
               {tenants.data ? `${tenants.data.length} firms` : "Every firm on the platform"} — create,
-              configure, impersonate and suspend
+              configure and suspend
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -386,13 +368,9 @@ export function AdminClient() {
                     </td>
                     <td className="px-5 py-3">
                       <div className="flex items-center justify-end gap-1">
-                        <IconAction
-                          title="Open admin panel (impersonate)"
-                          onClick={() => impersonate(tenant)}
-                          busy={busyId === tenant.id}
-                        >
-                          <LogIn className="size-4" />
-                        </IconAction>
+                        {/* Impersonation removed: a platform superadmin never
+                            opens a firm-owner surface, by policy (see
+                            components/firm/shell.tsx's isProviderOnly). */}
                         <Link
                           href={`/admin/tenants/${tenant.id}`}
                           title="View firm"

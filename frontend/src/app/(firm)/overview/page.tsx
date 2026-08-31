@@ -23,15 +23,15 @@ import { RevenueTrendChart } from "./revenue-chart";
 export const metadata: Metadata = { title: "Overview" };
 
 export default async function FirmOverviewPage() {
-  // A platform superadmin who isn't impersonating is a pure platform operator
-  // (see firm/shell.tsx's isProviderOnly): they get the platform-wide view, not
-  // a tenant dashboard — regardless of whether their own account happens to
-  // carry a firm. While impersonating, this is false and the borrowed firm's
-  // own dashboard renders below, same as any other firm login. Checked here
-  // rather than only in the shell so this route renders the right thing
-  // directly, same as any other page decides its own content.
+  // A platform superadmin is always a pure platform operator (see
+  // firm/shell.tsx's isProviderOnly): they get the platform-wide view, never a
+  // tenant dashboard — regardless of whether their account carries a firm, and
+  // regardless of impersonation, which is no longer a path a superadmin can
+  // take into firm-owner surfaces. Checked here rather than only in the shell
+  // so this route renders the right thing directly, same as any other page
+  // decides its own content.
   const me = await apiServer<Me>("/auth/me");
-  const isProviderOnly = Boolean(me?.profile.is_superadmin) && !me?.is_impersonating;
+  const isProviderOnly = Boolean(me?.profile.is_superadmin);
   if (isProviderOnly) {
     return <PlatformOverviewClient />;
   }

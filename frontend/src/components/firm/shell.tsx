@@ -141,20 +141,20 @@ function FirmShellInner({ children }: { children: ReactNode }) {
   // backend/app/routers/admin.py). Distinct from having no tenant at all.
   const isPlatformTenant = Boolean(session.me?.tenant?.settings?.is_platform);
   // A platform superadmin is a platform operator, full stop: their login shows
-  // ONLY the superadminOnly console pages, never a firm-owner surface — even
-  // when their account happens to be attached to a real customer firm. The one
-  // sanctioned way for a superadmin to see firm-owner data is to *impersonate*
-  // a tenant (audited, with the banner), which is exactly the `isImpersonating`
-  // escape hatch here: while impersonating, this is false and the borrowed
-  // firm's full nav returns.
+  // ONLY the superadminOnly console pages and NEVER a firm-owner surface —
+  // under any condition. Not when their account is attached to a real customer
+  // firm, and not while impersonating one either: firm-owner pages are off the
+  // table for a superadmin, period. The impersonation entry points have been
+  // removed from the Admin console to match (see admin-client.tsx /
+  // tenant-detail-client.tsx) so this is never a dead-end.
   //
-  // This deliberately no longer keys off whether the superadmin's own tenant is
-  // null or flagged is_platform. That older rule leaked the entire firm nav onto
-  // a superadmin whose workspace simply hadn't been flagged — a config-dependent
-  // gap that read as a role-separation breach. Impersonation is state the backend
-  // sets and audits (act_as_tenant → Me.is_impersonating), so it can't be left
-  // unset by accident the way a per-tenant checkbox could.
-  const isProviderOnly = isSuperadmin && session.me !== null && !session.isImpersonating;
+  // This deliberately does not key off the superadmin's own tenant (null or
+  // is_platform) or off impersonation state. An earlier version keyed off the
+  // is_platform flag and leaked the entire firm nav onto a superadmin whose
+  // workspace simply hadn't been flagged — a config-dependent gap that read as
+  // a role-separation breach. Being unconditional on `isSuperadmin` removes any
+  // such gap: there is no state a superadmin can get into where a firm page shows.
+  const isProviderOnly = isSuperadmin && session.me !== null;
   // Hiding the nav link (above) doesn't stop a direct URL visit — a
   // bookmark, the "Your Firm" breadcrumb, browser history — from still
   // reaching a firm-only page's real component, which then either 403s or
