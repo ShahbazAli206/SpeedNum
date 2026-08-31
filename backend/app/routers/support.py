@@ -35,6 +35,7 @@ from ..schemas import (
     DocumentDownloadUrl,
     DocumentUploadUrl,
     DocumentUploadUrlRequest,
+    SupportCompanyOption,
     SupportMessageCreate,
     SupportMessageRead,
     SupportThreadDetail,
@@ -312,6 +313,21 @@ async def list_threads(session: SessionDep, _: SuperadminDep) -> list[SupportThr
             )
         )
     return summaries
+
+
+@admin_router.get("/companies", response_model=list[SupportCompanyOption])
+async def list_companies(session: SessionDep, _: SuperadminDep) -> list[SupportCompanyOption]:
+    """Every firm the super-admin can open a support conversation with, for the
+    inbox's "New message" picker. The platform's own workspace tenant is
+    excluded (settings.is_platform) — you don't message yourself."""
+    rows = (
+        await session.execute(select(Tenant.id, Tenant.name, Tenant.settings).order_by(Tenant.name))
+    ).all()
+    return [
+        SupportCompanyOption(tenant_id=tid, name=name)
+        for tid, name, settings in rows
+        if not bool((settings or {}).get("is_platform"))
+    ]
 
 
 @admin_router.get("/unread-count", response_model=SupportUnreadCount)
