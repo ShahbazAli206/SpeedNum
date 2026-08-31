@@ -36,14 +36,16 @@ import { FirmBrandingProvider, useBranding } from "./branding";
 
 const COLLAPSE_KEY = "speednum-firm-collapsed";
 
-// Owner and admin both read as "Admin" here — the distinction that matters at
-// a glance in the rail is platform superadmin vs. ordinary firm staff vs. a
-// client login, not the firm-internal owner/admin split.
+// Tones for the known portal role labels (see portalRoleLabelOf in
+// lib/session.tsx). A staff member's own tenant role name (e.g. "Manager")
+// won't be listed here and falls through to "neutral" at the call site.
 const ROLE_TONE: Record<string, Tone> = {
   "Super Admin": "brand",
+  "Company Owner": "info",
   Admin: "info",
-  Accountant: "neutral",
-  Client: "success",
+  Viewer: "neutral",
+  "Team member": "neutral",
+  Clients: "success",
 };
 
 /**

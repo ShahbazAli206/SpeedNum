@@ -215,14 +215,20 @@ function roleLabel(profile: Me["profile"] | null | undefined): string {
 }
 
 /** Superadmin outranks the firm role (an owner account can also carry
- *  `is_superadmin`); a portal login is `Client` regardless of its `role`
- *  value, since client accounts share the same role column as staff. */
+ *  `is_superadmin`); a portal login is `Clients` regardless of its `role`
+ *  value, since client accounts share the same role column as staff. Staff
+ *  below owner show their actual tenant-defined role name (e.g. "Manager")
+ *  when one is assigned, falling back to a humanised legacy bucket otherwise.
+ *  "Super Admin" is kept verbatim — shell.tsx gates the admin console on it. */
 function portalRoleLabelOf(profile: Me["profile"] | null): string {
   if (!profile) return "Admin";
   if (profile.is_superadmin) return "Super Admin";
-  if (profile.client_id) return "Client";
-  if (profile.role === "owner" || profile.role === "admin") return "Admin";
-  return "Accountant";
+  if (profile.client_id) return "Clients";
+  if (profile.role === "owner") return "Company Owner";
+  if (profile.role_name) return profile.role_name;
+  if (profile.role === "admin") return "Admin";
+  if (profile.role === "viewer") return "Viewer";
+  return "Team member";
 }
 
 /**

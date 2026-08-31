@@ -18,7 +18,7 @@ from sqlalchemy import func, select
 
 from ..config import settings
 from ..deps import CurrentUserDep, SessionDep, client_ip
-from ..models import Notification
+from ..models import Notification, Role
 from ..permissions import PERMISSION_KEYS, has_permission
 from ..schemas import (
     AuthResult,
@@ -320,8 +320,17 @@ async def me(session: SessionDep, user: CurrentUserDep) -> MeResponse:
             )
         ) or 0
 
+    profile = ProfileRead.model_validate(user.profile)
+    # The portal role chip (frontend lib/session.tsx) shows a staff member's
+    # actual role name — e.g. "Manager" — not the fixed owner/admin/member
+    # bucket. Only resolved here; every other ProfileRead leaves it None.
+    if user.profile.role_id is not None:
+        profile.role_name = await session.scalar(
+            select(Role.name).where(Role.id == user.profile.role_id)
+        )
+
     return MeResponse(
-        profile=ProfileRead.model_validate(user.profile),
+        profile=profile,
         tenant=TenantRead.model_validate(user.tenant) if user.tenant else None,
         unread_notifications=unread,
         is_impersonating=user.impersonating,

@@ -67,6 +67,10 @@ export interface Profile {
    * granted through. Null for Owner/superadmin and for any profile not yet
    * assigned a custom role — see backend/app/permissions.py. */
   role_id: string | null;
+  /** Human-readable name of `role_id` (e.g. "Manager"), populated only by
+   * GET /auth/me for the portal role chip. Null when `role_id` is, and on
+   * every other ProfileRead payload. */
+  role_name?: string | null;
   weekly_capacity: number;
   is_active: boolean;
   is_superadmin: boolean;

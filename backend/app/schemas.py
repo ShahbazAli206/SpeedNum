@@ -101,6 +101,10 @@ class ProfileRead(ORMModel):
     # see app/permissions.py. Null for Owner/superadmin (who bypass the
     # permission system) and for any profile not yet assigned a custom role.
     role_id: uuid.UUID | None = None
+    # Human-readable name of the role_id above (e.g. "Manager"), resolved and
+    # populated only by GET /auth/me for the portal role chip — other
+    # ProfileRead responses leave it None. Null whenever role_id is.
+    role_name: str | None = None
     weekly_capacity: int = 40
     is_active: bool = True
     is_superadmin: bool = False
