@@ -729,6 +729,69 @@ class ClientMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class SupportThread(Base):
+    """One support conversation per company (tenant) between the company Owner
+    and the SpeedNum platform super-admin. Unlike ClientMessage this crosses the
+    tenant boundary — the super-admin reads every firm's thread from the
+    platform side — and is a real back-and-forth. See routers/support.py and
+    db/migrations/0023_support_messages.sql."""
+
+    __tablename__ = "support_threads"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    # Bumped on every message so the platform inbox can sort by recent activity.
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SupportMessage(Base):
+    __tablename__ = "support_messages"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    thread_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("support_threads.id", ondelete="CASCADE"), nullable=False
+    )
+    # Denormalized copy of the thread's tenant (see migration) so tenant-scoped
+    # reads and the unread index never have to join through support_threads.
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    sender_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL")
+    )
+    sender_name: Mapped[str] = mapped_column(Text, nullable=False)
+    # True = the platform super-admin ("firm owner" side); False = the company.
+    from_platform: Mapped[bool] = mapped_column(Boolean, default=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    # Set when the opposite side reads it (null = unread by the recipient).
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    attachments: Mapped[list["SupportAttachment"]] = relationship(
+        lazy="selectin", cascade="all, delete-orphan"
+    )
+
+
+class SupportAttachment(Base):
+    __tablename__ = "support_attachments"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("support_messages.id", ondelete="CASCADE"), nullable=False
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    storage_path: Mapped[str] = mapped_column(Text, nullable=False)
+    mime_type: Mapped[str | None] = mapped_column(Text)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Notification(Base):
     __tablename__ = "notifications"
 

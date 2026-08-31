@@ -1438,6 +1438,73 @@ class ClientMessageCounts(BaseModel):
     unread: int = 0
 
 
+# --- Support: company-owner ↔ platform threaded messaging -----------------------
+class SupportAttachmentInput(BaseModel):
+    """One file to hang off a support message. `storage_path` must have come
+    from POST .../support/attachments/upload-url — the router refuses any path
+    outside the caller's own minted prefix."""
+
+    name: str = Field(min_length=1, max_length=260)
+    storage_path: str = Field(min_length=1, max_length=500)
+    mime_type: str | None = Field(default=None, max_length=200)
+    size_bytes: int | None = Field(default=None, ge=0)
+
+
+class SupportAttachmentRead(ORMModel):
+    id: uuid.UUID
+    name: str
+    mime_type: str | None = None
+    size_bytes: int | None = None
+    created_at: datetime | None = None
+
+
+class SupportMessageCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=5000)
+    attachments: list[SupportAttachmentInput] = Field(default_factory=list, max_length=10)
+
+
+class SupportMessageRead(ORMModel):
+    id: uuid.UUID
+    from_platform: bool
+    sender_name: str
+    body: str
+    read_at: datetime | None = None
+    created_at: datetime | None = None
+    attachments: list[SupportAttachmentRead] = Field(default_factory=list)
+
+
+class SupportThreadRead(BaseModel):
+    """Firm-side view: this company's own thread and every message in it."""
+
+    thread_id: uuid.UUID
+    messages: list[SupportMessageRead] = Field(default_factory=list)
+
+
+class SupportThreadSummary(BaseModel):
+    """One row in the platform super-admin's inbox — a company and the state of
+    its support conversation."""
+
+    tenant_id: uuid.UUID
+    tenant_name: str
+    last_message_at: datetime | None = None
+    last_message_preview: str | None = None
+    last_from_platform: bool | None = None
+    unread: int = 0
+    total: int = 0
+
+
+class SupportThreadDetail(BaseModel):
+    """Platform-side view of one company's thread."""
+
+    tenant_id: uuid.UUID
+    tenant_name: str
+    messages: list[SupportMessageRead] = Field(default_factory=list)
+
+
+class SupportUnreadCount(BaseModel):
+    unread: int = 0
+
+
 class ClientExpenseTotals(BaseModel):
     total: float = 0
     approved: float = 0
