@@ -97,7 +97,7 @@ export function PlatformOverviewClient() {
   return (
     <>
       <DashboardHeader
-        title="Platform overview"
+        title="Platform dashboard"
         subtitle="Every company running on SpeedNum — staff, clients, billing and recent activity."
         actions={<ButtonLink href="/admin">Open Admin console</ButtonLink>}
       />

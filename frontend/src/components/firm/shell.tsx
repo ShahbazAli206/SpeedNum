@@ -6,7 +6,6 @@ import {
   LogOut,
   Menu as MenuIcon,
   PanelLeftClose,
-  Plus,
   Search,
   Settings,
   ShieldOff,
@@ -181,6 +180,10 @@ function FirmShellInner({ children }: { children: ReactNode }) {
         ...group,
         items: group.items.filter((item) => {
           if (isProviderOnly) {
+            // The one "Dashboard" (Practice, /overview) stays visible even for
+            // a provider-only account — page.tsx renders the platform-wide
+            // overview there. The rest of the firm groups still fall away below.
+            if (item.href === "/overview") return true;
             if (isPlatformTenant && (item.href === "/settings" || item.href === "/notifications")) return true;
             return Boolean(item.superadminOnly) && !item.hiddenForProviderOnly;
           }
@@ -260,36 +263,6 @@ function FirmShellInner({ children }: { children: ReactNode }) {
           </Badge>
         </div>
       ) : null}
-
-      {/* A tenant-less superadmin has no client book of their own — "Add
-          client" would create a record nobody's firm owns. Their equivalent
-          quick action is provisioning a new firm (tenant), which is what
-          /admin's "New tenant" flow already does. Which of the two this
-          account gets depends on `isProviderOnly`, which isn't known until
-          the session loads — a skeleton stands in rather than committing to
-          either label and relabeling underneath the pointer. */}
-      <div className={cn("border-b border-line", collapsed ? "px-3 py-3" : "px-3 py-3")}>
-        {session.isLoading ? (
-          <Skeleton className={collapsed ? "mx-auto size-9" : "h-[42px] w-full"} />
-        ) : collapsed ? (
-          <Link
-            href={isProviderOnly ? "/admin?new=1" : "/clients/new"}
-            className="brand-gradient mx-auto grid size-9 place-items-center rounded-lg text-white shadow-sm transition hover:brightness-110"
-            aria-label={isProviderOnly ? "Add owner" : "Add client"}
-            title={isProviderOnly ? "Add owner" : "Add client"}
-          >
-            <Plus className="size-4.5" />
-          </Link>
-        ) : (
-          <Link
-            href={isProviderOnly ? "/admin?new=1" : "/clients/new"}
-            className="brand-gradient flex items-center justify-center gap-2 rounded-lg py-2.5 text-[13.5px] font-semibold text-white shadow-sm transition hover:brightness-110"
-          >
-            <Plus className="size-4" />
-            {isProviderOnly ? "Add owner" : "Add client"}
-          </Link>
-        )}
-      </div>
 
       <nav className="scroll-thin flex-1 overflow-y-auto px-3 py-4" aria-label="Practice">
         {session.isLoading ? (

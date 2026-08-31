@@ -20,7 +20,7 @@ import type { Dashboard, Letter, Me, Task } from "@/lib/types";
 import { PlatformOverviewClient } from "./platform-overview";
 import { RevenueTrendChart } from "./revenue-chart";
 
-export const metadata: Metadata = { title: "Overview" };
+export const metadata: Metadata = { title: "Dashboard" };
 
 export default async function FirmOverviewPage() {
   // A provider-only login (no company of their own, or their one tenant is
@@ -103,7 +103,7 @@ export default async function FirmOverviewPage() {
   return (
     <>
       <DashboardHeader
-        title={`${dashboard.firm_name} — practice overview`}
+        title={`${dashboard.firm_name} — dashboard`}
         subtitle={`${dashboard.clients_active} active clients · ${formatMoney(dashboard.revenue_under_contract)} recurring revenue under contract`}
       />
 

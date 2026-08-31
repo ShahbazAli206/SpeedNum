@@ -110,29 +110,17 @@ export const FOOTER_RESOURCES: NavLink[] = [
  */
 export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
   {
-    // Provider-only: a tenant-less superadmin (isProviderOnly in
-    // components/firm/shell.tsx) sees just this, above the Administration
-    // console below. It points at /overview, whose page.tsx renders the
-    // cross-tenant PlatformOverviewClient for exactly this account — every
-    // company, its billing and recent activity. An ordinary firm login's
-    // /overview is that firm's own practice dashboard, labelled "Overview" in
-    // the Practice group; `providerOnly` keeps the two out of each other's nav.
-    group: "Platform",
-    items: [
-      {
-        label: "Dashboard",
-        href: "/overview",
-        icon: "layout-dashboard",
-        description: "Platform-wide overview — companies, billing and activity",
-        providerOnly: true,
-      },
-    ],
-  },
-  {
     group: "Practice",
     items: [
       {
-        label: "Overview",
+        // The single dashboard entry for the whole firm side. For ordinary
+        // firm staff /overview is their own practice dashboard; for a
+        // provider-only superadmin (isProviderOnly in components/firm/shell.tsx)
+        // the same route's page.tsx swaps in the cross-tenant
+        // PlatformOverviewClient. The shell's provider-only filter keeps this
+        // one Practice item visible even though the rest of the group is hidden
+        // for that account.
+        label: "Dashboard",
         href: "/overview",
         icon: "layout-dashboard",
         description: "Firm health, needs-attention and workload",
@@ -349,13 +337,6 @@ export interface DashboardNavItem {
    * superadminOnly — for a page that needs one specific tenant already
    * selected/impersonated to be useful at all. */
   hiddenForProviderOnly?: boolean;
-  /** The complement of hiddenForProviderOnly: shown ONLY in the tenant-less
-   * superadmin's provider-only nav (components/firm/shell.tsx's isProviderOnly),
-   * never an ordinary firm login nor a superadmin impersonating a tenant. For a
-   * page that only makes sense there — the cross-tenant platform dashboard at
-   * /overview, whose own page.tsx swaps in PlatformOverviewClient for exactly
-   * this account. */
-  providerOnly?: boolean;
 }
 
 export const DASHBOARD_NAV: { group: string; items: DashboardNavItem[] }[] = [
