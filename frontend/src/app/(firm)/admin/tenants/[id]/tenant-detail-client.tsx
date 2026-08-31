@@ -6,6 +6,7 @@ import {
   Building2,
   CalendarDays,
   Globe,
+  LogIn,
   Mail,
   Pause,
   Pencil,
@@ -26,6 +27,7 @@ import {
   type TenantDetail,
 } from "@/lib/admin";
 import { ApiError } from "@/lib/api";
+import { startImpersonation } from "@/lib/auth-client";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { useApi } from "@/lib/hooks";
 
@@ -68,6 +70,21 @@ export function TenantDetailClient({ tenantId }: { tenantId: string }) {
   }
 
   const t = tenant.data;
+
+  const impersonate = async () => {
+    setError(null);
+    setBusy("impersonate");
+    try {
+      await startImpersonation(t.id);
+      // Full navigation, not router.push — see admin-client.tsx: the identity
+      // changed, so the proxy and shell must re-hydrate as the firm.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+      window.location.assign("/overview");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not open that firm.");
+      setBusy(null);
+    }
+  };
 
   const toggleSuspend = async () => {
     setError(null);
@@ -131,9 +148,9 @@ export function TenantDetailClient({ tenantId }: { tenantId: string }) {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {/* Impersonation removed: a platform superadmin never opens a
-                firm-owner surface, by policy (see components/firm/shell.tsx's
-                isProviderOnly). */}
+            <Button icon={<LogIn className="size-4" />} onClick={impersonate} loading={busy === "impersonate"}>
+              Open admin panel
+            </Button>
             <Button variant="secondary" icon={<Pencil className="size-4" />} onClick={() => setEditing(true)}>
               Edit
             </Button>

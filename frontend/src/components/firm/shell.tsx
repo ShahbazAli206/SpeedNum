@@ -31,7 +31,7 @@ import { Badge, ButtonLink, EmptyState, Menu, Skeleton, type Tone } from "@/comp
 import { cn } from "@/lib/cn";
 import { getFirmOverview } from "@/lib/firm-demo";
 import { SessionProvider, useSession } from "@/lib/session";
-import { FIRM_NAV } from "@/lib/site";
+import { FIRM_NAV, FIRM_NAV_FLAT } from "@/lib/site";
 
 import { FirmBrandingProvider, useBranding } from "./branding";
 
@@ -116,6 +116,7 @@ function FirmShellInner({ children }: { children: ReactNode }) {
   // Demo fixtures stand in only for the badges the API hasn't been asked for
   // yet (overdue deadlines); notifications and reminders come from the session.
   const overview = useMemo(() => getFirmOverview(), []);
+  const current = FIRM_NAV_FLAT.find((item) => pathname.startsWith(item.href));
 
   // Admin console / Reach / Platform settings / Backup & Recovery are
   // enforced server-side to the platform superadmin role (SuperadminDep) —
@@ -140,21 +141,16 @@ function FirmShellInner({ children }: { children: ReactNode }) {
   // our own platform workspace" checkbox (Tenant.settings.is_platform — see
   // backend/app/routers/admin.py). Distinct from having no tenant at all.
   const isPlatformTenant = Boolean(session.me?.tenant?.settings?.is_platform);
-  // A platform superadmin is a platform operator, full stop: their login shows
-  // ONLY the superadminOnly console pages and NEVER a firm-owner surface —
-  // under any condition. Not when their account is attached to a real customer
-  // firm, and not while impersonating one either: firm-owner pages are off the
-  // table for a superadmin, period. The impersonation entry points have been
-  // removed from the Admin console to match (see admin-client.tsx /
-  // tenant-detail-client.tsx) so this is never a dead-end.
-  //
-  // This deliberately does not key off the superadmin's own tenant (null or
-  // is_platform) or off impersonation state. An earlier version keyed off the
-  // is_platform flag and leaked the entire firm nav onto a superadmin whose
-  // workspace simply hadn't been flagged — a config-dependent gap that read as
-  // a role-separation breach. Being unconditional on `isSuperadmin` removes any
-  // such gap: there is no state a superadmin can get into where a firm page shows.
-  const isProviderOnly = isSuperadmin && session.me !== null;
+  // A superadmin with no firm of their own, OR whose one firm *is* that
+  // platform workspace, has nothing real behind Clients/Services/Task
+  // Master/etc. — those pages would only ever show empty state or stale
+  // demo fixtures. Restrict the nav to the superadminOnly items (plus
+  // Settings/Notifications when there's an actual platform tenant backing
+  // them — see PROVIDER_ALLOWED_ROUTES below) instead of every firm-facing
+  // one. A superadmin who owns a *real* customer firm is unaffected, since
+  // that tenant carries neither condition.
+  const isProviderOnly =
+    isSuperadmin && session.me !== null && (session.me.tenant === null || isPlatformTenant);
   // Hiding the nav link (above) doesn't stop a direct URL visit — a
   // bookmark, the "Your Firm" breadcrumb, browser history — from still
   // reaching a firm-only page's real component, which then either 403s or
@@ -185,15 +181,9 @@ function FirmShellInner({ children }: { children: ReactNode }) {
         ...group,
         items: group.items.filter((item) => {
           if (isProviderOnly) {
-            if (item.providerOnly) return true;
             if (isPlatformTenant && (item.href === "/settings" || item.href === "/notifications")) return true;
             return Boolean(item.superadminOnly) && !item.hiddenForProviderOnly;
           }
-          // providerOnly items belong to the tenant-less superadmin nav alone —
-          // never an ordinary firm login, nor a superadmin impersonating a
-          // tenant (whose /overview is that firm's own dashboard, already the
-          // "Overview" item).
-          if (item.providerOnly) return false;
           if (item.superadminOnly && !isSuperadmin) return false;
           if (item.hiddenFromAdmin && isPlainAdmin) return false;
           if (item.ownerOnly && !isOwner) return false;
@@ -206,11 +196,6 @@ function FirmShellInner({ children }: { children: ReactNode }) {
     () => visibleNav.flatMap((group) => group.items.map((item) => ({ ...item, group: group.group }))),
     [visibleNav],
   );
-  // Breadcrumb label reads from the nav this account can actually see, not the
-  // full FIRM_NAV: /overview lives there twice now (a firm's "Overview" and the
-  // provider-only "Dashboard"), and the visible set already resolves to the one
-  // for this login.
-  const current = visibleNavFlat.find((item) => pathname.startsWith(item.href));
 
   const badgeFor = (href: string): number => {
     switch (href) {
