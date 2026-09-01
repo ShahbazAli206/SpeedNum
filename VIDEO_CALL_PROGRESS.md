@@ -24,7 +24,9 @@ All commits for this feature use the `video-call:` message prefix so they're eas
 **Phase 2 (database models/migrations) — DONE**, not yet applied to any real database.
 **Phase 3 (call authorization + REST APIs) — DONE**, not yet run/tested against a live server.
 **Phase 4 (LiveKit token generation) — DONE**, not yet run against a live LiveKit server.
-Next up: **Phase 5 (basic 1:1 audio/video frontend)**.
+**Phases 5–9 (frontend LiveKit integration + in-call UI) — DONE**, typechecked clean against
+real `livekit-client` types; not yet run in a browser against a live LiveKit server.
+Next up: **Phase 10 (group calling + participant invitations UI + call provider/ringing)**.
 
 ---
 
@@ -338,17 +340,60 @@ Verified the exact `livekit-api` Python token API against the SDK source before 
 LiveKit to validate against (a signed JWT is only meaningful once LiveKit accepts it). Wiring
 looks right by inspection; real validation is deploy-time work.
 
-### Phase 5 — Basic 1:1 audio/video — NOT STARTED
+### Phases 5–9 — Frontend LiveKit integration + in-call UI — **DONE (one commit)**
 
-### Phase 5 — Basic 1:1 audio/video — NOT STARTED
+These five spec phases are all facets of the same LiveKit client integration (basic AV, then
+simulcast/adaptive/dynacast, quality selector, poor-network handling, device controls + screen
+share), so they were built and committed together rather than split artificially. Verified the
+current `livekit-client` API (v2.22.1) against the SDK README/source before writing, and
+**installed `livekit-client` into the frontend to run a real `tsc --noEmit`** — every new file
+below typechecks clean (the only `tsc` errors in the repo are the pre-existing Next 16
+`PageProps`/`LayoutProps` ones that only resolve after `next build` generates `.next/types`,
+present on `main` before this work and unrelated to it).
 
-### Phase 6 — Simulcast + Adaptive Stream + Dynacast — NOT STARTED
+**Decision — core SDK, not `@livekit/components-react`:** used `livekit-client` (the core Room
+SDK) directly instead of the high-level React components package. The spec's quality/adaptation
+requirements (§3–§8) need fine control — capture-resolution caps, per-track quality, connection-
+quality events, dynacast, audio-only fallback — that the prebuilt components abstract away, and
+the core API is far more stable across versions. Cost: ~one custom hook (`use-call.ts`) instead
+of a `<LiveKitRoom>` wrapper. Worth it.
 
-### Phase 7 — Quality selector + connection indicator — NOT STARTED
+**Files added:**
+- `frontend/package.json` — `livekit-client ^2.22.1`
+- `frontend/src/lib/calls-api.ts` — typed REST client for `routers/calls.py` (goes through the
+  existing `api()` wrapper, so auth/refresh/error-handling are inherited)
+- `frontend/src/lib/livekit/room.ts` — Room construction encoding the quality policy:
+  `adaptiveStream`+`dynacast`+simulcast on (§5), capture-resolution caps per `QualityMode`,
+  `applyQualityCap` (restarts only the *local* camera track — receive side stays on
+  adaptiveStream, satisfying §4's "don't recreate camera tracks for receiving"), and the
+  `profile_<uuid>` identity ↔ profile-id helper (must match backend `livekit_tokens.py`).
+- `frontend/src/lib/livekit/use-call.ts` — the core hook: connect/disconnect, participant
+  views re-derived from the live Room on a version-bump (standard core-SDK-in-React pattern),
+  mic/camera/screen toggles, quality cap, `lowDataMode` audio-only fallback (§6), and
+  connection-state tracking incl. reconnecting (§8).
+- `frontend/src/lib/livekit/use-media-devices.ts` — mic/camera/speaker enumeration + switching
+  (§22), re-reads labels on `devicechange`.
+- `frontend/src/components/calls/` — `control-button`, `video-tile` (attaches tracks via
+  `track.attach()`/`detach()`), `video-grid` (spotlight-on-screenshare / 1:1-with-PiP /
+  responsive grid — §25), `connection-indicator` (LiveKit `ConnectionQuality` → the spec's
+  Excellent/Good/Fair/Poor/Reconnecting scale — §7), `quality-selector` (§4), `device-selector`
+  (§22), `screen-share-button` (with the mandatory confirm-before-share warning — §33.7),
+  `call-controls` (the full control bar — §22), `participant-list` (§25), `call-window` (fetches
+  a token, connects, renders grid + controls + panels; owns the media session for its mount).
 
-### Phase 8 — Poor-network handling + reconnection + audio-only fallback — NOT STARTED
+**Deliberately deferred (not forgotten):**
+- `call-window.tsx` takes an optional `renderChat` render-prop so it doesn't hard-depend on the
+  chat feature — the chat toggle shows a one-line placeholder until Phase 11 wires the real
+  `CallChat` in. This is why chat isn't in this commit.
+- The provider that *decides when to mount* `CallWindow` (incoming/outgoing ring, poll for
+  ringing calls) is Phase 10 — this commit is the in-call surface, not the "start/receive a
+  call" entry points, so nothing renders `CallWindow` yet.
 
-### Phase 9 — Device controls + screen sharing — NOT STARTED
+**Not done:** never run in a real browser against a live LiveKit server — types check, but
+camera/mic/screen/adaptation behaviour can only be verified with real media + a real SFU
+(deploy-time). Note: `livekit-client` was installed into `frontend/node_modules` for the
+typecheck; it's in `package.json` but node_modules is gitignored, so a fresh clone still needs
+`npm install`.
 
 ### Phase 10 — Group calling + participant invitations — NOT STARTED
 
@@ -393,11 +438,14 @@ looks right by inspection; real validation is deploy-time work.
 
 ## Next step
 
-Start Phase 4: `backend/app/services/livekit_tokens.py` (mint a short-lived LiveKit access
-token via `livekit-api`, opaque `profile_<uuid>` identity per spec §19) and
-`POST /calls/{call_id}/token` in `calls.py`, which should transition the caller's own
-`call_participants` row from `invited`/`ringing` to `joined` (see Phase 3's log above — this
-is the event Phase 3 deferred that transition to). Must verify: caller belongs to the call,
-call is still joinable, participant identity matches the authenticated profile, and must never
-return the LiveKit API secret itself (spec §18) — only the WebSocket URL, the token, and the
-room name.
+Start Phase 10: the "start a call" and "receive a call" entry points that mount `CallWindow`
+(the in-call surface from Phases 5–9 exists but nothing renders it yet).
+- A `CallProvider` (context) mounted in both shells (firm `(firm)/layout.tsx` and portal
+  `dashboard/layout.tsx`) that polls `listRingingCalls()` on a short interval and exposes
+  `startCall(inviteeIds, type)`.
+- `IncomingCall` (ring modal for a callee — accept/decline) and `OutgoingCall` (ring modal for
+  the caller — waiting/cancel), reusing the existing `Notification` feed for the persistent
+  case (Phase 0 decision).
+- `InviteParticipant` dialog (mid-call add — calls `inviteParticipant`; the backend re-checks
+  with `can_invite_to_call`).
+- A reusable "call" button to drop onto a client/staff/owner row that calls `startCall`.
