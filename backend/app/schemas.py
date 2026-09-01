@@ -2095,3 +2095,33 @@ class CallTokenRead(BaseModel):
     # can tell its own tracks apart from remote participants' without needing
     # any PII to make the match.
     identity: str
+
+
+class CallCandidateRead(BaseModel):
+    """One person the caller is allowed to call/invite (spec §21's "FastAPI
+    gets authorized candidates"). The server has already run can_call for
+    every row it returns — the frontend renders these directly, but the
+    create/invite endpoints re-check anyway (never trust the list round-trip)."""
+
+    profile_id: uuid.UUID
+    full_name: str | None = None
+    email: str
+    # A human label for the row: "Owner", "Staff", "Client", or "Platform".
+    kind: str
+
+
+class CallMessageCreate(BaseModel):
+    """A one-line in-call chat message to persist (spec §16). LiveKit's data
+    channel is the live-delivery path; this only records history."""
+
+    message: str = Field(min_length=1, max_length=2000)
+
+
+class CallMessageRead(ORMModel):
+    id: uuid.UUID
+    sender_profile_id: uuid.UUID | None = None
+    # Resolved by the router from the sender's profile, so the transcript reads
+    # with names even after a sender's account is later removed.
+    sender_name: str | None = None
+    message: str
+    created_at: datetime | None = None

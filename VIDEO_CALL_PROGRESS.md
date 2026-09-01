@@ -26,7 +26,9 @@ All commits for this feature use the `video-call:` message prefix so they're eas
 **Phase 4 (LiveKit token generation) — DONE**, not yet run against a live LiveKit server.
 **Phases 5–9 (frontend LiveKit integration + in-call UI) — DONE**, typechecked clean against
 real `livekit-client` types; not yet run in a browser against a live LiveKit server.
-Next up: **Phase 10 (group calling + participant invitations UI + call provider/ringing)**.
+**Phases 10–11 (call provider/ringing/launcher/invite + realtime chat & persistence) — DONE**,
+`tsc` + `eslint` clean; not yet run in a browser.
+Next up: **Phase 12 (E2EE + security hardening)**.
 
 ---
 
@@ -395,9 +397,57 @@ camera/mic/screen/adaptation behaviour can only be verified with real media + a 
 typecheck; it's in `package.json` but node_modules is gitignored, so a fresh clone still needs
 `npm install`.
 
-### Phase 10 — Group calling + participant invitations — NOT STARTED
+### Phases 10–11 — Call entry points, group calling, invitations, chat — **DONE (one commit)**
 
-### Phase 11 — Realtime call chat + persistence — NOT STARTED
+Built together because the `CallProvider` renders both the incoming-call ring and the
+`CallWindow`, and `CallWindow`'s chat panel needs the LiveKit room the provider's window owns —
+splitting them would have meant a broken intermediate commit. `tsc --noEmit` and `eslint` both
+clean on every new/edited file (only the repo-wide pre-existing `PageProps`/`LayoutProps` tsc
+errors remain).
+
+**Backend (small additions to the Phase 3/4 router):**
+- `GET /calls/candidates` — the authorized-candidate list (spec §21's "FastAPI gets authorized
+  candidates"), runs `can_call` for every row so the frontend renders it directly; create/invite
+  still re-check. Declared *before* `GET /{call_id}` on purpose (FastAPI route order — otherwise
+  "candidates" parses as a call_id).
+- `GET/POST /calls/{id}/chat` — persist/list in-call chat (spec §16/§33.2). Live delivery is the
+  LiveKit data channel (frontend); these are durable history only. `+ _call_chat_rate_limit`.
+- `schemas.py` — `CallCandidateRead`, `CallMessageCreate`, `CallMessageRead`.
+
+**Frontend:**
+- `lib/calls-api.ts` — `listCallCandidates`, `listChat`, `postChat` + types.
+- `components/calls/call-provider.tsx` — the orchestrator (mounted in both shells): polls
+  `listRingingCalls()` every 5s while idle, exposes `startCall()`, renders `IncomingCall` and
+  the active `CallWindow`. Ringing reuses the existing Notification feed (Phase 0 decision).
+- `components/calls/candidate-picker.tsx` — shared authorized-candidate list (single or
+  multi-select) used by both launcher and invite dialog.
+- `components/calls/call-launcher.tsx` — the "start a call" topbar button (multi-select →
+  doubles as the group-call launcher). Wired into **both** shells' topbars
+  (`firm/shell.tsx`, `dashboard/topbar.tsx`).
+- `components/calls/incoming-call.tsx` — the accept/decline ring.
+- `components/calls/invite-participant.tsx` — mid-call add (wired into `CallWindow`'s
+  participants panel; backend re-checks `can_invite_to_call`).
+- `components/calls/call-chat.tsx` — dual-path chat: LiveKit data channel for live delivery
+  (`publishData`/`DataReceived`, topic `"chat"`), backend for history/persistence, reconciled
+  by message id.
+- `call-window.tsx` — `renderChat` render-prop now passes the room through; participants panel
+  gained the invite button.
+- `firm/shell.tsx` + `dashboard/shell.tsx` — wrapped in `<CallProvider>` (inside
+  `SessionProvider`, since the provider needs the signed-in profile id).
+
+**Notable design choices (documented inline too):**
+- Reused the `react-hooks/refs` lint failure as a signal to do the *right* thing: `use-call.ts`
+  now holds the LiveKit Room in `useState`, not a ref (setting it on connect is what reveals the
+  call; a mirrored ref is kept only for effect-cleanup teardown). Two React-19 lint rules
+  (`exhaustive-deps` on the intentional `version` re-derivation trigger, `set-state-in-effect`
+  on the post-`await` device load) are suppressed with explicit comments explaining why they're
+  false positives here — not blanket-disabled.
+- "Outgoing ringing" is just the caller's own `CallWindow` showing themselves until a callee
+  joins — no separate OutgoingCall modal, since the window already conveys "waiting".
+
+**Not done:** never run in a real browser / against a live LiveKit + real DB. The ringing poll,
+data-channel chat, and candidate authorization all need a live multi-user session to actually
+validate. Types + lint pass; behaviour is unverified.
 
 ### Phase 12 — E2EE + security hardening — NOT STARTED
 
@@ -418,7 +468,8 @@ typecheck; it's in `package.json` but node_modules is gitignored, so a fresh clo
 
 - `db/migrations/0028_video_calls.sql` — `call_sessions`, `call_participants`,
   `call_invitations`, `call_events`, `call_messages` + 6 enum types. Not yet applied to any
-  database.
+  database. (No further migrations added in Phases 3–11 — the chat/candidate features reuse
+  `call_messages` and `profiles`.)
 
 ## Known limitations (running list, per spec §32/definition of done)
 
@@ -435,17 +486,24 @@ typecheck; it's in `package.json` but node_modules is gitignored, so a fresh clo
 - No LiveKit join/leave webhook integration — "joined"/"left" participant status is inferred
   from this API's own token-fetch/end calls, not confirmed by LiveKit itself. Acceptable for
   v1; a future phase could add `POST /calls/webhooks/livekit` for more accurate state.
+- No frontend has been run in a real browser against a live LiveKit server + real DB — every
+  frontend phase (5–11) is `tsc`+`eslint`-clean but behaviourally unverified.
+- E2EE is NOT implemented yet (Phase 12) — do not describe calls as end-to-end encrypted.
+  Media is DTLS-SRTP encrypted in transit by WebRTC regardless, but that's hop-by-hop through
+  the SFU, not E2EE.
 
 ## Next step
 
-Start Phase 10: the "start a call" and "receive a call" entry points that mount `CallWindow`
-(the in-call surface from Phases 5–9 exists but nothing renders it yet).
-- A `CallProvider` (context) mounted in both shells (firm `(firm)/layout.tsx` and portal
-  `dashboard/layout.tsx`) that polls `listRingingCalls()` on a short interval and exposes
-  `startCall(inviteeIds, type)`.
-- `IncomingCall` (ring modal for a callee — accept/decline) and `OutgoingCall` (ring modal for
-  the caller — waiting/cancel), reusing the existing `Notification` feed for the persistent
-  case (Phase 0 decision).
-- `InviteParticipant` dialog (mid-call add — calls `inviteParticipant`; the backend re-checks
-  with `can_invite_to_call`).
-- A reusable "call" button to drop onto a client/staff/owner row that calls `startCall`.
+Start Phase 12: E2EE + security hardening (spec §26, §33.10). LiveKit supports insertable-
+streams E2EE via an `ExternalE2EEKeyProvider` + a Web Worker on the client Room options. Key
+points to get right / decide:
+- Where the shared room key comes from (per-call, derived server-side and delivered in the
+  token response? a passphrase? — the spec insists E2EE not be *claimed* until key
+  generation/distribution/client behaviour are actually implemented and tested, §26/§33.10).
+- The E2EE Web Worker wiring in `lib/livekit/room.ts` (`Room` `e2ee` option).
+- Document the E2EE threat model honestly (§26) — and do NOT flip any "end-to-end encrypted"
+  UI copy on until it's real and tested.
+Given the spec's explicit caution, this may land as scaffolding + a clearly-labelled
+"not-yet-verified" flag rather than a claimed-complete feature. Then Phase 13: test scaffolding
+(pytest authorization matrix from §30) + the perf/testing docs (the real VPS run is the user's
+config step).

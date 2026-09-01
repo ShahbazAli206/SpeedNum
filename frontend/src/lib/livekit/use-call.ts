@@ -107,9 +107,21 @@ export interface UseCall {
 }
 
 export function useCall(): UseCall {
+  // The Room lives in state, not a ref: setting it on connect triggers the
+  // re-render that reveals the call, and reading it during render (to derive
+  // participant views) is then legitimate. A mirrored ref is kept ONLY for
+  // effect/callback teardown (reading a ref there is allowed), never read
+  // during render.
+  const [room, setRoom] = useState<Room | null>(null);
   const roomRef = useRef<Room | null>(null);
+  useEffect(() => {
+    roomRef.current = room;
+  }, [room]);
+
   // Bumped on every RoomEvent that changes what we render; used only as a
-  // useMemo dependency so the participant views re-derive from the live Room.
+  // useMemo dependency so the participant views re-derive from the live Room
+  // (participant/track changes mutate the Room in place — its reference is
+  // stable, so state alone wouldn't re-render).
   const [version, setVersion] = useState(0);
   const bump = useCallback(() => setVersion((v) => v + 1), []);
 
@@ -157,17 +169,18 @@ export function useCall(): UseCall {
     async (url: string, token: string) => {
       // A hook instance owns at most one room at a time; a stale one is torn
       // down first so a re-connect never leaks the previous media session.
+      // roomRef (not the `room` state) so this reads the latest without the
+      // callback needing `room` as a dependency.
       if (roomRef.current) {
         await roomRef.current.disconnect().catch(() => {});
-        roomRef.current = null;
       }
-      const room = createCallRoom(quality);
-      roomRef.current = room;
-      attach(room);
+      const next = createCallRoom(quality);
+      attach(next);
+      setRoom(next);
       setError(null);
       setConnectionState("connecting");
       try {
-        await room.connect(url, token, CONNECT_OPTIONS);
+        await next.connect(url, token, CONNECT_OPTIONS);
         setConnectionState("connected");
         bump();
       } catch (err) {
@@ -180,24 +193,21 @@ export function useCall(): UseCall {
   );
 
   const disconnect = useCallback(async () => {
-    const room = roomRef.current;
-    roomRef.current = null;
-    if (room) await room.disconnect().catch(() => {});
+    const current = roomRef.current;
+    setRoom(null);
+    if (current) await current.disconnect().catch(() => {});
     setConnectionState("disconnected");
-    bump();
-  }, [bump]);
+  }, []);
 
   // Tear the room down if the component unmounts mid-call — a media session
-  // must never outlive its UI.
+  // must never outlive its UI. Reads the ref (allowed in an effect cleanup).
   useEffect(() => {
     return () => {
-      const room = roomRef.current;
-      roomRef.current = null;
-      if (room) room.disconnect().catch(() => {});
+      roomRef.current?.disconnect().catch(() => {});
     };
   }, []);
 
-  const local = roomRef.current?.localParticipant as LocalParticipant | undefined;
+  const local = room?.localParticipant as LocalParticipant | undefined;
 
   const toggleMic = useCallback(async () => {
     if (!local) return;
@@ -223,41 +233,34 @@ export function useCall(): UseCall {
   const setQuality = useCallback(
     async (mode: QualityMode) => {
       setQualityState(mode);
-      const room = roomRef.current;
       if (room) await applyQualityCap(room, mode).catch(() => {});
     },
-    [],
+    [room],
   );
 
   const setLowDataMode = useCallback(
     async (on: boolean) => {
       setLowDataModeState(on);
-      const room = roomRef.current;
       if (!room) return;
       // Stop publishing camera and cap the received layers hard; audio is
       // untouched. Reversible: turning it off re-enables the camera.
-      if (on) {
-        await room.localParticipant.setCameraEnabled(false).catch(() => {});
-      } else {
-        await room.localParticipant.setCameraEnabled(true).catch(() => {});
-      }
+      await room.localParticipant.setCameraEnabled(!on).catch(() => {});
       bump();
     },
-    [bump],
+    [room, bump],
   );
 
   const { localView, remoteViews } = useMemo(() => {
-    const room = roomRef.current;
     if (!room) return { localView: null, remoteViews: [] as ParticipantView[] };
     const localV = room.localParticipant ? toView(room.localParticipant, true) : null;
     const remotes: ParticipantView[] = [];
     room.remoteParticipants.forEach((p: RemoteParticipant) => remotes.push(toView(p, false)));
     return { localView: localV, remoteViews: remotes };
-    // `version` bumps on every render-affecting RoomEvent (the ref itself is
-    // stable across renders — its *contents* are what change), so it is the
-    // correct trigger to re-derive the views. connectionState covers the
-    // connect/disconnect edges that don't emit one of those events.
-  }, [version, connectionState]);
+    // `version` isn't read in the body but is a deliberate re-derivation
+    // trigger: the Room reference is stable while its participant/track
+    // *contents* mutate, and `version` bumps on exactly those RoomEvents.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room, version]);
 
   const allViews = useMemo(
     () => (localView ? [localView, ...remoteViews] : remoteViews),
@@ -283,7 +286,7 @@ export function useCall(): UseCall {
     toggleScreenShare,
     setQuality,
     setLowDataMode,
-    room: roomRef.current,
+    room,
   };
 }
 

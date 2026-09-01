@@ -28,12 +28,15 @@ from sqlalchemy import func, select, update
 
 from ..config import settings
 from ..deps import CallableUserDep, SessionDep
-from ..models import CallEvent, CallInvitation, CallParticipant, CallSession, Profile
+from ..models import CallEvent, CallInvitation, CallMessage, CallParticipant, CallSession, Profile
 from ..permissions import can_call, can_invite_to_call
 from ..schemas import (
+    CallCandidateRead,
     CallCreate,
     CallInvitationRead,
     CallInviteCreate,
+    CallMessageCreate,
+    CallMessageRead,
     CallParticipantRead,
     CallSessionRead,
     CallTokenRead,
@@ -53,6 +56,9 @@ _OPEN_PARTICIPANT_STATUSES = ("invited", "ringing", "joined")
 
 _call_create_rate_limit = rate_limit_by_tenant("calls-create", limit=30, window_seconds=3600)
 _call_invite_rate_limit = rate_limit_by_tenant("calls-invite", limit=60, window_seconds=3600)
+# Chat persistence is chattier than call actions but still bounded (a message
+# flood is cheap to write but shouldn't be unbounded — spec §27).
+_call_chat_rate_limit = rate_limit_by_tenant("calls-chat", limit=300, window_seconds=3600)
 # Token requests are hit on every (re)connect and reconnect attempt, so this
 # window is much looser than create/invite — but still bounded per the spec's
 # "rate-limit token requests" requirement (§27).
@@ -264,6 +270,67 @@ async def list_calls(
         stmt = stmt.where(CallSession.status == status_filter)
     calls = (await session.scalars(stmt.order_by(CallSession.created_at.desc()).limit(limit))).all()
     return [await _read_call(session, call.id) for call in calls]
+
+
+def _candidate_kind(p: Profile) -> str:
+    if p.is_superadmin:
+        return "Platform"
+    if p.client_id is not None:
+        return "Client"
+    if p.role == "owner":
+        return "Owner"
+    return "Staff"
+
+
+# NOTE: declared before GET /{call_id} on purpose — FastAPI matches routes in
+# declaration order, so "candidates" must be claimed here or it would be
+# parsed as a call_id and 422 on the UUID conversion.
+@router.get("/candidates", response_model=list[CallCandidateRead])
+async def list_call_candidates(session: SessionDep, user: CallableUserDep) -> list[CallCandidateRead]:
+    """Everyone the caller is allowed to call or invite (spec §21). The server
+    runs can_call for every row, so the frontend can render these directly —
+    but create_call/invite re-check regardless, so a stale/tampered list can
+    never widen access."""
+    if user.profile.is_superadmin:
+        # Platform → any company Owner, across tenants.
+        pool = (
+            await session.scalars(
+                select(Profile).where(
+                    Profile.is_superadmin.is_(False),
+                    Profile.client_id.is_(None),
+                    Profile.role == "owner",
+                    Profile.is_active.is_(True),
+                )
+            )
+        ).all()
+    elif user.profile.tenant_id is not None:
+        # Everyone active in the caller's own tenant; can_call narrows it to the
+        # subset the matrix actually permits (bounded by tenant size).
+        pool = (
+            await session.scalars(
+                select(Profile).where(
+                    Profile.tenant_id == user.profile.tenant_id,
+                    Profile.is_active.is_(True),
+                    Profile.id != user.profile.id,
+                )
+            )
+        ).all()
+    else:
+        pool = []
+
+    candidates: list[CallCandidateRead] = []
+    for target in pool:
+        if await can_call(session, user, target):
+            candidates.append(
+                CallCandidateRead(
+                    profile_id=target.id,
+                    full_name=target.full_name,
+                    email=target.email,
+                    kind=_candidate_kind(target),
+                )
+            )
+    candidates.sort(key=lambda c: (c.full_name or c.email).lower())
+    return candidates
 
 
 @router.get("/{call_id}", response_model=CallSessionRead)
@@ -576,3 +643,54 @@ async def remove_participant(call_id: uuid.UUID, profile_id: uuid.UUID, session:
     )
     await session.flush()
     return Ok(message="Removed from the call")
+
+
+@router.get("/{call_id}/chat", response_model=list[CallMessageRead])
+async def list_chat(
+    call_id: uuid.UUID,
+    session: SessionDep,
+    user: CallableUserDep,
+    limit: int = Query(default=200, ge=1, le=500),
+) -> list[CallMessageRead]:
+    """Persisted in-call chat history (spec §16). Live delivery is LiveKit's
+    data channel (frontend), not a poll of this — this is the transcript a
+    participant loads on join or scrollback. Only a call participant may read
+    it. Soft-deleted rows (deleted_at set) are omitted."""
+    await _ensure_participant(session, call_id, user)
+    rows = (
+        await session.execute(
+            select(CallMessage, Profile.full_name, Profile.email)
+            .outerjoin(Profile, Profile.id == CallMessage.sender_profile_id)
+            .where(CallMessage.call_session_id == call_id, CallMessage.deleted_at.is_(None))
+            .order_by(CallMessage.created_at)
+            .limit(limit)
+        )
+    ).all()
+    return [
+        read(CallMessageRead, msg, sender_name=(name or email))
+        for msg, name, email in rows
+    ]
+
+
+@router.post(
+    "/{call_id}/chat",
+    response_model=CallMessageRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_call_chat_rate_limit)],
+)
+async def post_chat(
+    call_id: uuid.UUID, payload: CallMessageCreate, session: SessionDep, user: CallableUserDep
+) -> CallMessageRead:
+    """Persist one in-call chat message (spec §16, §33.2). The frontend also
+    sends it over LiveKit's data channel for immediate delivery; this call is
+    only about durable history, so it does not itself fan the message out."""
+    await _ensure_participant(session, call_id, user)
+    row = CallMessage(
+        call_session_id=call_id,
+        sender_profile_id=user.profile.id,
+        message=payload.message,
+    )
+    session.add(row)
+    await session.flush()
+    sender_name = user.profile.full_name or user.profile.email
+    return read(CallMessageRead, row, sender_name=sender_name)

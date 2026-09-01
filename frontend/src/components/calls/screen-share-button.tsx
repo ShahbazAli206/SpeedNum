@@ -3,8 +3,6 @@
 import { MonitorUp, MonitorX } from "lucide-react";
 import { useState } from "react";
 
-import { cn } from "@/lib/cn";
-
 import { ControlButton } from "./control-button";
 
 /**

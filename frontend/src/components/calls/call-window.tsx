@@ -4,13 +4,14 @@ import { X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { endCall as endCallApi, getCall, getCallToken, removeParticipant } from "@/lib/calls-api";
-import { profileIdFromIdentity } from "@/lib/livekit/room";
+import { profileIdFromIdentity, type Room } from "@/lib/livekit/room";
 import { useCall, type ParticipantView } from "@/lib/livekit/use-call";
 import { useMediaDevices } from "@/lib/livekit/use-media-devices";
 import { cn } from "@/lib/cn";
 
 import { CallControls } from "./call-controls";
 import { ConnectionIndicator } from "./connection-indicator";
+import { InviteParticipant } from "./invite-participant";
 import { ParticipantList } from "./participant-list";
 import { VideoGrid } from "./video-grid";
 
@@ -36,7 +37,7 @@ export function CallWindow({
   callId: string;
   myProfileId: string | null;
   onClose: () => void;
-  renderChat?: (args: { onUnreadChange: (n: number) => void; visible: boolean }) => ReactNode;
+  renderChat?: (args: { room: Room | null; onUnreadChange: (n: number) => void; visible: boolean }) => ReactNode;
 }) {
   const call = useCall();
   const devices = useMediaDevices(call.room);
@@ -133,11 +134,17 @@ export function CallWindow({
               <>
                 <h2 className="mb-1 text-sm font-semibold text-white/80">In this call</h2>
                 <ParticipantList views={call.allViews} canRemove={canModerate} onRemove={(v) => void remove(v)} />
+                <InviteParticipant
+                  callId={callId}
+                  alreadyInCallProfileIds={call.allViews
+                    .map((v) => profileIdFromIdentity(v.identity))
+                    .filter((id): id is string => !!id)}
+                />
               </>
             ) : null}
             {panel === "chat" ? (
               renderChat ? (
-                renderChat({ onUnreadChange: setChatUnread, visible: true })
+                renderChat({ room: call.room, onUnreadChange: setChatUnread, visible: true })
               ) : (
                 <p className="text-sm text-white/50">In-call chat is enabled once connected.</p>
               )
@@ -164,7 +171,7 @@ export function CallWindow({
       {/* Keep chat mounted (hidden) while another panel is open so its live
           data-channel subscription and unread counter keep running. */}
       {panel !== "chat" && renderChat ? (
-        <div className="hidden">{renderChat({ onUnreadChange: setChatUnread, visible: false })}</div>
+        <div className="hidden">{renderChat({ room: call.room, onUnreadChange: setChatUnread, visible: false })}</div>
       ) : null}
     </div>
   );

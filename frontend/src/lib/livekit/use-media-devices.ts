@@ -69,6 +69,10 @@ export function useMediaDevices(room: Room | null): UseMediaDevices {
   }, [room]);
 
   useEffect(() => {
+    // refresh() only setStates *after* awaiting enumerateDevices(), so this is
+    // an async external-system read (permission-gated device list), not a
+    // synchronous cascading render — the rule can't see past the await.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
     if (typeof navigator === "undefined" || !navigator.mediaDevices) return;
     const onChange = () => void refresh();

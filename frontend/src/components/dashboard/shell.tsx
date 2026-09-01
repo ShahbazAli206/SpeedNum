@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState, type ReactNode } from "react";
 
+import { CallProvider } from "@/components/calls/call-provider";
 import { SessionProvider } from "@/lib/session";
 
 import { CommandPalette } from "./command-palette";
@@ -25,7 +26,9 @@ const COLLAPSE_KEY = "speednum-sidebar-collapsed";
 export function DashboardShell({ children }: { children: ReactNode }) {
   return (
     <SessionProvider>
-      <DashboardShellInner>{children}</DashboardShellInner>
+      <CallProvider>
+        <DashboardShellInner>{children}</DashboardShellInner>
+      </CallProvider>
     </SessionProvider>
   );
 }

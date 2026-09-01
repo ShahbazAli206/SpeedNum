@@ -83,12 +83,24 @@ export interface CallToken {
   identity: string;
 }
 
+/** Someone the caller is allowed to call/invite — the server has already run
+ *  can_call for every row (spec §21). */
+export interface CallCandidate {
+  profile_id: string;
+  full_name: string | null;
+  email: string;
+  kind: string;
+}
+
 export interface CreateCallInput {
   invitee_profile_ids: string[];
   call_type?: CallType;
 }
 
 export const createCall = (input: CreateCallInput) => post<CallSession>("/calls", input);
+
+/** Everyone the caller may start a call with or invite mid-call. */
+export const listCallCandidates = () => get<CallCandidate[]>("/calls/candidates");
 
 export const listCalls = (status?: CallSessionStatus) =>
   get<CallSession[]>(status ? `/calls?status=${status}` : "/calls");
@@ -119,3 +131,17 @@ export const removeParticipant = (callId: string, profileId: string) =>
  *  Phase 0 decided ringing delivery reuses this poll + the Notification
  *  feed, since there is no pre-room push channel). */
 export const listRingingCalls = () => listCalls("ringing");
+
+export interface CallMessage {
+  id: string;
+  sender_profile_id: string | null;
+  sender_name: string | null;
+  message: string;
+  created_at: string | null;
+}
+
+/** In-call chat persistence (spec §16). Live delivery is LiveKit's data
+ *  channel — these two only load/record durable history. */
+export const listChat = (callId: string) => get<CallMessage[]>(`/calls/${callId}/chat`);
+export const postChat = (callId: string, message: string) =>
+  post<CallMessage>(`/calls/${callId}/chat`, { message });

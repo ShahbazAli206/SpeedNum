@@ -27,6 +27,8 @@ import { ExpiryAlertBell } from "@/components/firm/expiry-alert-bell";
 import { PlanExpiryBanner } from "@/components/firm/plan-expiry-banner";
 import { Icon } from "@/components/icon";
 import { Logo } from "@/components/logo";
+import { CallLauncher } from "@/components/calls/call-launcher";
+import { CallProvider } from "@/components/calls/call-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge, ButtonLink, EmptyState, Menu, Skeleton, type Tone } from "@/components/ui";
 import { get } from "@/lib/api";
@@ -63,7 +65,9 @@ export function FirmShell({ children }: { children: ReactNode }) {
   return (
     <SessionProvider>
       <FirmBrandingProvider>
-        <FirmShellInner>{children}</FirmShellInner>
+        <CallProvider>
+          <FirmShellInner>{children}</FirmShellInner>
+        </CallProvider>
       </FirmBrandingProvider>
     </SessionProvider>
   );
@@ -524,6 +528,9 @@ function FirmShellInner({ children }: { children: ReactNode }) {
             </button>
 
             <ThemeToggle className="hidden md:inline-flex" />
+
+            {/* Start a video call with an authorized contact (video-calling). */}
+            <CallLauncher />
 
             {/* Superadmin-only: the blinking "expiries" bell for companies whose
                 plan / server-domain access is due or overdue. */}

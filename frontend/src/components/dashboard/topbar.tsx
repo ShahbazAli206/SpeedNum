@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { CallLauncher } from "@/components/calls/call-launcher";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Menu as DropdownMenu } from "@/components/ui";
 import { get, post } from "@/lib/api";
@@ -165,6 +166,9 @@ export function Topbar({
         </button>
 
         <ThemeToggle className="hidden md:inline-flex" />
+
+        {/* Start a video call with an authorized contact (video-calling). */}
+        <CallLauncher />
 
         <div ref={bellRef} className="relative">
           <button
