@@ -5,6 +5,9 @@ const nextConfig: NextConfig = {
   // Vercel — standalone bundles a minimal server + only the node_modules actually used, so the
   // runtime Docker image doesn't need the full node_modules tree.
   output: "standalone",
+  // Caddy in front of this (see deploy/Caddyfile.example) already compresses every response;
+  // leaving Next's own gzip on would just redo that work on every request for nothing.
+  compress: false,
 };
 
 export default nextConfig;

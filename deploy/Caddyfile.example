@@ -24,7 +24,14 @@ www.spidnums.com {
 		reverse_proxy speednum-frontend:3000
 	}
 
-	encode gzip
+	# Next.js content-hashes every filename under /_next/static/* (webpack build ID in the
+	# path) — the file at a given URL never changes, so a year-long immutable cache is safe.
+	# Everything else (pages, RSC payloads) is left at no special caching.
+	header /_next/static/* Cache-Control "public, max-age=31536000, immutable"
+
+	# zstd first (better ratio, less CPU than gzip), gzip as fallback for clients that don't
+	# support it. next.config.ts turns off Next's own gzip so this is the only compression pass.
+	encode zstd gzip
 
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
