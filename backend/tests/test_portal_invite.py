@@ -31,14 +31,14 @@ def test_portal_welcome_html_includes_credentials_and_magic_link():
         client_name="Maple Leaf Consulting",
         email="alison@mapleleaf.ca",
         temp_password="hP2CyMDPzvJasSwH",
-        login_url="https://app.speednum.com/login",
-        magic_url="https://app.speednum.com/portal-login?token_hash=abc123&email=alison%40mapleleaf.ca",
+        login_url="https://app.spidnums.com/login",
+        magic_url="https://app.spidnums.com/portal-login?token_hash=abc123&email=alison%40mapleleaf.ca",
     )
     assert "Harrison CPA" in html
     assert "Maple Leaf Consulting" in html
     assert "alison@mapleleaf.ca" in html
     assert "hP2CyMDPzvJasSwH" in html
-    assert "https://app.speednum.com/portal-login?token_hash=abc123" in html
+    assert "https://app.spidnums.com/portal-login?token_hash=abc123" in html
     assert "Sign in to your dashboard" in html
 
 
@@ -48,9 +48,9 @@ def test_portal_welcome_html_falls_back_to_login_url_without_a_magic_link():
         client_name="Maple Leaf Consulting",
         email="alison@mapleleaf.ca",
         temp_password="hP2CyMDPzvJasSwH",
-        login_url="https://app.speednum.com/login",
+        login_url="https://app.spidnums.com/login",
         magic_url=None,
     )
     # No magic link: the CTA button itself must point at the plain login page.
-    assert 'href="https://app.speednum.com/login"' in html
+    assert 'href="https://app.spidnums.com/login"' in html
     assert "Sign in to your dashboard" in html

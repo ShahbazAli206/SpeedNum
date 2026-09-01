@@ -1,5 +1,5 @@
 -- =============================================================================
--- SpeedNum — client-portal messages
+-- SpidNums — client-portal messages
 -- Target: Supabase Postgres (>= 15)
 -- Run order: ... -> 0015_desktop_releases.sql -> 0016_client_messages.sql
 --

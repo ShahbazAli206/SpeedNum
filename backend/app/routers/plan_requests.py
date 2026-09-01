@@ -238,7 +238,7 @@ def _to_company_invoice_read(row: PlatformInvoice, today: date) -> CompanyInvoic
 
 @router.get("/invoices", response_model=list[CompanyInvoiceRead])
 async def list_company_invoices(session: SessionDep, user: TenantUserDep) -> list[CompanyInvoiceRead]:
-    """Invoices SpeedNum has sent this firm — the read-only counterpart of
+    """Invoices SpidNums has sent this firm — the read-only counterpart of
     platform_invoices.py's superadmin-side router. "draft" invoices are
     invisible here, same as firm_invoices.py's own client-facing view."""
     stmt = (

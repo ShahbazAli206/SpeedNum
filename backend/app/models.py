@@ -742,10 +742,34 @@ class ClientMessage(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    attachments: Mapped[list["ClientMessageAttachment"]] = relationship(
+        lazy="selectin", cascade="all, delete-orphan"
+    )
+
+
+class ClientMessageAttachment(Base):
+    __tablename__ = "client_message_attachments"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("client_messages.id", ondelete="CASCADE"), nullable=False
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    storage_path: Mapped[str] = mapped_column(Text, nullable=False)
+    mime_type: Mapped[str | None] = mapped_column(Text)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
 
 class SupportThread(Base):
     """One support conversation per company (tenant) between the company Owner
-    and the SpeedNum platform super-admin. Unlike ClientMessage this crosses the
+    and the SpidNums platform super-admin. Unlike ClientMessage this crosses the
     tenant boundary — the super-admin reads every firm's thread from the
     platform side — and is a real back-and-forth. See routers/support.py and
     db/migrations/0023_support_messages.sql."""

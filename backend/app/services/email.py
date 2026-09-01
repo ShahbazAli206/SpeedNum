@@ -102,7 +102,7 @@ def sender_name(name: str | None, override: str | None = None) -> str:
 
 def _sender(from_name: str | None) -> str:
     """The From header. `from_name` lets a message go out as the firm's own name
-    over the platform's address — "Harrison CPA <no-reply@speednum.app>" — which
+    over the platform's address — "Harrison CPA <no-reply@spidnums.app>" — which
     reads far better to a client than the product's name for a firm they hired."""
     if not from_name:
         return settings.email_from
@@ -811,7 +811,7 @@ def verify_email_html(*, url: str, brand_color: str = "#1d4ed8") -> str:
   <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:14px;
               border:1px solid #e2e8f0;padding:28px;color:#0f172a;line-height:1.6">
     <h2 style="margin:0 0 12px;font-size:20px">Confirm your email address</h2>
-    <p style="margin:0 0 20px">Click below to verify your SpeedNum account. This link expires in 24 hours.</p>
+    <p style="margin:0 0 20px">Click below to verify your SpidNums account. This link expires in 24 hours.</p>
     <a href="{url}" style="display:inline-block;background:{brand_color};color:#fff;
        text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600">Verify email</a>
     <p style="margin:20px 0 0;font-size:13px;color:#64748b">

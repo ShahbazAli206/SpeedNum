@@ -1,5 +1,5 @@
 -- =============================================================================
--- SpeedNum — engagement letter rich terms + firm-side signature
+-- SpidNums — engagement letter rich terms + firm-side signature
 -- Target: Supabase Postgres (>= 15)
 -- Run order: 0001_schema.sql -> 0002_rls.sql -> 0003_functions.sql ->
 --            0004_client_books.sql -> 0005_client_portal_invite.sql ->

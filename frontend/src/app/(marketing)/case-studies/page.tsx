@@ -10,7 +10,7 @@ import { CASE_STUDIES, CASE_STUDY_DISCLAIMER } from "@/lib/content/case-studies"
 export const metadata: Metadata = {
   title: "Illustrative firm scenarios",
   description:
-    "Twelve illustrative scenarios showing how Canadian firm archetypes run their work in SpeedNum. No client data, no quotes, no measured results — workflow only.",
+    "Twelve illustrative scenarios showing how Canadian firm archetypes run their work in SpidNums. No client data, no quotes, no measured results — workflow only.",
   alternates: { canonical: "/case-studies" },
 };
 
@@ -21,7 +21,7 @@ export default function CaseStudiesPage() {
         trail={[{ label: "Home", href: "/" }, { label: "Illustrative firm scenarios" }]}
         eyebrow="Scenarios"
         title="Illustrative firm scenarios"
-        lead={`${CASE_STUDIES.length} illustrative scenarios showing how Canadian firm archetypes run their work in SpeedNum. No client data, no quotes, no measured results — workflow only.`}
+        lead={`${CASE_STUDIES.length} illustrative scenarios showing how Canadian firm archetypes run their work in SpidNums. No client data, no quotes, no measured results — workflow only.`}
         aside={
           <HeroArt
             icon={<Users className="size-7" />}

@@ -368,7 +368,7 @@ export function ClientsClient({
               icon={<Download className="size-4" />}
               onClick={() => {
                 downloadTemplate(
-                  "speednum-client-import",
+                  "spidnums-client-import",
                   CLIENT_COLUMNS.map((column) => column.column),
                   CLIENT_EXAMPLE,
                 );
@@ -466,7 +466,7 @@ export function ClientsClient({
           ]}
           emptyTitle="No clients match"
           emptyDescription="Try clearing the search or the filters above."
-          exportName="speednum-clients"
+          exportName="spidnums-clients"
         />
       </section>
 

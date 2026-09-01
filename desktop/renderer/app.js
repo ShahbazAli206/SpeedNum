@@ -10,7 +10,7 @@ function appendLog(message) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-window.speednum.onSyncLog(appendLog);
+window.spidnums.onSyncLog(appendLog);
 
 function showDashboard() {
   loginView.classList.add("hidden");
@@ -32,7 +32,7 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
   const errorEl = document.getElementById("loginError");
   errorEl.textContent = "";
   try {
-    await window.speednum.login(baseUrl, email, password);
+    await window.spidnums.login(baseUrl, email, password);
     showDashboard();
   } catch (err) {
     errorEl.textContent = err.message || "Could not sign in.";
@@ -40,7 +40,7 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
 });
 
 logoutBtn.addEventListener("click", async () => {
-  await window.speednum.logout();
+  await window.spidnums.logout();
   showLogin();
 });
 
@@ -52,7 +52,7 @@ document.getElementById("syncNowBtn").addEventListener("click", async () => {
   }
   appendLog("Starting sync…");
   try {
-    const result = await window.speednum.runSyncNow(backupPassword);
+    const result = await window.spidnums.runSyncNow(backupPassword);
     appendLog(`Sync finished: ${result.message || `snapshot #${result.sequence}`}`);
   } catch (err) {
     appendLog(`Sync failed: ${err.message}`);
@@ -63,7 +63,7 @@ document.getElementById("syncNowBtn").addEventListener("click", async () => {
 document.getElementById("triggerBackupBtn").addEventListener("click", async () => {
   appendLog("Triggering a new server-side backup…");
   try {
-    const result = await window.speednum.triggerBackup();
+    const result = await window.spidnums.triggerBackup();
     appendLog(`Server backup: ${result.status} (#${result.sequence}, ${result.snapshot_kind})`);
   } catch (err) {
     appendLog(`Trigger failed: ${err.message}`);
@@ -73,8 +73,8 @@ document.getElementById("triggerBackupBtn").addEventListener("click", async () =
 
 async function refreshAll() {
   const [backups, state] = await Promise.all([
-    window.speednum.listBackups().catch(() => []),
-    window.speednum.getSyncState().catch(() => null),
+    window.spidnums.listBackups().catch(() => []),
+    window.spidnums.getSyncState().catch(() => null),
   ]);
   renderBackups(backups);
   renderSyncStatus(state);
@@ -136,7 +136,7 @@ function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-window.speednum.onUpdateStatus((status) => {
+window.spidnums.onUpdateStatus((status) => {
   // "up to date" / "checking" only ever need to say something when the user
   // actually asked (clicked the dashboard's deep link, or the in-app "Check
   // for updates" affordance) — the silent 4-hour background poll must stay
@@ -183,19 +183,19 @@ window.speednum.onUpdateStatus((status) => {
 });
 
 document.getElementById("updateNowBtn").addEventListener("click", () => {
-  window.speednum.downloadUpdate();
+  window.spidnums.downloadUpdate();
 });
 document.getElementById("updateLaterBtn").addEventListener("click", hideUpdateModal);
 document.getElementById("restartNowBtn").addEventListener("click", () => {
-  window.speednum.installUpdate();
+  window.spidnums.installUpdate();
 });
 document.getElementById("updateReadyLaterBtn").addEventListener("click", hideUpdateModal);
 
 (async function init() {
-  currentAppVersion = await window.speednum.getAppVersion();
+  currentAppVersion = await window.spidnums.getAppVersion();
   document.getElementById("appVersion").textContent = `v${currentAppVersion}`;
 
-  const restored = await window.speednum.restoreSession();
+  const restored = await window.spidnums.restoreSession();
   if (restored) {
     document.getElementById("baseUrl").value = restored.baseUrl;
     showDashboard();

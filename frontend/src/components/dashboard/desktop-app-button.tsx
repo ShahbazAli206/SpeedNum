@@ -10,7 +10,7 @@ import type { DesktopRelease } from "@/lib/types";
 import { useToast } from "../toast";
 import { Button, Modal } from "../ui";
 
-const DEEP_LINK = "speednum://check-update";
+const DEEP_LINK = "spidnums://check-update";
 // How long to wait for the browser to hand off to the OS/protocol handler
 // before concluding nobody answered. There is no reliable, standards-based
 // way for a web page to ask "is a given custom protocol registered?" — every
@@ -21,8 +21,8 @@ const DEEP_LINK = "speednum://check-update";
 const HANDOFF_TIMEOUT_MS = 1500;
 
 /**
- * Bottom-of-sidebar entry point for the SpeedNum Desktop disaster-recovery
- * app (see DESKTOP.md). Clicking it tries the speednum:// deep link; if the
+ * Bottom-of-sidebar entry point for the SpidNums Desktop disaster-recovery
+ * app (see DESKTOP.md). Clicking it tries the spidnums:// deep link; if the
  * page is still in the foreground after a short timeout, nothing answered
  * the link, so we assume the app isn't installed and offer the real
  * installer download instead. The desktop app itself remains the sole
@@ -43,7 +43,7 @@ export function DesktopAppButton({ collapsed }: { collapsed?: boolean }) {
       window.clearTimeout(timer);
       document.removeEventListener("visibilitychange", markHandledByApp);
       window.removeEventListener("blur", markHandledByApp);
-      toast.info("Opening SpeedNum Desktop…");
+      toast.info("Opening SpidNums Desktop…");
     };
 
     document.addEventListener("visibilitychange", markHandledByApp);
@@ -68,7 +68,7 @@ export function DesktopAppButton({ collapsed }: { collapsed?: boolean }) {
       <button
         type="button"
         onClick={handleClick}
-        title={collapsed ? "SpeedNum Desktop — Download App" : undefined}
+        title={collapsed ? "SpidNums Desktop — Download App" : undefined}
         className={cn(
           "flex items-center gap-2.5 rounded-lg border border-line bg-surface-2/60 px-2.5 py-2.5 text-left transition hover:bg-surface-2",
           collapsed && "justify-center px-0",
@@ -85,7 +85,7 @@ export function DesktopAppButton({ collapsed }: { collapsed?: boolean }) {
         </span>
         {!collapsed ? (
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] font-semibold text-ink">SpeedNum Desktop</span>
+            <span className="block truncate text-[13px] font-semibold text-ink">SpidNums Desktop</span>
             <span className="flex items-center gap-1 truncate text-[11.5px] text-muted">
               <Download className="size-3" />
               Download App
@@ -97,8 +97,8 @@ export function DesktopAppButton({ collapsed }: { collapsed?: boolean }) {
       <Modal
         open={notInstalledOpen}
         onClose={() => setNotInstalledOpen(false)}
-        title="SpeedNum Desktop isn't installed"
-        description="It looks like SpeedNum Desktop isn't set up on this computer yet."
+        title="SpidNums Desktop isn't installed"
+        description="It looks like SpidNums Desktop isn't set up on this computer yet."
         width="sm"
         footer={
           <>
@@ -113,14 +113,14 @@ export function DesktopAppButton({ collapsed }: { collapsed?: boolean }) {
                 setNotInstalledOpen(false);
               }}
             >
-              Download SpeedNum Desktop
+              Download SpidNums Desktop
             </Button>
           </>
         }
       >
         <p className="text-[13.5px] text-ink-soft">
           This downloads the official Windows installer{release.data ? ` (v${release.data.version})` : ""}.
-          Windows will ask you to run it after the download finishes — SpeedNum Desktop does not
+          Windows will ask you to run it after the download finishes — SpidNums Desktop does not
           install itself automatically.
         </p>
       </Modal>

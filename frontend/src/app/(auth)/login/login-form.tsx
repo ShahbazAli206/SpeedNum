@@ -99,7 +99,7 @@ export function LoginForm() {
       {/* This one form signs in both firm staff and client-portal accounts —
           resolveHome() below sorts out where each lands only after auth
           succeeds — so this copy must not claim either audience specifically. */}
-      <p className="mt-1.5 text-[14.5px] text-muted">Sign in to your SpeedNum account.</p>
+      <p className="mt-1.5 text-[14.5px] text-muted">Sign in to your SpidNums account.</p>
 
       {!AUTH_CONFIGURED ? (
         <div className="mt-5">

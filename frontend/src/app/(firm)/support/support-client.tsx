@@ -27,15 +27,15 @@ export function SupportClient({ thread, live }: { thread: SupportThread; live: b
     <>
       <DashboardHeader
         title="Support"
-        subtitle="Message the SpeedNum platform team — questions, issues, anything about your account"
+        subtitle="Message the SpidNums platform team — questions, issues, anything about your account"
       />
       <Conversation
         initialMessages={thread.messages}
         meIsPlatform={false}
         scope={{ kind: "firm" }}
-        otherName="SpeedNum Support"
+        otherName="SpidNums Support"
         emptyTitle="Start a conversation"
-        emptyDescription="Send the SpeedNum team a message about your account. Their replies show up right here."
+        emptyDescription="Send the SpidNums team a message about your account. Their replies show up right here."
         live={live}
         onSend={onSend}
       />

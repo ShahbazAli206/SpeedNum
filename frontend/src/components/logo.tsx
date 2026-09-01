@@ -5,7 +5,7 @@ import { SITE } from "@/lib/site";
 import { cn } from "@/lib/cn";
 
 /**
- * The SpeedNum mark: a rounded tile holding an ascending bar chart whose last
+ * The SpidNums mark: a rounded tile holding an ascending bar chart whose last
  * bar breaks out into an arrow — "numbers moving up, fast".
  *
  * `tone` picks the palette: `brand` for light backgrounds, `invert` for the
@@ -69,7 +69,7 @@ export function Logo({
   sublabel?: string;
   className?: string;
   /** The tenant's own uploaded logo (Settings → Branding). When set, this
-   * replaces the SpeedNum mark + wordmark everywhere `<Logo>` is used, so a
+   * replaces the SpidNums mark + wordmark everywhere `<Logo>` is used, so a
    * firm's chosen logo actually shows up in the chrome instead of only in
    * the settings-page preview. */
   logoUrl?: string | null;
@@ -97,8 +97,8 @@ export function Logo({
               )}
               style={{ fontSize: size * 0.53 }}
             >
-              Speed
-              <span className={tone === "invert" ? "text-brand-on-dark" : "text-brand"}>Num</span>
+              Spid
+              <span className={tone === "invert" ? "text-brand-on-dark" : "text-brand"}>Nums</span>
             </span>
           )}
           {sublabel ? (

@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ---------------------------------------------------------------------------
-   SpeedNum design tokens.
+   SpidNums design tokens.
 
    Light is the default. Dark follows the OS setting, and an explicit
    `data-theme` on <html> always wins so the header toggle can override it.
@@ -21,7 +21,7 @@
   --ink-soft: #3b4d70;
   --muted: #6b7c99;
 
-  /* Brand — SpeedNum green */
+  /* Brand — SpidNums green */
   --brand: #0a8f4e;
   --brand-strong: #077a42;
   --brand-soft: #e4f6ec;

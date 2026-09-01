@@ -119,7 +119,7 @@ export function BillsClient() {
           <div>
             <h2 className="text-[15px] font-semibold text-ink">All bills</h2>
             <p className="mt-0.5 text-[13px] text-muted">
-              Manual entries plus what you&apos;ve paid SpeedNum, merged into one ledger
+              Manual entries plus what you&apos;ve paid SpidNums, merged into one ledger
             </p>
           </div>
           {canManage ? (
@@ -177,7 +177,7 @@ export function BillsClient() {
                     {canManage ? (
                       <TD align="right">
                         {isSubscription ? (
-                          <span className="text-[11.5px] text-muted">SpeedNum</span>
+                          <span className="text-[11.5px] text-muted">SpidNums</span>
                         ) : (
                           <span className="inline-flex gap-1">
                             <button

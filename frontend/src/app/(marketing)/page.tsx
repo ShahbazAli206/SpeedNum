@@ -865,7 +865,7 @@ function Pricing() {
             Everything included
           </span>
           <div className="rounded-2xl border-2 border-brand bg-surface p-8 shadow-[var(--shadow-lift)]">
-            <h3 className="text-lg font-bold text-ink">SpeedNum — full platform</h3>
+            <h3 className="text-lg font-bold text-ink">SpidNums — full platform</h3>
             <p className="mt-1 text-[13.5px] text-muted">
               For accounting firms that want it all, from day one.
             </p>
@@ -903,7 +903,7 @@ function Pricing() {
           </div>
 
           <p className="mt-5 text-center text-[13.5px] text-muted">
-            Reselling SpeedNum to many firms under your own brand?{" "}
+            Reselling SpidNums to many firms under your own brand?{" "}
             <Link
               href="/request-demo"
               className="font-semibold text-brand hover:underline"

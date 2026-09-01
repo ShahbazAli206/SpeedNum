@@ -3,7 +3,7 @@
 /**
  * Client for the firm's own accounts-payable bills (backend/app/routers/
  * firm_bills.py, prefix /bills). Any signed-in staff can read, including the
- * read-only "subscription" rows merged in from what the firm paid SpeedNum;
+ * read-only "subscription" rows merged in from what the firm paid SpidNums;
  * writes are Owner/Admin-only server-side (CurrentUser.is_admin).
  */
 

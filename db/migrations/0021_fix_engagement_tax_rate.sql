@@ -1,5 +1,5 @@
 -- =============================================================================
--- SpeedNum — fix engagement letter tax rate storage and totals math
+-- SpidNums — fix engagement letter tax rate storage and totals math
 -- Target: Supabase Postgres (>= 15) / plain Postgres 16 (VPS)
 -- Run order: ... -> 0020_plan_change_requests.sql -> 0021_fix_engagement_tax_rate.sql
 --

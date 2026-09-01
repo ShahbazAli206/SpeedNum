@@ -400,4 +400,4 @@ export const CASE_STUDY_BY_SLUG = new Map(CASE_STUDIES.map((study) => [study.slu
 export const CASE_STUDY_SLUGS = CASE_STUDIES.map((study) => study.slug);
 
 export const CASE_STUDY_DISCLAIMER =
-  "Every scenario below is illustrative. SpeedNum does not publish customer results it has not measured, so these pages describe firm archetypes and the workflow that fits them — no client names, no quotes, no numbers we cannot stand behind.";
+  "Every scenario below is illustrative. SpidNums does not publish customer results it has not measured, so these pages describe firm archetypes and the workflow that fits them — no client names, no quotes, no numbers we cannot stand behind.";

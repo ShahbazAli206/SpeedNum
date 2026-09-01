@@ -58,7 +58,7 @@ def configure(monkeypatch):
     def _configure(**overrides):
         defaults = {
             "DATABASE_URL": "postgresql://ci:ci@localhost:5432/postgres",
-            "EMAIL_FROM": "SpeedNum <no-reply@speednum.app>",
+            "EMAIL_FROM": "SpidNums <no-reply@spidnums.app>",
         }
         defaults.update({key: str(value) for key, value in overrides.items()})
         replacement = Settings(_env_file=None, **{k: v for k, v in defaults.items()})
@@ -116,23 +116,23 @@ def test_port_picks_the_tls_mode_unless_overridden(configure, port, ssl_override
 
 # --- the sender ---------------------------------------------------------------
 def test_sender_address_is_extracted_from_a_display_name(configure):
-    settings = configure(EMAIL_FROM="SpeedNum <no-reply@speednum.app>")
-    assert settings.email_sender_address == "no-reply@speednum.app"
-    assert settings.email_sender_domain == "speednum.app"
+    settings = configure(EMAIL_FROM="SpidNums <no-reply@spidnums.app>")
+    assert settings.email_sender_address == "no-reply@spidnums.app"
+    assert settings.email_sender_domain == "spidnums.app"
 
 
 def test_bare_address_needs_no_angle_brackets(configure):
-    assert configure(EMAIL_FROM="no-reply@speednum.app").email_sender_address == "no-reply@speednum.app"
+    assert configure(EMAIL_FROM="no-reply@spidnums.app").email_sender_address == "no-reply@spidnums.app"
 
 
 def test_firm_name_becomes_the_display_name(configure):
-    configure(SMTP_HOST="smtp.test", EMAIL_FROM="SpeedNum <no-reply@speednum.app>")
-    assert email_service._sender("Harrison CPA") == "Harrison CPA <no-reply@speednum.app>"
+    configure(SMTP_HOST="smtp.test", EMAIL_FROM="SpidNums <no-reply@spidnums.app>")
+    assert email_service._sender("Harrison CPA") == "Harrison CPA <no-reply@spidnums.app>"
 
 
 def test_no_firm_name_leaves_the_configured_sender_alone(configure):
-    configure(EMAIL_FROM="SpeedNum <no-reply@speednum.app>")
-    assert email_service._sender(None) == "SpeedNum <no-reply@speednum.app>"
+    configure(EMAIL_FROM="SpidNums <no-reply@spidnums.app>")
+    assert email_service._sender(None) == "SpidNums <no-reply@spidnums.app>"
 
 
 def test_sender_name_prefers_the_firms_override():
@@ -188,7 +188,7 @@ def test_smtp_send_builds_a_multipart_message(configure, captured_smtp):
 
     assert result.ok and result.provider == "smtp"
     message = captured_smtp[0]
-    assert message["From"] == "Harrison CPA <no-reply@speednum.app>"
+    assert message["From"] == "Harrison CPA <no-reply@spidnums.app>"
     assert message["To"] == "jane@harrisoncpa.ca"
     assert message["Reply-To"] == "admin@harrisoncpa.ca"
     assert message.get_content_type() == "multipart/alternative"
@@ -275,7 +275,7 @@ def test_status_never_leaks_a_credential(configure):
 def test_status_flags_the_resend_sandbox_sender(configure):
     """The default EMAIL_FROM delivers only to the Resend account owner, so
     every client and staff credential email silently goes nowhere."""
-    configure(RESEND_API_KEY="re_test", EMAIL_FROM="SpeedNum <onboarding@resend.dev>")
+    configure(RESEND_API_KEY="re_test", EMAIL_FROM="SpidNums <onboarding@resend.dev>")
     warnings = " ".join(email_status()["warnings"])
     assert "resend.dev" in warnings
 

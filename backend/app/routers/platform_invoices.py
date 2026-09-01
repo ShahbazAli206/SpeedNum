@@ -329,9 +329,9 @@ async def send_invoice(
 
     delivered = await send_email(
         to=recipient,
-        subject=f"SpeedNum: invoice {invoice.number}",
+        subject=f"SpidNums: invoice {invoice.number}",
         html=invoice_email_html(
-            from_name="SpeedNum",
+            from_name="SpidNums",
             recipient_name=tenant.name,
             invoice_number=invoice.number,
             invoice_title=invoice.title,

@@ -7,7 +7,7 @@ import { ResetPasswordForm } from "./reset-password-form";
 
 export const metadata: Metadata = {
   title: "Reset password",
-  description: "Choose a new SpeedNum password.",
+  description: "Choose a new SpidNums password.",
   robots: { index: false, follow: false },
 };
 

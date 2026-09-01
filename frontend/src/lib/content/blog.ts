@@ -23,18 +23,18 @@ export const POSTS: BlogPost[] = [
   {
     slug: "engagement-letters-from-services-catalogue",
     category: "Product",
-    title: "From services catalogue to signed letter: engagement letters in SpeedNum",
+    title: "From services catalogue to signed letter: engagement letters in SpidNums",
     excerpt:
-      "A walkthrough of SpeedNum engagement letters: build a priced letter from your services, send a branded no-login link, and collect e-signatures on the record.",
+      "A walkthrough of SpidNums engagement letters: build a priced letter from your services, send a branded no-login link, and collect e-signatures on the record.",
     date: "March 2027",
     order: 1,
     readMinutes: 5,
-    author: { name: "The SpeedNum team", role: "Product" },
+    author: { name: "The SpidNums team", role: "Product" },
     sections: [
       {
         paragraphs: [
           "An engagement letter has one job: to say what the firm agreed to do, for how much, before the work starts. Everything else about it — the drafting, the chasing, the filing — is overhead the firm absorbs because the letter matters.",
-          "SpeedNum removes most of that overhead by treating the letter as a view over data the firm already has, rather than as a document someone writes from scratch each year.",
+          "SpidNums removes most of that overhead by treating the letter as a view over data the firm already has, rather than as a document someone writes from scratch each year.",
         ],
       },
       {
@@ -75,7 +75,7 @@ export const POSTS: BlogPost[] = [
     date: "March 2027",
     order: 2,
     readMinutes: 6,
-    author: { name: "The SpeedNum team", role: "Practice research" },
+    author: { name: "The SpidNums team", role: "Practice research" },
     sections: [
       {
         paragraphs: [
@@ -119,7 +119,7 @@ export const POSTS: BlogPost[] = [
     date: "February 2027",
     order: 3,
     readMinutes: 6,
-    author: { name: "The SpeedNum team", role: "Practice research" },
+    author: { name: "The SpidNums team", role: "Practice research" },
     sections: [
       {
         paragraphs: [
@@ -170,7 +170,7 @@ export const POSTS: BlogPost[] = [
     date: "February 2027",
     order: 4,
     readMinutes: 9,
-    author: { name: "The SpeedNum team", role: "Compliance" },
+    author: { name: "The SpidNums team", role: "Compliance" },
     sections: [
       {
         paragraphs: [
@@ -240,7 +240,7 @@ export const POSTS: BlogPost[] = [
     date: "February 2027",
     order: 5,
     readMinutes: 8,
-    author: { name: "The SpeedNum team", role: "Compliance" },
+    author: { name: "The SpidNums team", role: "Compliance" },
     sections: [
       {
         paragraphs: [
@@ -285,7 +285,7 @@ export const POSTS: BlogPost[] = [
     date: "February 2027",
     order: 6,
     readMinutes: 7,
-    author: { name: "The SpeedNum team", role: "Practice research" },
+    author: { name: "The SpidNums team", role: "Practice research" },
     sections: [
       {
         paragraphs: [
@@ -338,7 +338,7 @@ export const POSTS: BlogPost[] = [
     date: "January 2027",
     order: 7,
     readMinutes: 6,
-    author: { name: "The SpeedNum team", role: "Practice research" },
+    author: { name: "The SpidNums team", role: "Practice research" },
     sections: [
       {
         paragraphs: [
@@ -383,7 +383,7 @@ export const POSTS: BlogPost[] = [
     date: "January 2027",
     order: 8,
     readMinutes: 7,
-    author: { name: "The SpeedNum team", role: "Practice research" },
+    author: { name: "The SpidNums team", role: "Practice research" },
     sections: [
       {
         paragraphs: [
@@ -428,7 +428,7 @@ export const POSTS: BlogPost[] = [
     date: "December 2026",
     order: 9,
     readMinutes: 5,
-    author: { name: "The SpeedNum team", role: "Compliance" },
+    author: { name: "The SpidNums team", role: "Compliance" },
     sections: [
       {
         paragraphs: [

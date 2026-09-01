@@ -1,4 +1,4 @@
-"""SpeedNum API — FastAPI service designed to run as a Hugging Face Docker Space."""
+"""SpidNums API — FastAPI service designed to run as a Hugging Face Docker Space."""
 
 from __future__ import annotations
 
@@ -146,7 +146,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="SpeedNum API",
+    title="SpidNums API",
     version=__version__,
     description=(
         "Practice-management API for accounting firms: client CRM, workflows, "
@@ -253,7 +253,7 @@ async def root() -> str:
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SpeedNum API</title>
+    <title>SpidNums API</title>
     <style>
       body {{ font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
              background:#0f172a; color:#e2e8f0; display:grid; place-items:center;
@@ -268,15 +268,15 @@ async def root() -> str:
   </head>
   <body>
     <div class="card">
-      <h1>SpeedNum API <small style="color:#64748b">v{__version__}</small></h1>
+      <h1>SpidNums API <small style="color:#64748b">v{__version__}</small></h1>
       <p>Practice-management backend for accounting firms. This API serves the JSON API
-         consumed by the SpeedNum web app.</p>
+         consumed by the SpidNums web app.</p>
       <p>
         <a href="/docs">Interactive docs</a> &middot;
         <a href="/redoc">ReDoc</a> &middot;
         <a href="/health">Health</a>
       </p>
-      <p>All endpoints live under <code>{API_PREFIX}</code> and expect a SpeedNum
+      <p>All endpoints live under <code>{API_PREFIX}</code> and expect a SpidNums
          access token in the <code>Authorization: Bearer</code> header.</p>
     </div>
   </body>

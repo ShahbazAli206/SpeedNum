@@ -21,7 +21,7 @@ from .services.local_auth import SUSPENDED_FIRM_MESSAGE, firm_expiry_block
 
 log = logging.getLogger(__name__)
 
-bearer_scheme = HTTPBearer(auto_error=False, description="SpeedNum access token (self-hosted local auth by default; see security.py)")
+bearer_scheme = HTTPBearer(auto_error=False, description="SpidNums access token (self-hosted local auth by default; see security.py)")
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 

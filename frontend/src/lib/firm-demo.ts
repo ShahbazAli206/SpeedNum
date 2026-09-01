@@ -1039,7 +1039,7 @@ export function getPlatformUsers(): PlatformUser[] {
       return {
         id: `user-${client.id}`,
         full_name: contact?.full_name ?? client.business_name,
-        email: contact?.email ?? `${slug(client.business_name)}@portal.speednum.ca`,
+        email: contact?.email ?? `${slug(client.business_name)}@portal.spidnums.ca`,
         role: "client" as const,
         created_at: client.joined,
         last_sign_in: neverSignedIn ? null : offsetDate(TODAY, -(2 + ((index * 3) % 20))),
@@ -1099,8 +1099,8 @@ export function getRecentEmails(): RecentEmail[] {
       const contact = CONTACTS.find((c) => c.client_id === client.id && c.is_primary);
       return {
         id: `email-invite-${client.id}`,
-        subject: "Welcome to SpeedNum — your client portal is ready",
-        recipient: contact?.email ?? `${slug(client.business_name)}@portal.speednum.ca`,
+        subject: "Welcome to SpidNums — your client portal is ready",
+        recipient: contact?.email ?? `${slug(client.business_name)}@portal.spidnums.ca`,
         when: client.portal_invited_at as string,
         status: "sent" as const,
       };

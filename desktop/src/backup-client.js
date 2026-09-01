@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * Talks to the same SpeedNum FastAPI backend every other client does —
+ * Talks to the same SpidNums FastAPI backend every other client does —
  * plain HTTPS + the existing local-auth JWT/refresh-cookie pair, and the
  * six /admin/backups/* endpoints (superadmin-only). No direct Postgres or
  * MinIO admin credential ever reaches this process — see

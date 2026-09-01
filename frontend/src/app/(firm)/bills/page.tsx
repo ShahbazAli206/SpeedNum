@@ -11,7 +11,7 @@ export default function BillsPage() {
     <>
       <DashboardHeader
         title="Bills"
-        subtitle="What the firm spends running the practice, including your SpeedNum subscription"
+        subtitle="What the firm spends running the practice, including your SpidNums subscription"
       />
       <BillsClient />
     </>

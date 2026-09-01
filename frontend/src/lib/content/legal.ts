@@ -88,7 +88,7 @@ export const TERMS: LegalSection[] = [
     id: "fees",
     heading: "7. Fees, billing and trials",
     paragraphs: [
-      `Paid plans are billed in advance at the price shown at the time of purchase. Unless stated otherwise, fees are quoted in ${SITE.name === "SpeedNum" ? "US dollars" : "US dollars"} and exclude applicable taxes, which will be added where required.`,
+      `Paid plans are billed in advance at the price shown at the time of purchase. Unless stated otherwise, fees are quoted in ${SITE.name === "SpidNums" ? "US dollars" : "US dollars"} and exclude applicable taxes, which will be added where required.`,
       "Subscriptions renew automatically for successive terms unless cancelled before the renewal date. You may cancel at any time; cancellation takes effect at the end of the current term and you retain access until then.",
       "Free trials are provided as-is and may be modified or withdrawn. At the end of a trial, the account converts to a paid plan only if you have provided payment details and elected to continue.",
       "Except where required by law or expressly stated in these Terms, fees are non-refundable.",

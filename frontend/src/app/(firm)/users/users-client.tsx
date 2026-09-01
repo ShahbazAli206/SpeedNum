@@ -383,7 +383,7 @@ export function UsersClient({
     <>
       <DashboardHeader
         title="Users"
-        subtitle="Create and manage SpeedNum platform accounts."
+        subtitle="Create and manage SpidNums platform accounts."
         actions={
           <>
             <ButtonLink href="/import?mode=users" variant="secondary" icon={<Upload className="size-4" />}>
@@ -450,7 +450,7 @@ export function UsersClient({
           ]}
           emptyTitle="No users match"
           emptyDescription="Try clearing the search or the role filter above."
-          exportName="speednum-users"
+          exportName="spidnums-users"
         />
       </section>
 
@@ -461,7 +461,7 @@ export function UsersClient({
         description={
           editing
             ? "Update this account's details and access."
-            : "Create a new SpeedNum platform account."
+            : "Create a new SpidNums platform account."
         }
         footer={
           <>

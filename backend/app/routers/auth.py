@@ -125,7 +125,7 @@ async def register(
         f"{settings.public_app_url.rstrip('/')}/verify-email?token={raw_verify_token}"
     )
     await send_email(
-        to=profile.email, subject="Confirm your SpeedNum account", html=verify_email_html(url=verify_url)
+        to=profile.email, subject="Confirm your SpidNums account", html=verify_email_html(url=verify_url)
     )
 
     _set_refresh_cookie(response, tokens)
@@ -292,7 +292,7 @@ async def forgot_password(payload: ForgotPasswordRequest, session: SessionDep) -
     profile, raw_token = result
     reset_url = f"{settings.public_app_url.rstrip('/')}/reset-password?token={raw_token}"
     await send_email(
-        to=profile.email, subject="Reset your SpeedNum password", html=password_reset_html(url=reset_url)
+        to=profile.email, subject="Reset your SpidNums password", html=password_reset_html(url=reset_url)
     )
     return generic
 

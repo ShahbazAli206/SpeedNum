@@ -121,7 +121,7 @@ export function AccountantInvoicesClient({
           emptyTitle="No invoices yet"
           emptyDescription="Invoices your accountant sends you will appear here."
           onRowClick={setSelected}
-          exportName="speednum-accountant-invoices"
+          exportName="spidnums-accountant-invoices"
         />
       </section>
 

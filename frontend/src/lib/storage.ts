@@ -231,3 +231,40 @@ export async function supportAttachmentUrl(scope: SupportScope, attachmentId: st
   const { url } = await get<DownloadUrl>(`${prefix}/attachments/${attachmentId}/download-url`);
   return url;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Client-portal message attachments (backend/app/routers/client_messages.py). */
+/* Same presigned-upload pattern as support attachments above — one endpoint  */
+/* pair, reached by a portal login (its own client) or firm staff             */
+/* (?client_id=), the router enforcing the same reach as sending a message.   */
+/* -------------------------------------------------------------------------- */
+
+/** The reference a caller includes in the create-message payload. */
+export interface ClientMessageAttachmentDraft {
+  name: string;
+  storage_path: string;
+  mime_type: string | null;
+  size_bytes: number;
+}
+
+export async function uploadClientMessageAttachment(
+  file: File,
+  clientId?: string,
+): Promise<ClientMessageAttachmentDraft> {
+  const query = clientId ? `?client_id=${encodeURIComponent(clientId)}` : "";
+  const slot = await post<UploadSlot>(`/client-portal/messages/attachments/upload-url${query}`, {
+    name: file.name,
+  });
+  await putToStorage(slot.url, file);
+  return {
+    name: file.name,
+    storage_path: slot.storage_path,
+    mime_type: file.type || null,
+    size_bytes: file.size,
+  };
+}
+
+export async function clientMessageAttachmentUrl(attachmentId: string): Promise<string> {
+  const { url } = await get<DownloadUrl>(`/client-portal/messages/attachments/${attachmentId}/download-url`);
+  return url;
+}

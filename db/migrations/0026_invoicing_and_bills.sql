@@ -1,5 +1,5 @@
 -- =============================================================================
--- SpeedNum — invoicing & bills across the three money levels
+-- SpidNums — invoicing & bills across the three money levels
 -- Target: Supabase Postgres (>= 15) / plain Postgres 16 (VPS)
 -- Run order: ... -> 0025_plans.sql -> 0026_invoicing_and_bills.sql
 --

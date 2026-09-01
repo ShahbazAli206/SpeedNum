@@ -541,7 +541,7 @@ export function TeamClient({
           ]}
           emptyTitle="No team members match"
           emptyDescription="Try clearing the search or the filters above."
-          exportName="speednum-staff"
+          exportName="spidnums-staff"
         />
       </section>
 

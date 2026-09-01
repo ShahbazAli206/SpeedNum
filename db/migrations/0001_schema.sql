@@ -1,5 +1,5 @@
 -- =============================================================================
--- SpeedNum / SpidNums — core schema
+-- SpidNums — core schema
 -- Target: Supabase Postgres (>= 15)
 -- Run order: 0001_schema.sql -> 0002_rls.sql -> 0003_functions.sql
 -- =============================================================================

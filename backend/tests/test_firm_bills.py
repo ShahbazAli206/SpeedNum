@@ -58,7 +58,7 @@ class TestManualBillRead:
 
 
 class TestSubscriptionRowSynthesis:
-    """A platform_income row (what the firm paid SpeedNum) is merged in at
+    """A platform_income row (what the firm paid SpidNums) is merged in at
     read time as a read-only, always-"paid" bill — see firm_bills.py's
     module docstring for why no separate table exists for this."""
 
@@ -67,7 +67,7 @@ class TestSubscriptionRowSynthesis:
         read = _subscription_row(row)
         assert read.status == "paid"
         assert read.source == "subscription"
-        assert read.vendor == "SpeedNum"
+        assert read.vendor == "SpidNums"
         assert read.category == "subscription"
         assert read.amount == 499.0
 

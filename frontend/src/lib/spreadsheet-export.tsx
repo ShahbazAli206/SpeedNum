@@ -108,7 +108,7 @@ export function useSpreadsheetExport<T>(
 
       const { header, body } = buildExportRows(rows, columns, false);
       const title = exportName
-        .replace(/^speednum-/, "")
+        .replace(/^spidnums-/, "")
         .replace(/[-_]+/g, " ")
         .replace(/\b\w/g, (letter) => letter.toUpperCase());
       const tenantName = session.me?.tenant?.name ?? null;

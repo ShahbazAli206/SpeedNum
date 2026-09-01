@@ -1,5 +1,5 @@
 -- =============================================================================
--- SpeedNum — provider-side finance ledger (income from tenants, operating
+-- SpidNums — provider-side finance ledger (income from tenants, operating
 -- expenses) for the platform superadmin's profit dashboard.
 -- Target: Supabase Postgres (>= 15) / plain Postgres 16 (VPS)
 -- Run order: ... -> 0018_roles_permissions.sql -> 0019_platform_finance.sql

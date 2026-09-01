@@ -1,6 +1,6 @@
 "use client";
 
-import { MessageSquare, Plus, Send } from "lucide-react";
+import { FileText, MessageSquare, Paperclip, Plus, Send, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 
@@ -9,13 +9,36 @@ import { useToast } from "@/components/toast";
 import { Button, EmptyState, Textarea } from "@/components/ui";
 import { post } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { relativeTime } from "@/lib/format";
+import { formatBytes, relativeTime } from "@/lib/format";
 import { useSession } from "@/lib/session";
-import type { Client, ClientMessage } from "@/lib/types";
+import {
+  type ClientMessageAttachmentDraft,
+  clientMessageAttachmentUrl,
+  uploadClientMessageAttachment,
+  UploadError,
+} from "@/lib/storage";
+import type { Client, ClientMessage, ClientMessageAttachment } from "@/lib/types";
 
 /** Pull a human-readable reason out of an ApiError without leaking `[object]`. */
 function reason(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+/** The sidebar's one-line preview — falls back to an attachment count for a
+ * file-only message, which otherwise previews as a blank line. */
+function lastMessagePreview(message: ClientMessage | undefined) {
+  if (!message) return "";
+  if (message.body) return message.body;
+  const count = message.attachments.length;
+  return count ? `📎 ${count} attachment${count === 1 ? "" : "s"}` : "";
+}
+
+interface PendingUpload {
+  key: string;
+  name: string;
+  size: number;
+  status: "uploading" | "done" | "error";
+  draft?: ClientMessageAttachmentDraft;
 }
 
 interface Conversation {
@@ -68,10 +91,13 @@ export function MessagesClient({
   const [selected, setSelected] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
   const [body, setBody] = useState("");
+  const [pending, setPending] = useState<PendingUpload[]>([]);
   const [sending, setSending] = useState(false);
   // Threads we've already fired "mark read" for this session, so re-selecting
   // one doesn't POST the same reads again.
   const markedRef = useRef<Set<string>>(new Set());
+  const fileInput = useRef<HTMLInputElement>(null);
+  const keySeq = useRef(0);
 
   const conversations = useMemo(() => buildConversations(messages, read), [messages, read]);
 
@@ -88,6 +114,7 @@ export function MessagesClient({
   const openThread = (clientId: string) => {
     setComposing(false);
     setSelected(clientId);
+    setPending([]);
     if (!isLive || markedRef.current.has(clientId)) return;
     const convo = conversations.find((c) => c.clientId === clientId);
     const unread = (convo?.messages ?? []).filter((m) => m.is_from_client && !(read[m.id] ?? m.is_read));
@@ -105,18 +132,68 @@ export function MessagesClient({
     setComposing(true);
     setSelected(clientId);
     setBody("");
+    setPending([]);
+  };
+
+  const onPickFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0 || !activeId) return;
+    if (!isLive) {
+      toast.info("Demo mode", "Connect a backend to attach files to a real message.");
+      return;
+    }
+    const chosen = Array.from(files);
+    if (fileInput.current) fileInput.current.value = "";
+
+    await Promise.all(
+      chosen.map(async (file) => {
+        const key = `u${(keySeq.current += 1)}`;
+        setPending((current) => [...current, { key, name: file.name, size: file.size, status: "uploading" }]);
+        try {
+          const draft = await uploadClientMessageAttachment(file, activeId);
+          setPending((current) =>
+            current.map((item) => (item.key === key ? { ...item, status: "done", draft } : item)),
+          );
+        } catch (error) {
+          setPending((current) => current.map((item) => (item.key === key ? { ...item, status: "error" } : item)));
+          const message = error instanceof UploadError ? error.message : "Upload failed.";
+          toast.error(`Couldn't attach ${file.name}`, message);
+        }
+      }),
+    );
+  };
+
+  const removePending = (key: string) => setPending((current) => current.filter((item) => item.key !== key));
+
+  const openAttachment = async (attachment: ClientMessageAttachment) => {
+    try {
+      const url = await clientMessageAttachmentUrl(attachment.id);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch {
+      toast.error("Could not open that file", "The link may have expired — try again.");
+    }
   };
 
   const send = async () => {
-    if (!activeId || !body.trim()) return;
+    const trimmed = body.trim();
+    const drafts = pending.filter((item) => item.status === "done" && item.draft).map((item) => item.draft!);
+    if (!activeId || (!trimmed && drafts.length === 0)) return;
+    if (pending.some((item) => item.status === "uploading")) {
+      toast.info("Still uploading", "Wait for the attachments to finish, then send.");
+      return;
+    }
     if (!isLive) {
       toast.info("Demo mode", "Connect a backend to send a real message.");
       return;
     }
     setSending(true);
     try {
-      await post(`/client-portal/messages?client_id=${activeId}`, { subject: null, body: body.trim() });
+      await post(`/client-portal/messages?client_id=${activeId}`, {
+        subject: null,
+        body: trimmed,
+        attachments: drafts,
+      });
       setBody("");
+      setPending([]);
       setComposing(false);
       router.refresh(); // reload the server-rendered thread so the new message shows
       session.refresh(); // update the bell badge
@@ -214,7 +291,7 @@ export function MessagesClient({
                         ) : null}
                       </span>
                       <span className="mt-0.5 block truncate text-[12px] text-muted">
-                        {convo.messages[convo.messages.length - 1]?.body}
+                        {lastMessagePreview(convo.messages[convo.messages.length - 1])}
                       </span>
                     </span>
                   </button>
@@ -258,6 +335,29 @@ export function MessagesClient({
                           <span className="mb-0.5 block font-semibold">{m.subject}</span>
                         ) : null}
                         {m.body}
+                        {m.attachments.length > 0 ? (
+                          <span className="mt-1.5 flex flex-wrap gap-1.5">
+                            {m.attachments.map((attachment) => (
+                              <button
+                                key={attachment.id}
+                                type="button"
+                                onClick={() => void openAttachment(attachment)}
+                                className={cn(
+                                  "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12px] transition",
+                                  m.is_from_client
+                                    ? "border-line bg-surface text-ink-soft hover:bg-surface hover:text-ink"
+                                    : "border-white/30 bg-white/10 text-white hover:bg-white/20",
+                                )}
+                              >
+                                <FileText className="size-3.5 shrink-0" />
+                                <span className="max-w-48 truncate">{attachment.name}</span>
+                                {attachment.size_bytes ? (
+                                  <span className="opacity-75">{formatBytes(attachment.size_bytes)}</span>
+                                ) : null}
+                              </button>
+                            ))}
+                          </span>
+                        ) : null}
                       </div>
                       <span className="mt-1 px-1 text-[11px] text-muted">
                         {m.is_from_client ? m.sender_name : "You"} · {relativeTime(m.created_at)}
@@ -278,11 +378,61 @@ export function MessagesClient({
                   onChange={(event) => setBody(event.target.value)}
                   placeholder={`Write a message to ${active?.clientName ?? composeName}…`}
                 />
-                <div className="mt-2 flex justify-end">
+
+                {pending.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {pending.map((item) => (
+                      <span
+                        key={item.key}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[12px]",
+                          item.status === "error"
+                            ? "border-danger/40 bg-danger-soft text-danger"
+                            : "border-line bg-surface-2 text-ink-soft",
+                        )}
+                      >
+                        <FileText className="size-3.5 shrink-0 text-muted" />
+                        <span className="max-w-40 truncate">{item.name}</span>
+                        <span className="text-muted">
+                          {item.status === "uploading"
+                            ? "uploading…"
+                            : item.status === "error"
+                              ? "failed"
+                              : formatBytes(item.size)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removePending(item.key)}
+                          className="rounded p-0.5 text-muted transition hover:bg-surface hover:text-ink"
+                          aria-label={`Remove ${item.name}`}
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <input
+                    ref={fileInput}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(event) => void onPickFiles(event.target.files)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInput.current?.click()}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-[12.5px] font-medium text-ink-soft transition hover:bg-surface-2 hover:text-ink"
+                  >
+                    <Paperclip className="size-4" />
+                    Attach a file
+                  </button>
                   <Button
                     icon={<Send className="size-4" />}
                     loading={sending}
-                    disabled={!body.trim()}
+                    disabled={!body.trim() && !pending.some((item) => item.status === "done")}
                     onClick={send}
                   >
                     Send

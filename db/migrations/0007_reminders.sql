@@ -1,5 +1,5 @@
 -- =============================================================================
--- SpeedNum — reminders
+-- SpidNums — reminders
 -- Target: Supabase Postgres (>= 15)
 -- Run order: 0001 -> 0002 -> 0003 -> 0004 -> 0005 -> 0006_* -> 0007_reminders.sql
 --

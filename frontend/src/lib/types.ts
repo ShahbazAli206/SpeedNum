@@ -776,6 +776,14 @@ export interface CategoryTotal {
 /* -------------------------------------------------------------------------- */
 /* Client-portal messages — GET/POST /client-portal/messages.                  */
 /* -------------------------------------------------------------------------- */
+export interface ClientMessageAttachment {
+  id: string;
+  name: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  created_at: string | null;
+}
+
 export interface ClientMessage {
   id: string;
   client_id: string;
@@ -786,6 +794,7 @@ export interface ClientMessage {
   body: string;
   is_read: boolean;
   created_at: string;
+  attachments: ClientMessageAttachment[];
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1087,7 +1096,7 @@ export interface FirmInvoiceTotals {
 }
 
 /** GET/POST /bills — the firm's own accounts-payable ledger, merged at read
- * time with what it has paid SpeedNum (source: "subscription", read-only).
+ * time with what it has paid SpidNums (source: "subscription", read-only).
  * See app/routers/firm_bills.py. */
 export interface FirmBill {
   id: string;

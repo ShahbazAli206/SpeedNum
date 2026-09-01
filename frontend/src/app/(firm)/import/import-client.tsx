@@ -233,10 +233,10 @@ export function ImportClient() {
             icon={<Download className="size-4" />}
             onClick={() => {
               const stem = {
-                clients: "speednum-client-import",
-                users: "speednum-user-import",
-                services: "speednum-service-import",
-                tenants: "speednum-firm-import",
+                clients: "spidnums-client-import",
+                users: "spidnums-user-import",
+                services: "spidnums-service-import",
+                tenants: "spidnums-firm-import",
               }[mode];
               const example = {
                 clients: CLIENT_EXAMPLE,

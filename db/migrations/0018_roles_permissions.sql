@@ -1,5 +1,5 @@
 -- =============================================================================
--- SpeedNum — tenant-defined custom roles and granular permissions
+-- SpidNums — tenant-defined custom roles and granular permissions
 -- Target: Supabase Postgres (>= 15) / plain Postgres 16 (VPS)
 -- Run order: ... -> 0017_team_notes.sql -> 0018_roles_permissions.sql
 --

@@ -193,7 +193,7 @@ export function InvoicesClient({
           emptyTitle="No invoices match"
           emptyDescription="Try clearing the search or the status filter."
           onRowClick={setSelected}
-          exportName="speednum-invoices"
+          exportName="spidnums-invoices"
         />
       </section>
 

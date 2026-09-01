@@ -694,11 +694,11 @@ async def complete_oauth(
             # Link only on a *verified* email claim from the provider — an
             # unverified claim is just an assertion, and trusting it would
             # let anyone with a throwaway OAuth account take over a
-            # SpeedNum account that merely shares its (unverified) address.
+            # SpidNums account that merely shares its (unverified) address.
             if not email_verified:
                 raise AuthError(
                     "An account already exists for this email. Verify your email address with "
-                    "Google, or sign in with your SpeedNum password instead.",
+                    "Google, or sign in with your SpidNums password instead.",
                     status_code=409,
                 )
             profile = existing_profile

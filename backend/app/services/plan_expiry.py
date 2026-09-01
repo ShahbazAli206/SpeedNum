@@ -119,10 +119,10 @@ async def sweep_tenant_expiry(session: AsyncSession, tenant: Tenant, *, today: d
         phrase = _expiry_phrase(days)
         on_date = expires_at.date().isoformat()
         body = (
-            f"Your {label} expired on {on_date}. Renew now to restore your SpeedNum services."
+            f"Your {label} expired on {on_date}. Renew now to restore your SpidNums services."
             if days < 0
             else f"Your {label} is set to expire on {on_date}. "
-            "Request a renewal to avoid any interruption to your SpeedNum services."
+            "Request a renewal to avoid any interruption to your SpidNums services."
         )
         await audit.notify(
             session,

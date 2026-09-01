@@ -1,6 +1,6 @@
 """Firm bills: the accounting firm's own accounts payable — what it spends
 running the practice (software, rent, salaries, ...), plus a read-only view of
-what it has paid SpeedNum for its own subscription.
+what it has paid SpidNums for its own subscription.
 
 The subscription rows are not stored here: they are `platform_income` rows the
 platform superadmin already logs against this tenant on `/admin/finance` (see
@@ -58,7 +58,7 @@ def _subscription_row(row: PlatformIncome) -> FirmBillRead:
     return FirmBillRead(
         id=row.id,
         category="subscription",
-        vendor="SpeedNum",
+        vendor="SpidNums",
         amount=float(row.amount),
         currency=row.currency,
         bill_date=row.received_date,

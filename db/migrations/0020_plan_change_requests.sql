@@ -1,5 +1,5 @@
 -- =============================================================================
--- SpeedNum — owner-submitted plan change requests
+-- SpidNums — owner-submitted plan change requests
 -- Target: Supabase Postgres (>= 15) / plain Postgres 16 (VPS)
 -- Run order: ... -> 0019_platform_finance.sql -> 0020_plan_change_requests.sql
 --

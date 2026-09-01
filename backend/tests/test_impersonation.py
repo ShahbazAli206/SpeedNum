@@ -33,7 +33,7 @@ def _run(coro):
 def _profile(*, superadmin: bool, tenant_id: uuid.UUID | None) -> Profile:
     return Profile(
         id=uuid.uuid4(),
-        email="root@speednum.com" if superadmin else "staff@firm.com",
+        email="root@spidnums.com" if superadmin else "staff@firm.com",
         full_name="Root" if superadmin else "Staff",
         role="member",
         tenant_id=tenant_id,
@@ -70,7 +70,7 @@ class TestImpersonationToken:
         assert claims.metadata["is_portal"] is False
         # Still the superadmin's own identity — audit attributes to them.
         assert claims.user_id == str(profile.id)
-        assert claims.email == "root@speednum.com"
+        assert claims.email == "root@spidnums.com"
 
     def test_an_ordinary_token_has_no_act_as_claim(self):
         profile = _profile(superadmin=True, tenant_id=None)

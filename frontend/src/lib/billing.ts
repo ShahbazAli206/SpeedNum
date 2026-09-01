@@ -38,7 +38,7 @@ export const cancelPlanRequest = (id: string) =>
 export const requestRenewal = (note?: string) =>
   post<{ ok: boolean; message: string }>("/billing/renewal-request", { note: note?.trim() || null });
 
-/** Read-only: invoices SpeedNum has sent this firm (backend/app/routers/
+/** Read-only: invoices SpidNums has sent this firm (backend/app/routers/
  * plan_requests.py's extension of /billing). No write path — there is no
  * payment processor wired up; the platform records payments on its side. */
 export const listCompanyInvoices = () => get<CompanyInvoice[]>("/billing/invoices");

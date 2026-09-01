@@ -1,10 +1,10 @@
 -- =============================================================================
--- SpeedNum — company-owner ↔ platform support messaging
+-- SpidNums — company-owner ↔ platform support messaging
 -- Target: Supabase Postgres (>= 15)
 -- Run order: ... -> 0022_plan_request_custom_and_attachment.sql -> 0023_support_messages.sql
 --
 -- A threaded, two-way channel between a company owner (a tenant's Owner) and the
--- SpeedNum platform provider (the is_superadmin operator, working inside the
+-- SpidNums platform provider (the is_superadmin operator, working inside the
 -- workspace tenant flagged settings.is_platform). Distinct from
 -- 0016_client_messages.sql, which is a client↔firm channel scoped to one tenant
 -- and one client, flat and one-way: this one crosses the tenant boundary (the
@@ -74,7 +74,7 @@ create index if not exists support_attachments_message_idx
   on public.support_attachments (message_id);
 
 comment on table public.support_threads is
-  'One support conversation per company (tenant) between the company Owner and the SpeedNum platform super-admin. See backend/app/routers/support.py.';
+  'One support conversation per company (tenant) between the company Owner and the SpidNums platform super-admin. See backend/app/routers/support.py.';
 comment on table public.support_messages is
   'Messages in a company↔platform support thread. from_platform marks the sender side; read_at is set when the opposite side reads it (drives per-side unread badges).';
 comment on table public.support_attachments is

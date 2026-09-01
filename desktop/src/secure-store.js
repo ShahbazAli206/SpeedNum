@@ -7,7 +7,7 @@
  * kwallet on Linux — so the encryption key itself is never something this
  * app manages; only the OS user account that's logged in can decrypt.
  *
- * Session credentials for the *SpeedNum backend* work the same way here as
+ * Session credentials for the *SpidNums backend* work the same way here as
  * everywhere else in this codebase: a short-lived access token kept in
  * memory only, and a refresh token that's the one thing worth protecting
  * at rest, since it's what a stolen laptop file would actually be able to

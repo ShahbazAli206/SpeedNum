@@ -522,14 +522,14 @@ async def remind_tenant(
         on_date = expires_at.date().isoformat()
         days = (expires_at.date() - datetime.now(timezone.utc).date()).days
         body = (
-            f"Your {label} expired on {on_date}. Renew now to restore your SpeedNum services."
+            f"Your {label} expired on {on_date}. Renew now to restore your SpidNums services."
             if days < 0
             else f"Your {label} is set to expire on {on_date}. "
-            "Request a renewal to avoid any interruption to your SpeedNum services."
+            "Request a renewal to avoid any interruption to your SpidNums services."
         )
     else:
         body = (
-            f"Please review your {label} with your provider to keep your SpeedNum "
+            f"Please review your {label} with your provider to keep your SpidNums "
             "services running without interruption."
         )
 
@@ -690,9 +690,9 @@ async def platform_email_test(payload: PlatformEmailTest, user: SuperadminDep) -
     recipient = str(payload.to) if payload.to else user.profile.email
     result = await deliver(
         to=recipient,
-        subject="SpeedNum: platform email delivery test",
+        subject="SpidNums: platform email delivery test",
         html=test_message_html(
-            firm_name="SpeedNum",
+            firm_name="SpidNums",
             requested_by=user.profile.full_name or user.profile.email,
             provider=app_settings.resolved_email_provider,
         ),

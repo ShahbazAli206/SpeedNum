@@ -310,7 +310,7 @@ export function RolesClient({
           searchKeys={(row) => `${row.name} ${row.description ?? ""}`}
           emptyTitle="No roles yet"
           emptyDescription="Create one to start granting staff a custom set of permissions."
-          exportName="speednum-roles"
+          exportName="spidnums-roles"
         />
       </section>
 

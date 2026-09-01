@@ -374,12 +374,12 @@ export function BillingClient() {
       <section className="mt-6 rounded-xl border border-line bg-surface shadow-card">
         <div className="flex items-center gap-2 border-b border-line px-5 py-4">
           <Receipt className="size-4 text-muted" />
-          <h3 className="text-[15px] font-semibold text-ink">Invoices from SpeedNum</h3>
+          <h3 className="text-[15px] font-semibold text-ink">Invoices from SpidNums</h3>
         </div>
         {companyInvoices.isLoading ? (
           <LoadingBlock />
         ) : !companyInvoices.data || companyInvoices.data.length === 0 ? (
-          <p className="px-5 py-8 text-center text-[13px] text-muted">No invoices from SpeedNum yet.</p>
+          <p className="px-5 py-8 text-center text-[13px] text-muted">No invoices from SpidNums yet.</p>
         ) : (
           <ul className="divide-y divide-line">
             {companyInvoices.data.map((invoice) => (
@@ -395,7 +395,7 @@ export function BillingClient() {
                     type="button"
                     onClick={() =>
                       downloadInvoicePdf({
-                        fromName: "SpeedNum",
+                        fromName: "SpidNums",
                         billToName: null,
                         invoice: { ...invoice, description: null, payments: [] },
                         filenameHint: invoice.number,

@@ -88,7 +88,7 @@ async function decryptFile(inputPath, outputPath, password) {
     const header = Buffer.alloc(HEADER_LEN);
     await fd.read(header, 0, HEADER_LEN, 0);
     if (!header.subarray(0, 4).equals(MAGIC)) {
-      throw new Error("Not a SpeedNum backup file (bad magic).");
+      throw new Error("Not a SpidNums backup file (bad magic).");
     }
     const version = header[4];
     const kdfId = header[5];

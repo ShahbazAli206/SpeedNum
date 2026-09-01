@@ -124,7 +124,7 @@ export function CredentialsModal({
               result.email_sent ? "text-muted" : "text-warn",
             )}
           >
-            This password is shown only now — it is never stored in SpeedNum. If it is lost, use
+            This password is shown only now — it is never stored in SpidNums. If it is lost, use
             &ldquo;Resend credentials&rdquo; to issue a new one.
           </p>
         </div>

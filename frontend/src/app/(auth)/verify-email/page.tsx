@@ -7,7 +7,7 @@ import { VerifyEmailClient } from "./verify-email-client";
 
 export const metadata: Metadata = {
   title: "Verify email",
-  description: "Confirm your SpeedNum account email address.",
+  description: "Confirm your SpidNums account email address.",
   robots: { index: false, follow: false },
 };
 

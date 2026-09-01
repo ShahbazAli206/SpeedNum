@@ -1,5 +1,5 @@
 -- =============================================================================
--- SpeedNum — task type (Internal / Client / Other)
+-- SpidNums — task type (Internal / Client / Other)
 -- Target: Supabase Postgres (>= 15)
 -- Run order: 0001 -> 0002 -> 0003 -> 0004 -> 0005 -> 0006_task_type.sql
 --

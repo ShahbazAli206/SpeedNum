@@ -6,7 +6,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 UserRole = Literal["owner", "admin", "member", "viewer"]
 ClientStatus = Literal["prospect", "active", "inactive", "archived"]
@@ -1593,7 +1593,7 @@ class FirmBillRead(BaseModel):
     is_recurring: bool
     notes: str | None = None
     # "manual" = a firm_bills row (editable); "subscription" = a read-only row
-    # synthesized from platform_income (what the firm paid SpeedNum). See
+    # synthesized from platform_income (what the firm paid SpidNums). See
     # app/routers/firm_bills.py.
     source: str = "manual"
     created_at: datetime | None = None
@@ -1608,9 +1608,37 @@ class FirmBillTotals(BaseModel):
 
 
 # --- Client-portal messages -----------------------------------------------------
+class ClientMessageAttachmentInput(BaseModel):
+    """One file to hang off a client-portal message. `storage_path` must have
+    come from POST .../client-portal/messages/attachments/upload-url — the
+    router refuses any path outside the caller's own client thread."""
+
+    name: str = Field(min_length=1, max_length=260)
+    storage_path: str = Field(min_length=1, max_length=500)
+    mime_type: str | None = Field(default=None, max_length=200)
+    size_bytes: int | None = Field(default=None, ge=0)
+
+
+class ClientMessageAttachmentRead(ORMModel):
+    id: uuid.UUID
+    name: str
+    mime_type: str | None = None
+    size_bytes: int | None = None
+    created_at: datetime | None = None
+
+
 class ClientMessageCreate(BaseModel):
     subject: str | None = Field(default=None, max_length=200)
-    body: str = Field(min_length=1, max_length=5000)
+    # Empty is allowed when there's at least one attachment — see the
+    # model_validator below — so "just a file, no note" can be sent.
+    body: str = Field(default="", max_length=5000)
+    attachments: list[ClientMessageAttachmentInput] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def _require_body_or_attachment(self) -> "ClientMessageCreate":
+        if not self.body.strip() and not self.attachments:
+            raise ValueError("A message needs text or at least one attachment.")
+        return self
 
 
 class ClientMessageRead(ORMModel):
@@ -1623,6 +1651,7 @@ class ClientMessageRead(ORMModel):
     body: str
     is_read: bool
     created_at: datetime | None = None
+    attachments: list[ClientMessageAttachmentRead] = Field(default_factory=list)
 
 
 class ClientMessageCounts(BaseModel):

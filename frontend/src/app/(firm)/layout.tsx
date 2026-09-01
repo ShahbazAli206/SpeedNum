@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { FirmShell } from "@/components/firm/shell";
 
 export const metadata: Metadata = {
-  title: { default: "Practice", template: "%s · SpeedNum" },
+  title: { default: "Practice", template: "%s · SpidNums" },
   robots: { index: false, follow: false },
 };
 

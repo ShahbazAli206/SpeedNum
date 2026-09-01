@@ -243,7 +243,7 @@ export function ExpensesClient({
           emptyTitle="No expenses match"
           emptyDescription="Try clearing the search or the filters above."
           onRowClick={setSelected}
-          exportName="speednum-expenses"
+          exportName="spidnums-expenses"
         />
       </section>
 

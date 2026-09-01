@@ -52,14 +52,14 @@ def test_is_newer_handles_major_and_minor_bumps():
 
 
 def test_validate_installer_url_accepts_the_configured_host():
-    assert validate_installer_url(BASE_URL + "SpeedNum-Setup-1.0.1.exe") == BASE_URL + "SpeedNum-Setup-1.0.1.exe"
+    assert validate_installer_url(BASE_URL + "SpidNums-Setup-1.0.1.exe") == BASE_URL + "SpidNums-Setup-1.0.1.exe"
 
 
 @pytest.mark.parametrize(
     "malicious",
     [
-        "https://evil.example.com/desktop-releases/SpeedNum-Setup.exe",
-        "http://test.spidnums.com/desktop-releases/SpeedNum-Setup.exe",  # not https
+        "https://evil.example.com/desktop-releases/SpidNums-Setup.exe",
+        "http://test.spidnums.com/desktop-releases/SpidNums-Setup.exe",  # not https
         "https://test.spidnums.com/../etc/passwd",
         "https://test.spidnums.com.evil.com/desktop-releases/x.exe",
         "javascript:alert(1)",
@@ -86,7 +86,7 @@ def test_validate_new_release_accepts_first_ever_release():
     installer_url, sha256 = validate_new_release(
         candidate_version="1.0.0",
         current_version=None,
-        installer_url=BASE_URL + "SpeedNum-Setup-1.0.0.exe",
+        installer_url=BASE_URL + "SpidNums-Setup-1.0.0.exe",
         sha256=VALID_SHA256,
     )
     assert installer_url.endswith("1.0.0.exe")

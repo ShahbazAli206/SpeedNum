@@ -26,7 +26,7 @@ async function withPlaintext(content, run) {
 }
 
 test("round trip: decrypted output matches the original plaintext exactly", async () => {
-  const content = Buffer.from("SpeedNum disaster-recovery backup — some tenant data\n".repeat(500));
+  const content = Buffer.from("SpidNums disaster-recovery backup — some tenant data\n".repeat(500));
   await withPlaintext(content, async ({ plain, enc, dec }) => {
     await encryptFile(plain, enc, "correct horse battery staple");
     await decryptFile(enc, dec, "correct horse battery staple");
@@ -82,7 +82,7 @@ test("a truncated file is rejected outright rather than throwing something obscu
   });
 });
 
-test("a file that isn't a SpeedNum envelope at all is rejected", async () => {
+test("a file that isn't a SpidNums envelope at all is rejected", async () => {
   const notOurs = tmpFile("plain.bin");
   const dec = tmpFile("dec.bin");
   await fs.promises.writeFile(notOurs, Buffer.alloc(HEADER_LEN + TAG_LEN + 10, 0x41));

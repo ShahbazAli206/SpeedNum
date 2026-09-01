@@ -151,7 +151,7 @@ async def publish_release(
         action="published",
         entity="desktop_release",
         entity_id=release.id,
-        summary=f"Published SpeedNum Desktop {payload.version}",
+        summary=f"Published SpidNums Desktop {payload.version}",
         ip_address=client_ip(request),
     )
 

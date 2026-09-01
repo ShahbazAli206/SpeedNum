@@ -1,7 +1,7 @@
 """Company-owner ↔ platform support messaging.
 
 A threaded, two-way channel between a company Owner (a tenant's owner role) and
-the SpeedNum platform provider (the is_superadmin operator). One thread per
+the SpidNums platform provider (the is_superadmin operator). One thread per
 company. Two routers in one file, mirroring plan_requests.py:
 
   * `router`       — firm side, `/support/*`, OwnerOrSuperadminDep. A company's
@@ -397,7 +397,7 @@ async def platform_send_message(
     await _notify_firm_owners(
         session,
         tenant_id=tenant_id,
-        title="New reply from SpeedNum support",
+        title="New reply from SpidNums support",
         body=_preview(payload.body),
         link="/support",
     )

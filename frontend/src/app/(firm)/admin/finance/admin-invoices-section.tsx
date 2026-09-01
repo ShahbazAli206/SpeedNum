@@ -113,7 +113,7 @@ export function AdminInvoicesSection({ tenants }: { tenants: TenantOption[] }) {
 
   const downloadPdf = (invoice: PlatformInvoice) =>
     downloadInvoicePdf({
-      fromName: "SpeedNum",
+      fromName: "SpidNums",
       billToName: invoice.tenant_name,
       // PlatformInvoice carries no description/payments breakdown (only the
       // running amount_paid total) — pass the fields InvoiceDocumentData

@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    app_name: str = "SpeedNum API"
+    app_name: str = "SpidNums API"
     environment: str = Field(default="production", alias="ENVIRONMENT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
@@ -47,7 +47,7 @@ class Settings(BaseSettings):
 
     # --- Social login (Google) --------------------------------------------------
     # Optional: only "Continue with Google" is offered when both are set — no
-    # provider is ever required to use SpeedNum. This is identity verification
+    # provider is ever required to use SpidNums. This is identity verification
     # only; Google never sees business data and no provider access/refresh
     # token is ever stored (see services/oauth_google.py). Get these from a
     # Google Cloud OAuth 2.0 Client ID (Web application type) — never put the
@@ -131,7 +131,7 @@ class Settings(BaseSettings):
     # hash. Empty by default: this used to be a hardcoded `https://.*\.vercel\.app`,
     # which allowed *anyone's* Vercel project to call the API, not just ours.
     # Set it to your own project's pattern, e.g.
-    #   CORS_ORIGIN_REGEX=https://speed-num[a-z0-9-]*\.vercel\.app
+    #   CORS_ORIGIN_REGEX=https://spidnums[a-z0-9-]*\.vercel\.app
     cors_origin_regex: str = Field(default="", alias="CORS_ORIGIN_REGEX")
 
     # --- Email ----------------------------------------------------------------
@@ -161,7 +161,7 @@ class Settings(BaseSettings):
     # only ever delivers to the Resend account owner's own address — fine for a
     # smoke test, silently useless for real clients. `email_sender_domain`
     # below is what the startup check and /admin/email/status read to say so.
-    email_from: str = Field(default="SpeedNum <onboarding@resend.dev>", alias="EMAIL_FROM")
+    email_from: str = Field(default="SpidNums <onboarding@resend.dev>", alias="EMAIL_FROM")
     # Where replies land when the caller has nobody more specific to name. The
     # reminder digest has no human sender, for instance.
     email_reply_to: str = Field(default="", alias="EMAIL_REPLY_TO")
@@ -283,7 +283,7 @@ class Settings(BaseSettings):
     @property
     def email_sender_address(self) -> str:
         """The bare address out of EMAIL_FROM, with any display name stripped:
-        `SpeedNum <no-reply@firm.ca>` -> `no-reply@firm.ca`."""
+        `SpidNums <no-reply@firm.ca>` -> `no-reply@firm.ca`."""
         raw = (self.email_from or "").strip()
         if "<" in raw and ">" in raw:
             return raw[raw.rindex("<") + 1 : raw.rindex(">")].strip()

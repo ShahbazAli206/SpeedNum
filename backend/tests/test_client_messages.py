@@ -51,6 +51,13 @@ class TestPreview:
         assert len(out) == _PREVIEW_LEN
         assert out.endswith("...")
 
+    def test_empty_body_with_attachments_falls_back_to_attachment_count(self):
+        assert _preview("", 1) == "📎 1 attachment"
+        assert _preview("", 3) == "📎 3 attachments"
+
+    def test_empty_body_and_no_attachments_is_blank(self):
+        assert _preview("") == ""
+
 
 class TestStaffRecipients:
     def test_owner_and_assigned_staff_both_notified(self):

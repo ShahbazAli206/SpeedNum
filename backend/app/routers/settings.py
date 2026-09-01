@@ -103,7 +103,7 @@ async def send_test_email(payload: EmailTestRequest, user: AdminUserDep) -> Emai
     recipient = str(payload.to) if payload.to else user.profile.email
     result = await deliver(
         to=recipient,
-        subject=f"{user.tenant.name}: SpeedNum email delivery test",
+        subject=f"{user.tenant.name}: SpidNums email delivery test",
         html=test_message_html(
             firm_name=user.tenant.name,
             requested_by=user.profile.full_name or user.profile.email,

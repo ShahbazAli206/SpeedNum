@@ -4,7 +4,7 @@ Standard OAuth 2.0 authorization-code flow with PKCE. This module talks to
 Google and Google alone: building the authorize URL, exchanging a code for
 an ID token, and verifying that ID token's signature/issuer/audience/
 expiration against Google's own published keys. It never touches a
-`Profile` or issues a SpeedNum session — that's local_auth.py's
+`Profile` or issues a SpidNums session — that's local_auth.py's
 start_oauth/complete_oauth, which call into this module for the
 Google-specific parts.
 

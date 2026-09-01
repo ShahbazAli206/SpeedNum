@@ -117,7 +117,7 @@ export function ServicesClient({ services }: { services: ClientServiceLink[] }) 
           ]}
           emptyTitle="No services yet"
           emptyDescription="Your accountant hasn't assigned any services to your account yet."
-          exportName="speednum-services"
+          exportName="spidnums-services"
         />
       </section>
     </>

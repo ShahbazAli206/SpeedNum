@@ -1,7 +1,7 @@
 {
-  "name": "speednum-desktop",
+  "name": "spidnums-desktop",
   "version": "1.0.0",
-  "description": "SpeedNum admin desktop — encrypted disaster-recovery backup sync, restore drills, and a thin admin overview. Talks only to the same authenticated FastAPI backend every other SpeedNum client uses; never touches Postgres or MinIO directly.",
+  "description": "SpidNums admin desktop — encrypted disaster-recovery backup sync, restore drills, and a thin admin overview. Talks only to the same authenticated FastAPI backend every other SpidNums client uses; never touches Postgres or MinIO directly.",
   "private": true,
   "main": "src/main.js",
   "scripts": {
@@ -18,8 +18,8 @@
     "electron-updater": "^6.8.9"
   },
   "build": {
-    "appId": "com.speednum.desktop",
-    "productName": "SpeedNum Desktop",
+    "appId": "com.spidnums.desktop",
+    "productName": "SpidNums Desktop",
     "files": [
       "src/**/*",
       "renderer/**/*",
@@ -32,8 +32,8 @@
     },
     "protocols": [
       {
-        "name": "SpeedNum Desktop deep link",
-        "schemes": ["speednum"]
+        "name": "SpidNums Desktop deep link",
+        "schemes": ["spidnums"]
       }
     ],
     "publish": [

@@ -1,5 +1,5 @@
 -- =============================================================================
--- SpeedNum — internal notes about a staff member
+-- SpidNums — internal notes about a staff member
 -- Target: Supabase Postgres (>= 15)
 -- Run order: ... -> 0016_client_messages.sql -> 0017_team_notes.sql
 --

@@ -5,18 +5,18 @@
  */
 
 export const SITE = {
-  name: "SpeedNum",
-  legalName: "SpeedNum Technologies Inc.",
+  name: "SpidNums",
+  legalName: "SpidNums Technologies Inc.",
   tagline: "Practice management for accounting firms",
-  domain: "speednum.com",
-  url: process.env.NEXT_PUBLIC_SITE_URL ?? "https://speednum.com",
+  domain: "spidnums.com",
+  url: process.env.NEXT_PUBLIC_SITE_URL ?? "https://spidnums.com",
   description:
     "One home for every client, every task and every CRA deadline. Colour-coded reminders, e-signed engagement letters and a live SLA dashboard — so nothing slips and everything is on record.",
   founded: 2026,
   phones: ["+1-780-952-6108", "+1-780-932-6405"],
-  email: "hello@speednum.com",
-  salesEmail: "sales@speednum.com",
-  privacyEmail: "privacy@speednum.com",
+  email: "hello@spidnums.com",
+  salesEmail: "sales@spidnums.com",
+  privacyEmail: "privacy@spidnums.com",
   address: {
     line1: "MOSAIC ENCOR 56-4850 Terwillegar Common N.W.",
     city: "Edmonton",
@@ -193,7 +193,7 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         label: "Bills",
         href: "/bills",
         icon: "receipt",
-        description: "What the firm spends running the practice, including your SpeedNum subscription",
+        description: "What the firm spends running the practice, including your SpidNums subscription",
       },
       {
         label: "Reporting",
@@ -296,13 +296,13 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         ownerOnly: true,
       },
       {
-        // The company owner's line to the SpeedNum platform team (the
+        // The company owner's line to the SpidNums platform team (the
         // superadmin's Support inbox). ownerOnly to match the backend gate
         // (OwnerOrSuperadminDep on /support/*) — Member/Viewer never see it.
         label: "Platform support",
         href: "/support",
         icon: "life-buoy",
-        description: "Message the SpeedNum platform team about your account",
+        description: "Message the SpidNums platform team about your account",
         ownerOnly: true,
       },
       {

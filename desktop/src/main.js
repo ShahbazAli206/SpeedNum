@@ -35,7 +35,7 @@ const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 // — HTTPS only, ever, no fallback.
 function assertHttps(baseUrl) {
   if (!/^https:\/\//i.test(baseUrl)) {
-    throw new Error("The SpeedNum backend URL must be HTTPS.");
+    throw new Error("The SpidNums backend URL must be HTTPS.");
   }
 }
 
@@ -46,11 +46,11 @@ let session = null; // { baseUrl, accessToken, refreshToken, profile }
 let updater = null;
 let stopUpdateChecks = null;
 
-const DEEP_LINK_PROTOCOL = "speednum";
+const DEEP_LINK_PROTOCOL = "spidnums";
 
 /**
- * The web dashboard's "Download App" button opens speednum://check-update
- * (or speednum://version) to detect whether the app is installed and, if
+ * The web dashboard's "Download App" button opens spidnums://check-update
+ * (or spidnums://version) to detect whether the app is installed and, if
  * so, ask it to check for updates — see PHASE 10-13 of the desktop
  * distribution work: the website is only a launcher, never the authority on
  * installed/latest version, and must never be able to make this process run
@@ -74,9 +74,9 @@ function handleDeepLink(rawUrl) {
   }
   if (parsed.protocol !== `${DEEP_LINK_PROTOCOL}:`) return;
 
-  // Electron/Windows URL parsing puts the part after `speednum://` into
-  // either `hostname` (speednum://check-update) or `pathname`
-  // (speednum:check-update) depending on platform quirks — check both,
+  // Electron/Windows URL parsing puts the part after `spidnums://` into
+  // either `hostname` (spidnums://check-update) or `pathname`
+  // (spidnums:check-update) depending on platform quirks — check both,
   // still only ever as an exact match against the allow-list below.
   const command = (parsed.hostname || parsed.pathname.replace(/^\/+/, "")).toLowerCase();
 
@@ -162,7 +162,7 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
 }
 
-// Windows delivers a speednum:// deep link by launching a *second* process
+// Windows delivers a spidnums:// deep link by launching a *second* process
 // with the URL as a command-line argument. Without a single-instance lock
 // that would silently open a second, session-less window instead of routing
 // the link to the one already running — this lock plus the "second-instance"
@@ -194,7 +194,7 @@ if (!gotSingleInstanceLock) {
     // isn't reliably at index 1 (e.g. `electron --remote-debugging-port=9502 .`
     // puts a CLI flag there instead), and registering that flag as the fixed
     // launch argument silently corrupts the OS-level protocol handler — every
-    // future speednum:// click then launches electron.exe against a bogus
+    // future spidnums:// click then launches electron.exe against a bogus
     // path and fails, until the registry entry is manually corrected.
     if (process.defaultApp) {
       app.setAsDefaultProtocolClient(DEEP_LINK_PROTOCOL, process.execPath, [app.getAppPath()]);
@@ -208,7 +208,7 @@ if (!gotSingleInstanceLock) {
     updater = setupAutoUpdater({
       onStatus: (status) => {
         debugLog(`updateStatus: ${JSON.stringify(status)}`);
-        mainWindow?.webContents.send("speednum:updateStatus", status);
+        mainWindow?.webContents.send("spidnums:updateStatus", status);
       },
     });
 
@@ -256,7 +256,7 @@ app.on("window-all-closed", () => {
 /* No backend credential (Postgres, MinIO) ever crosses this boundary.     */
 /* ---------------------------------------------------------------------- */
 
-ipcMain.handle("speednum:restoreSession", async () => {
+ipcMain.handle("spidnums:restoreSession", async () => {
   const saved = await secureStore.load();
   if (!saved) return null;
   try {
@@ -275,7 +275,7 @@ ipcMain.handle("speednum:restoreSession", async () => {
   }
 });
 
-ipcMain.handle("speednum:login", async (_event, { baseUrl, email, password }) => {
+ipcMain.handle("spidnums:login", async (_event, { baseUrl, email, password }) => {
   assertHttps(baseUrl);
   const result = await backupClient.login({ baseUrl, email, password });
   if (!result.profile.is_superadmin) {
@@ -292,7 +292,7 @@ ipcMain.handle("speednum:login", async (_event, { baseUrl, email, password }) =>
   return { profile: result.profile };
 });
 
-ipcMain.handle("speednum:logout", async () => {
+ipcMain.handle("spidnums:logout", async () => {
   session = null;
   if (stopScheduler) {
     stopScheduler();
@@ -301,22 +301,22 @@ ipcMain.handle("speednum:logout", async () => {
   await secureStore.clear();
 });
 
-ipcMain.handle("speednum:listBackups", async () => {
+ipcMain.handle("spidnums:listBackups", async () => {
   await ensureFreshAccessToken();
   return backupClient.listSnapshots({ baseUrl: session.baseUrl, accessToken: session.accessToken });
 });
 
-ipcMain.handle("speednum:triggerBackup", async () => {
+ipcMain.handle("spidnums:triggerBackup", async () => {
   await ensureFreshAccessToken();
   return backupClient.triggerBackup({ baseUrl: session.baseUrl, accessToken: session.accessToken });
 });
 
-ipcMain.handle("speednum:getSyncState", async () => {
+ipcMain.handle("spidnums:getSyncState", async () => {
   const { statePath } = userDataPaths();
   return syncState.load(statePath);
 });
 
-ipcMain.handle("speednum:runSyncNow", async (_event, { backupPassword }) => {
+ipcMain.handle("spidnums:runSyncNow", async (_event, { backupPassword }) => {
   await ensureFreshAccessToken();
   await ensureDeviceRegistered();
   const { statePath, backupsDir } = userDataPaths();
@@ -327,11 +327,11 @@ ipcMain.handle("speednum:runSyncNow", async (_event, { backupPassword }) => {
     backupPassword,
     backupsDir,
     statePath,
-    log: (msg) => mainWindow?.webContents.send("speednum:syncLog", msg),
+    log: (msg) => mainWindow?.webContents.send("spidnums:syncLog", msg),
   });
 });
 
-ipcMain.handle("speednum:setSyncInterval", async (_event, { minutes, backupPassword }) => {
+ipcMain.handle("spidnums:setSyncInterval", async (_event, { minutes, backupPassword }) => {
   const { statePath, backupsDir } = userDataPaths();
   const state = await syncState.load(statePath);
   state.syncIntervalMinutes = minutes;
@@ -348,13 +348,13 @@ ipcMain.handle("speednum:setSyncInterval", async (_event, { minutes, backupPassw
       backupPassword,
       backupsDir,
       statePath,
-      log: (msg) => mainWindow?.webContents.send("speednum:syncLog", msg),
+      log: (msg) => mainWindow?.webContents.send("spidnums:syncLog", msg),
     });
   }, minutes);
   return { ok: true };
 });
 
-ipcMain.handle("speednum:runRestoreDrill", async (_event, { snapshotId, backupPassword, apiImage }) => {
+ipcMain.handle("spidnums:runRestoreDrill", async (_event, { snapshotId, backupPassword, apiImage }) => {
   await ensureFreshAccessToken();
   await ensureDeviceRegistered();
   const { backupsDir } = userDataPaths();
@@ -363,7 +363,7 @@ ipcMain.handle("speednum:runRestoreDrill", async (_event, { snapshotId, backupPa
   const fs = require("fs");
 
   const encPath = path.join(backupsDir, snapshotId, "postgres_dump.snbk");
-  const decPath = path.join(os.tmpdir(), `speednum-drill-${Date.now()}.sql.gz`);
+  const decPath = path.join(os.tmpdir(), `spidnums-drill-${Date.now()}.sql.gz`);
   await cryptoEnvelope.decryptFile(encPath, decPath, backupPassword);
 
   try {
@@ -386,9 +386,9 @@ ipcMain.handle("speednum:runRestoreDrill", async (_event, { snapshotId, backupPa
   }
 });
 
-ipcMain.handle("speednum:getAppVersion", () => app.getVersion());
+ipcMain.handle("spidnums:getAppVersion", () => app.getVersion());
 
-ipcMain.handle("speednum:checkForUpdates", async () => {
+ipcMain.handle("spidnums:checkForUpdates", async () => {
   if (!app.isPackaged) {
     return { state: "error", message: "Update checks are only meaningful in a packaged build." };
   }
@@ -396,12 +396,12 @@ ipcMain.handle("speednum:checkForUpdates", async () => {
   return { ok: true };
 });
 
-ipcMain.handle("speednum:downloadUpdate", async () => {
+ipcMain.handle("spidnums:downloadUpdate", async () => {
   await updater.downloadUpdate();
   return { ok: true };
 });
 
-ipcMain.handle("speednum:installUpdate", () => {
+ipcMain.handle("spidnums:installUpdate", () => {
   // Quits and relaunches into the new version — nothing after this call runs.
   updater.quitAndInstall();
 });

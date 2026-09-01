@@ -42,7 +42,7 @@ def test_config_allowlist_is_json_serialisable():
 
 
 def test_sha256_bytes_matches_hashlib():
-    data = b"speednum disaster recovery test payload"
+    data = b"spidnums disaster recovery test payload"
     assert _sha256_bytes(data) == hashlib.sha256(data).hexdigest()
 
 

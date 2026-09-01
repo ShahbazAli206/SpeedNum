@@ -199,7 +199,7 @@ export function AdminClient() {
     ],
     [],
   );
-  const tenantExport = useSpreadsheetExport(filtered, tenantExportColumns, "speednum-tenants");
+  const tenantExport = useSpreadsheetExport(filtered, tenantExportColumns, "spidnums-tenants");
 
   const auditExportColumns = useMemo(
     () => [
@@ -212,7 +212,7 @@ export function AdminClient() {
     ],
     [],
   );
-  const auditExport = useSpreadsheetExport(audit.data ?? [], auditExportColumns, "speednum-audit-log");
+  const auditExport = useSpreadsheetExport(audit.data ?? [], auditExportColumns, "spidnums-audit-log");
 
   if (forbidden) {
     return (

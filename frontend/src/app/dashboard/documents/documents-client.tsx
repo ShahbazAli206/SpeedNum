@@ -290,7 +290,7 @@ export function DocumentsClient({
           ]}
           emptyTitle="No documents match"
           emptyDescription="Try clearing the search or the type filter."
-          exportName="speednum-documents"
+          exportName="spidnums-documents"
         />
       </section>
     </>

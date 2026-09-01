@@ -227,7 +227,7 @@ export function ServicesClient({
   const { exportCsv, exportXlsx, exportPdf, exporting } = useSpreadsheetExport(
     services,
     exportColumns,
-    "speednum-services",
+    "spidnums-services",
   );
 
   const set = <K extends keyof FormValues>(key: K, value: FormValues[K]) =>

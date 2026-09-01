@@ -1,3 +1,3 @@
-"""SpeedNum practice-management API."""
+"""SpidNums practice-management API."""
 
 __version__ = "1.0.0"

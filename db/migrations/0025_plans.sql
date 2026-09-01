@@ -1,5 +1,5 @@
 -- =============================================================================
--- SpeedNum — editable plan catalog
+-- SpidNums — editable plan catalog
 -- Run order: ... -> 0024_tenant_plan_expiry.sql -> 0025_plans.sql
 --
 -- The billing catalog (plan names, prices, seat caps, and the set of plans

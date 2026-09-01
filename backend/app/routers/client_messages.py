@@ -17,29 +17,77 @@ single column drives each side's unread badge without a second table.
 Guardrail: this channel is client ↔ firm only. The firm never reaches the
 platform provider here, and clients/staff never reach it either — that separate
 company-Owner ↔ provider channel is app/routers/support.py, Owner-gated.
+
+Attachments reuse the presigned `documents` bucket and the mint-path pattern
+from support.py / client_documents.py — the server names every object under
+`{tenant_id}/client-messages/{client_id}/`, never the browser. The same
+recipient/ownership rules above decide who can attach or download a file;
+attachments introduce no new reach.
 """
 
 from __future__ import annotations
 
+import re
 import uuid
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select, update
 
 from ..deps import BookScopeDep, ClientScopeDep, SessionDep
-from ..models import Client, ClientMessage, Profile
+from ..models import Client, ClientMessage, ClientMessageAttachment, Profile
 from ..permissions import client_owner_clause
-from ..schemas import ClientMessageCounts, ClientMessageCreate, ClientMessageRead
-from ..services import audit
+from ..schemas import (
+    ClientMessageCounts,
+    ClientMessageCreate,
+    ClientMessageRead,
+    DocumentDownloadUrl,
+    DocumentUploadUrl,
+    DocumentUploadUrlRequest,
+)
+from ..services import audit, storage
 from ..utils import ensure_client_in_tenant, ensure_found, now_utc, read
 
 router = APIRouter(prefix="/client-portal/messages", tags=["client-portal"])
 
 _PREVIEW_LEN = 160
+_UNSAFE_NAME = re.compile(r"[^\w.\-]+")
 
 
-def _preview(body: str) -> str:
-    return body if len(body) <= _PREVIEW_LEN else f"{body[: _PREVIEW_LEN - 3]}..."
+def _preview(body: str, attachment_count: int = 0) -> str:
+    body = body.strip()
+    if body:
+        return body if len(body) <= _PREVIEW_LEN else f"{body[: _PREVIEW_LEN - 3]}..."
+    if attachment_count:
+        return f"📎 {attachment_count} attachment{'s' if attachment_count != 1 else ''}"
+    return ""
+
+
+def _prefix_for(tenant_id: uuid.UUID, client_id: uuid.UUID) -> str:
+    """Every object lives under `{tenant}/client-messages/{client}/`, which is
+    what makes a storage path checkable rather than merely opaque — see
+    _mint_path and client_documents.py's identical pattern."""
+    return f"{tenant_id}/client-messages/{client_id}/"
+
+
+def _mint_path(tenant_id: uuid.UUID, client_id: uuid.UUID, name: str) -> str:
+    """The server names the object; the browser never gets to — same reasoning
+    as client_documents.py's _mint_path."""
+    safe = _UNSAFE_NAME.sub("_", name).strip("._") or "file"
+    return f"{_prefix_for(tenant_id, client_id)}{uuid.uuid4()}-{safe[:120]}"
+
+
+def _storage_unavailable(exc: storage.StorageError) -> HTTPException:
+    return HTTPException(status.HTTP_424_FAILED_DEPENDENCY, str(exc))
+
+
+def _assert_may_reach_client(scope: ClientScopeDep, client: Client) -> None:
+    """The exact rule create_message already enforced before attachments
+    existed: a restricted staff member (no clients.view_all) may only touch
+    clients assigned to them. A portal login is always scoped to its own
+    client by ClientScopeDep itself, so this is a no-op for that side."""
+    if not scope.is_portal and client_owner_clause(scope.user) is not None:
+        if client.owner_id != scope.user.profile.id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "You can only message clients assigned to you.")
 
 
 def _owned_client_ids(scope: BookScopeDep):
@@ -123,6 +171,56 @@ async def unread_count(session: SessionDep, scope: BookScopeDep) -> ClientMessag
     return ClientMessageCounts(unread=int(total or 0))
 
 
+@router.post("/attachments/upload-url", response_model=DocumentUploadUrl)
+async def create_upload_url(
+    payload: DocumentUploadUrlRequest, session: SessionDep, scope: ClientScopeDep
+) -> DocumentUploadUrl:
+    """Mint a signed slot for one attachment on the caller's own thread. Same
+    reach as create_message below — minting a path doesn't yet write anything,
+    but it's still gated so a restricted staff member can't stage an upload
+    against a client they could never actually message."""
+    client = await ensure_client_in_tenant(session, scope.tenant_id, scope.client_id)
+    _assert_may_reach_client(scope, client)
+
+    path = _mint_path(scope.tenant_id, scope.client_id, payload.name)
+    try:
+        url, token = await storage.create_upload_url(path)
+    except storage.StorageError as exc:
+        raise _storage_unavailable(exc) from exc
+    return DocumentUploadUrl(storage_path=path, token=token, url=url)
+
+
+@router.get("/attachments/{attachment_id}/download-url", response_model=DocumentDownloadUrl)
+async def attachment_download_url(
+    attachment_id: uuid.UUID, session: SessionDep, scope: BookScopeDep
+) -> DocumentDownloadUrl:
+    """Download is keyed by attachment id alone; the row's own client_id is
+    checked against the caller's scope exactly like _own_message_for_read
+    checks a message — a client only ever reaches its own client_id, staff
+    only the clients they're allowed to see."""
+    att = await session.scalar(
+        select(ClientMessageAttachment).where(
+            ClientMessageAttachment.id == attachment_id,
+            ClientMessageAttachment.tenant_id == scope.tenant_id,
+        )
+    )
+    ensure_found(att, "Attachment")
+    if scope.is_portal:
+        if att.client_id != scope.client_id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Attachment not found")
+    elif client_owner_clause(scope.user) is not None:
+        owned = await session.scalar(
+            select(Client.id).where(Client.id == att.client_id, Client.owner_id == scope.user.profile.id)
+        )
+        if owned is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Attachment not found")
+    try:
+        url = await storage.create_download_url(att.storage_path)
+    except storage.StorageError as exc:
+        raise _storage_unavailable(exc) from exc
+    return DocumentDownloadUrl(url=url, expires_in=storage.DOWNLOAD_TTL_SECONDS)
+
+
 @router.post("", response_model=ClientMessageRead, status_code=status.HTTP_201_CREATED)
 async def create_message(
     payload: ClientMessageCreate, session: SessionDep, scope: ClientScopeDep
@@ -131,11 +229,7 @@ async def create_message(
     staff post to a specific client via ?client_id= (only one they're allowed to
     reach). Each direction notifies the other side, and only the other side."""
     client = await ensure_client_in_tenant(session, scope.tenant_id, scope.client_id)
-
-    if not scope.is_portal and client_owner_clause(scope.user) is not None:
-        # A restricted staff member may only message clients assigned to them.
-        if client.owner_id != scope.user.profile.id:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "You can only message clients assigned to you.")
+    _assert_may_reach_client(scope, client)
 
     sender_name = scope.user.profile.full_name or scope.user.profile.email
     row = ClientMessage(
@@ -147,10 +241,29 @@ async def create_message(
         subject=payload.subject,
         body=payload.body,
     )
+
+    prefix = _prefix_for(scope.tenant_id, scope.client_id)
+    for att in payload.attachments:
+        if not att.storage_path.startswith(prefix):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "An attachment's storage_path must come from this thread's upload-url endpoint.",
+            )
+        row.attachments.append(
+            ClientMessageAttachment(
+                tenant_id=scope.tenant_id,
+                client_id=scope.client_id,
+                name=att.name,
+                storage_path=att.storage_path,
+                mime_type=att.mime_type,
+                size_bytes=att.size_bytes,
+            )
+        )
+
     session.add(row)
     await session.flush()
 
-    preview = _preview(payload.body)
+    preview = _preview(payload.body, len(row.attachments))
     client_name = client.business_name or client.legal_name
     if scope.is_portal:
         # Inbound — only the assigned staff and the company Owner(s).
