@@ -1,20 +1,23 @@
 "use client";
 
-import { Building2, CalendarClock, Layers, Paperclip, Pencil, Save, Send, Trash2, Upload, User } from "lucide-react";
+import { Building2, CalendarClock, Layers, Paperclip, Pencil, Play, Save, Send, Square, Trash2, Upload, User } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useConfirm } from "@/components/confirm";
+import { useTimer } from "@/components/tasks/timer-provider";
 import { useToast } from "@/components/toast";
 import { Button, EmptyState, Field, Input, LoadingBlock, Select, Textarea } from "@/components/ui";
 import { del, patch, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import type { ClientRow, Task, TeamRow } from "@/lib/firm-demo";
-import { formatBytes, formatDate, formatDateTime, titleCase } from "@/lib/format";
+import { formatBytes, formatClock, formatDate, formatDateTime, formatDurationShort, titleCase } from "@/lib/format";
 import { useAction, useApi } from "@/lib/hooks";
+import { useSession } from "@/lib/session";
 import { taskAttachmentUrl, uploadTaskAttachment } from "@/lib/storage";
-import type { TaskAttachment, TaskComment, TaskPriority, TaskStatus, TaskType } from "@/lib/types";
+import { liveSeconds } from "@/lib/timer";
+import type { TaskAttachment, TaskComment, TaskPriority, TaskStatus, TaskTimer as TaskTimerState, TaskType } from "@/lib/types";
 
 const TYPE_OPTIONS: { value: TaskType; label: string }[] = [
   { value: "internal", label: "Internal" },
@@ -334,10 +337,15 @@ export function TaskDetailClient({
       </div>
 
       {isLive ? (
-        <div className="mt-5 grid gap-5 lg:grid-cols-2">
-          <TaskAttachments taskId={task.id} />
-          <TaskComments taskId={task.id} />
-        </div>
+        <>
+          <div className="mt-5">
+            <TaskTimerCard task={task} />
+          </div>
+          <div className="mt-5 grid gap-5 lg:grid-cols-2">
+            <TaskAttachments taskId={task.id} />
+            <TaskComments taskId={task.id} />
+          </div>
+        </>
       ) : null}
     </>
   );
@@ -352,6 +360,140 @@ function MetaItem({ icon, label, value }: { icon?: ReactNode; label: string; val
       </dt>
       <dd className="mt-1 text-[13.5px] font-medium text-ink">{value}</dd>
     </div>
+  );
+}
+
+/**
+ * Time tracking for one task. Everyone who can already see this task's
+ * detail page sees the total logged; only the task's own assignee gets the
+ * Start/Resume/Stop control — matching backend/app/routers/task_timers.py's
+ * own reach exactly.
+ */
+function TaskTimerCard({ task }: { task: Task }) {
+  const session = useSession();
+  const confirm = useConfirm();
+  const toast = useToast();
+  const { activeTimer, start, stop } = useTimer();
+  const myTimer = useApi<TaskTimerState>(`/tasks/${task.id}/timer`);
+  const [busy, setBusy] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+
+  const isAssignee = Boolean(session.me?.profile.id) && session.me?.profile.id === task.assignee_id;
+  const isRunningHere = activeTimer?.task_id === task.id && activeTimer.status === "running";
+  const isRunningElsewhere = Boolean(activeTimer) && activeTimer!.status === "running" && activeTimer!.task_id !== task.id;
+  const banked = myTimer.data?.accumulated_seconds ?? 0;
+
+  useEffect(() => {
+    if (!isRunningHere) return;
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [isRunningHere]);
+
+  const displaySeconds = isRunningHere && activeTimer ? liveSeconds(activeTimer, now) : task.time_spent_seconds;
+
+  const doStart = async () => {
+    if (isRunningElsewhere && activeTimer) {
+      const switchOk = await confirm({
+        title: "Stop your other timer?",
+        description: `You already have a timer running on "${activeTimer.task_title}". Stop it and start this one instead?`,
+        confirmLabel: "Switch timer",
+      });
+      if (!switchOk) return;
+      setBusy(true);
+      try {
+        await stop();
+      } catch (error) {
+        toast.error("Could not stop the other timer", message(error, "Please try again."));
+        setBusy(false);
+        return;
+      }
+    }
+
+    const resuming = banked > 0;
+    const forClient = task.client_id ? ` for ${task.client_name}` : "";
+    const ok = await confirm({
+      title: resuming ? "Resume this timer?" : "Start this timer?",
+      description: `Are you sure you're ${resuming ? "resuming" : "starting"} work on "${task.title}"${forClient}?`,
+      confirmLabel: resuming ? "Resume timer" : "Start timer",
+      cancelLabel: "Not now",
+    });
+    if (!ok) {
+      setBusy(false);
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await start(task.id);
+      await myTimer.reload();
+      toast.success(resuming ? "Timer resumed" : "Timer started", task.title);
+    } catch (error) {
+      toast.error("Could not start the timer", message(error, "Please try again."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doStop = async () => {
+    const ok = await confirm({
+      title: "Stop the timer?",
+      description: `Stop tracking time on "${task.title}"? You can resume later from right where you left off.`,
+      confirmLabel: "Stop timer",
+      cancelLabel: "Keep running",
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await stop();
+      await myTimer.reload();
+      toast.success("Timer stopped", task.title);
+    } catch (error) {
+      toast.error("Could not stop the timer", message(error, "Please try again."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="rounded-xl border border-line bg-surface shadow-[var(--shadow-card)]">
+      <div className="border-b border-line px-5 py-4">
+        <h2 className="text-[15px] font-semibold text-ink">Time tracking</h2>
+        <p className="mt-0.5 text-[13px] text-muted">
+          {isAssignee ? "Your time logged against this task." : "Time logged against this task."}
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 p-5">
+        <div>
+          <p
+            className={cn(
+              "font-mono text-[22px] font-bold tabular-nums",
+              isRunningHere ? "text-brand" : "text-ink",
+            )}
+          >
+            {isRunningHere ? formatClock(displaySeconds) : formatDurationShort(displaySeconds)}
+          </p>
+          <p className="mt-0.5 text-[12px] text-muted">
+            {isRunningHere ? "Running now" : displaySeconds > 0 ? "Total time logged" : "No time logged yet"}
+          </p>
+        </div>
+        {isAssignee ? (
+          isRunningHere ? (
+            <Button
+              variant="secondary"
+              icon={<Square className="size-3.5" fill="currentColor" />}
+              loading={busy}
+              onClick={() => void doStop()}
+            >
+              Stop
+            </Button>
+          ) : (
+            <Button icon={<Play className="size-4" />} loading={busy} onClick={() => void doStart()}>
+              {banked > 0 ? "Resume" : "Start"}
+            </Button>
+          )
+        ) : null}
+      </div>
+    </section>
   );
 }
 

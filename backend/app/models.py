@@ -410,6 +410,34 @@ class Task(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class TaskTimer(Base):
+    """Time tracked on a task by one assignee. One row per (task_id,
+    assignee_id) — reassigning a task later doesn't erase a previous
+    assignee's own logged time, it just starts a fresh row for whoever picks
+    it up next. See routers/task_timers.py and
+    db/migrations/0028_task_timers.sql."""
+
+    __tablename__ = "task_timers"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    assignee_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(Text, default="stopped")
+    accumulated_seconds: Mapped[int] = mapped_column(BigInteger, default=0)
+    # Set only while status == "running"; the moment the current segment began.
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Deadline(Base):
     __tablename__ = "deadlines"
 

@@ -86,6 +86,25 @@ export function formatPercent(value: number | null | undefined, decimals = 0) {
 }
 
 /** Human file size for the documents list. */
+/** 0 → "0:00:00", 3661 → "1:01:01" — the sidebar timer's live-ticking clock. */
+export function formatClock(totalSeconds: number) {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${h}:${pad(m)}:${pad(s)}`;
+}
+
+/** 0 → "0m", 5400 → "1h 30m" — the compact "time spent" figure on a task row. */
+export function formatDurationShort(totalSeconds: number) {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(seconds / 3600);
+  const m = Math.round((seconds % 3600) / 60);
+  if (h === 0) return `${m}m`;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
 export function formatBytes(bytes: number | null | undefined) {
   const size = Number(bytes ?? 0);
   if (size <= 0) return "0 KB";

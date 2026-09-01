@@ -850,6 +850,28 @@ class TaskRead(ORMModel):
     completed_at: datetime | None = None
     custom: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime | None = None
+    # Timer summary (routers/task_timers.py) — banked seconds across every
+    # assignee who ever tracked time on this task, plus whether one of them
+    # currently has it running. time_spent_seconds excludes the live segment;
+    # add (now - timer_started_at) client-side while timer_running is true.
+    time_spent_seconds: int = 0
+    timer_running: bool = False
+    timer_started_at: datetime | None = None
+
+
+class TaskTimerRead(ORMModel):
+    """The caller's own timer state on one task — from GET/POST
+    .../tasks/{id}/timer* and GET /tasks/timers/active. accumulated_seconds
+    is banked time only (excludes the live segment); the frontend ticks it up
+    locally using started_at while status is "running"."""
+
+    task_id: uuid.UUID
+    task_title: str
+    client_id: uuid.UUID | None = None
+    client_name: str | None = None
+    status: Literal["running", "stopped"] = "stopped"
+    accumulated_seconds: int = 0
+    started_at: datetime | None = None
 
 
 class TaskAttachmentCreate(BaseModel):

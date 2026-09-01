@@ -11,6 +11,7 @@ import {
   Pencil,
   Plus,
   Table2,
+  Timer,
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
@@ -26,7 +27,7 @@ import { ButtonLink, Select } from "@/components/ui";
 import { del, patch } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { daysFromToday, type Task } from "@/lib/firm-demo";
-import { dueLabel, formatDate, titleCase } from "@/lib/format";
+import { dueLabel, formatDate, formatDurationShort, titleCase } from "@/lib/format";
 import type { TaskStatus, TaskType } from "@/lib/types";
 
 const COLUMNS: { status: TaskStatus; label: string; dot: string }[] = [
@@ -172,7 +173,18 @@ export function WorkflowsClient({
       cell: (row) => (
         <div className="min-w-0">
           <p className="truncate font-medium text-ink">{row.title}</p>
-          <p className="text-[11.5px] text-muted">{TYPE_LABEL[row.task_type]}</p>
+          <p className={cn("flex items-center gap-1 text-[11.5px]", row.timer_running ? "font-medium text-brand" : "text-muted")}>
+            {TYPE_LABEL[row.task_type]}
+            {row.timer_running ? (
+              <>
+                {" · "}
+                <span className="size-1.5 animate-pulse rounded-full bg-brand" />
+                running
+              </>
+            ) : row.time_spent_seconds > 0 ? (
+              ` · ${formatDurationShort(row.time_spent_seconds)}`
+            ) : null}
+          </p>
         </div>
       ),
       sortValue: (row) => row.title,
@@ -421,6 +433,23 @@ export function WorkflowsClient({
                           </span>
                           <span className="text-[11.5px] tabular-nums text-muted">{task.estimate_hours ?? 0}h</span>
                         </div>
+
+                        {task.timer_running || task.time_spent_seconds > 0 ? (
+                          <div
+                            className={cn(
+                              "mt-2 flex items-center gap-1 text-[11px] font-medium",
+                              task.timer_running ? "text-brand" : "text-muted",
+                            )}
+                          >
+                            {task.timer_running ? (
+                              <span className="size-1.5 animate-pulse rounded-full bg-brand" />
+                            ) : (
+                              <Timer className="size-3" />
+                            )}
+                            {formatDurationShort(task.time_spent_seconds)}
+                            {task.timer_running ? " · running" : ""}
+                          </div>
+                        ) : null}
 
                         {/* Inline status change — no need to open the card */}
                         <span

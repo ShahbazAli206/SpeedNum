@@ -29,6 +29,8 @@ import { Icon } from "@/components/icon";
 import { Logo } from "@/components/logo";
 import { CallLauncher } from "@/components/calls/call-launcher";
 import { CallProvider } from "@/components/calls/call-provider";
+import { TaskTimerWidget } from "@/components/tasks/task-timer-widget";
+import { TimerProvider } from "@/components/tasks/timer-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge, ButtonLink, EmptyState, Menu, Skeleton, type Tone } from "@/components/ui";
 import { get } from "@/lib/api";
@@ -66,7 +68,9 @@ export function FirmShell({ children }: { children: ReactNode }) {
     <SessionProvider>
       <FirmBrandingProvider>
         <CallProvider>
-          <FirmShellInner>{children}</FirmShellInner>
+          <TimerProvider>
+            <FirmShellInner>{children}</FirmShellInner>
+          </TimerProvider>
         </CallProvider>
       </FirmBrandingProvider>
     </SessionProvider>
@@ -399,6 +403,10 @@ function FirmShellInner({ children }: { children: ReactNode }) {
       </nav>
 
       <div className="border-t border-line p-3">
+        <div className={cn("mb-2", collapsed && "flex justify-center")}>
+          <TaskTimerWidget collapsed={collapsed} />
+        </div>
+
         <div className={cn("mb-2", collapsed && "flex justify-center")}>
           <DesktopAppButton collapsed={collapsed} />
         </div>

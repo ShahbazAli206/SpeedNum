@@ -4,6 +4,7 @@ import { LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 
+import { useTimer } from "@/components/tasks/timer-provider";
 import { cn } from "@/lib/cn";
 import { AUTH_CONFIGURED } from "@/lib/auth";
 import { logout } from "@/lib/auth-client";
@@ -22,8 +23,13 @@ import { logout } from "@/lib/auth-client";
  */
 export function useSignOut() {
   const router = useRouter();
+  // A no-op outside the firm shell (client-portal logins never mount
+  // TimerProvider — see components/tasks/timer-provider.tsx's fallback), so
+  // this is safe to call from either shell without checking which one first.
+  const { stopIfRunning } = useTimer();
 
   return useCallback(async () => {
+    await stopIfRunning();
     try {
       if (AUTH_CONFIGURED) {
         await logout();
@@ -35,7 +41,7 @@ export function useSignOut() {
     // refresh() re-runs the proxy so the server forgets the session cookie too.
     router.replace("/login");
     router.refresh();
-  }, [router]);
+  }, [router, stopIfRunning]);
 }
 
 export function SignOutButton({ className }: { className?: string }) {

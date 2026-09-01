@@ -324,6 +324,9 @@ export interface Task {
   due_date: string | null;
   estimate_hours: number | null;
   created_at: string | null;
+  time_spent_seconds: number;
+  timer_running: boolean;
+  timer_started_at: string | null;
 }
 
 export interface Project {
@@ -425,6 +428,11 @@ const TASKS: Task[] = RAW_TASKS.map((task) => {
     // A plausible creation date rather than a hand-typed one per row — two
     // weeks before it's due, or a month back for the one task with no date.
     created_at: task.due_date ? offsetDate(task.due_date, -14) : offsetDate(TODAY, -30),
+    // No demo timer data — the feature only means anything against a real
+    // Task Master task with a real assignee session behind it.
+    time_spent_seconds: 0,
+    timer_running: false,
+    timer_started_at: null,
   };
 });
 

@@ -97,6 +97,9 @@ export function toDemoTask(task: Task): DemoTask {
     due_date: task.due_date,
     estimate_hours: task.estimate_hours ?? 0,
     created_at: task.created_at ?? "",
+    time_spent_seconds: task.time_spent_seconds,
+    timer_running: task.timer_running,
+    timer_started_at: task.timer_started_at,
   };
 }
 

@@ -10,7 +10,7 @@ from sqlalchemy import func, or_, select
 
 from ..config import settings
 from ..deps import SessionDep, TenantUserDep, client_ip
-from ..models import Client, Profile, Project, Task
+from ..models import Client, Profile, Project, Task, TaskTimer
 from ..permissions import client_owner_clause, has_permission
 from ..services.email import deliver, task_assigned_html
 from ..schemas import (
@@ -213,6 +213,7 @@ async def list_tasks(
         ).all()
     )
     names = await profile_names(session, user.tenant_id)
+    timer_totals = await _timer_totals(session, user.tenant_id, [row.id for row in rows])
 
     return [
         read(
@@ -221,9 +222,39 @@ async def list_tasks(
             client_name=client_names.get(row.client_id),
             project_name=project_names.get(row.project_id),
             assignee_name=names.get(row.assignee_id),
+            time_spent_seconds=timer_totals.get(row.id, {}).get("seconds", 0),
+            timer_running=timer_totals.get(row.id, {}).get("running", False),
+            timer_started_at=timer_totals.get(row.id, {}).get("started_at"),
         )
         for row in rows
     ]
+
+
+async def _timer_totals(
+    session: SessionDep, tenant_id: uuid.UUID, task_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, dict]:
+    """Banked seconds per task, summed across every assignee who has ever
+    tracked time on it (see routers/task_timers.py), plus whether one of
+    them currently has it running and, if so, since when — so Task Master
+    can show a live-ticking "time spent" figure without a second round trip
+    per task. accumulated_seconds excludes the live segment on purpose; the
+    frontend adds (now - started_at) itself while timer_running is true."""
+    if not task_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(TaskTimer.task_id, TaskTimer.accumulated_seconds, TaskTimer.status, TaskTimer.started_at)
+            .where(TaskTimer.tenant_id == tenant_id, TaskTimer.task_id.in_(task_ids))
+        )
+    ).all()
+    totals: dict[uuid.UUID, dict] = {}
+    for task_id, seconds, status_value, started_at in rows:
+        entry = totals.setdefault(task_id, {"seconds": 0, "running": False, "started_at": None})
+        entry["seconds"] += seconds
+        if status_value == "running":
+            entry["running"] = True
+            entry["started_at"] = started_at
+    return totals
 
 
 async def _next_position(session: SessionDep, tenant_id: uuid.UUID, status_value: str) -> int:
@@ -455,10 +486,16 @@ async def _hydrate_task(session: SessionDep, user: TenantUserDep, task: Task) ->
     if task.assignee_id:
         names = await profile_names(session, user.tenant_id)
         assignee_name = names.get(task.assignee_id)
+    timer = (await _timer_totals(session, user.tenant_id, [task.id])).get(
+        task.id, {"seconds": 0, "running": False, "started_at": None}
+    )
     return read(
         TaskRead,
         task,
         client_name=client_name,
         project_name=project_name,
         assignee_name=assignee_name,
+        time_spent_seconds=timer["seconds"],
+        timer_running=timer["running"],
+        timer_started_at=timer["started_at"],
     )

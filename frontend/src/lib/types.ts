@@ -402,6 +402,25 @@ export interface Task {
   completed_at: string | null;
   custom: Record<string, unknown>;
   created_at: string | null;
+  /** Banked seconds across every assignee who has ever tracked time on this
+   * task — excludes the live segment. Add (now - timer_started_at) while
+   * timer_running is true for a live-ticking total. */
+  time_spent_seconds: number;
+  timer_running: boolean;
+  timer_started_at: string | null;
+}
+
+/** GET/POST .../tasks/{id}/timer* and GET /tasks/timers/active — the
+ * caller's own timer state on one task. accumulated_seconds is banked time
+ * only; tick it up locally with started_at while status is "running". */
+export interface TaskTimer {
+  task_id: string;
+  task_title: string;
+  client_id: string | null;
+  client_name: string | null;
+  status: "running" | "stopped";
+  accumulated_seconds: number;
+  started_at: string | null;
 }
 
 export interface Deadline {
