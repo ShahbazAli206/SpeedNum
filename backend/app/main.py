@@ -113,6 +113,12 @@ def _warn_about_configuration() -> None:
             "PUBLIC_APP_URL still points at localhost — sign-in and e-signature links "
             "sent by email will not work."
         )
+    if settings.is_production and not settings.livekit_is_configured:
+        log.warning(
+            "LIVEKIT_URL/LIVEKIT_API_KEY/LIVEKIT_API_SECRET are not fully set — "
+            "video calling will fail token generation until deploy/docker-compose.yml's "
+            "livekit service and deploy/.env are configured (see DEPLOYMENT.md)."
+        )
 
 
 @asynccontextmanager

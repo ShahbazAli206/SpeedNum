@@ -696,3 +696,122 @@ in a spam folder is the same as one never sent.
 returns False, the account is still created, and the UI shows the temporary password on
 screen for the admin to pass on by hand. That is the designed fallback, not a failure — but
 it is not a way to run a firm.
+
+---
+
+## Video calling (LiveKit + coturn)
+
+Self-hosted, per `spidnums_VIDEO_CALL_IMPLEMENTATION_SPEC.md` — no managed video provider.
+Full design context and phase-by-phase status: `VIDEO_CALL_PROGRESS.md`. This section only
+covers deploying the two new infrastructure services (`livekit`, `coturn` in
+`deploy/docker-compose.yml`); it says nothing about the application-level call feature itself,
+which lands in later phases.
+
+**This section has not been run against the real VPS yet.** In particular, the Caddy →
+LiveKit reachability step below (network_mode: host has no presence on the `web` bridge
+network Caddy is on) needs to be verified live — see `deploy/Caddyfile.example`'s
+`video.spidnums.com` block for the two candidate approaches. Everything else here follows the
+same patterns already proven for the `api`/`frontend`/`minio` services.
+
+### DNS
+
+Two new records, both pointing at the VPS's existing public IP (`2.25.108.16` as of this
+writing — see `ARCHITECTURE.md`'s DNS table for the current source of truth):
+
+| Record | Purpose |
+|---|---|
+| `video.spidnums.com` A | LiveKit signaling — Caddy terminates TLS for this one, same as every other Caddy-fronted host |
+| `turn.spidnums.com` A | coturn — **not** fronted by Caddy; coturn terminates its own TLS directly (see below) |
+
+### TLS certificate for coturn
+
+Caddy's automatic ACME issuance only covers hosts Caddy itself serves — `turn.spidnums.com`
+is never proxied by Caddy (raw TURN-over-TLS isn't HTTP), so coturn needs its own certificate
+on disk. Simplest path on a box that already has `certbot` or can install it:
+
+```bash
+# One-time, and every renewal (add to cron/systemd timer — Let's Encrypt certs expire in 90 days):
+sudo certbot certonly --standalone --preferred-challenges http -d turn.spidnums.com
+sudo mkdir -p /home/deploy/certs/turn.spidnums.com
+sudo cp /etc/letsencrypt/live/turn.spidnums.com/fullchain.pem /home/deploy/certs/turn.spidnums.com/
+sudo cp /etc/letsencrypt/live/turn.spidnums.com/privkey.pem   /home/deploy/certs/turn.spidnums.com/
+sudo chown -R deploy:deploy /home/deploy/certs
+```
+
+`--standalone` needs port 80 free for the ACME HTTP-01 challenge — stop Caddy briefly for the
+first issuance and every renewal, or switch to `--preferred-challenges dns` with your DNS
+provider's certbot plugin if that's disruptive. `deploy/docker-compose.yml`'s `coturn` service
+mounts `/home/deploy/certs/turn.spidnums.com` read-only into the container.
+
+### Firewall (UFW)
+
+Every port opened so far on this VPS has been 22/80/443 (see `ARCHITECTURE.md`'s ports
+table). Video calling is the first feature that needs more, and it's a meaningfully larger
+public surface than anything else this app runs — review before opening:
+
+```bash
+sudo ufw allow 7881/tcp comment 'LiveKit ICE/TCP fallback'
+sudo ufw allow 50000:60000/udp comment 'LiveKit WebRTC media'
+sudo ufw allow 3478/udp comment 'coturn STUN/TURN'
+sudo ufw allow 3478/tcp comment 'coturn STUN/TURN (TCP fallback)'
+sudo ufw allow 5349/tcp comment 'coturn TURN/TLS'
+sudo ufw allow 49152:49999/udp comment 'coturn relay range'
+sudo ufw status numbered   # confirm before and after
+```
+
+7880 (LiveKit signaling) is **not** in this list — it's reached only via Caddy on the `web`
+Docker network, same as the API's 8000, and never needs a host firewall rule.
+
+### Deploy steps
+
+```bash
+# 1. Config files — copy the templates and fill in the placeholders (TURN_SHARED_SECRET
+#    must match the same value in .env; external-ip is this VPS's own public IP):
+cd /opt/speednum/deploy
+cp livekit.yaml.example livekit.yaml && chmod 600 livekit.yaml
+cp turnserver.conf.example turnserver.conf && chmod 600 turnserver.conf
+# fill in livekit.yaml's rtc.turn_servers[0].secret and turnserver.conf's
+# static-auth-secret/external-ip by hand, then:
+
+# 2. Add to .env (see .env.example's "Video calling" section):
+#    LIVEKIT_API_KEY=$(openssl rand -hex 16)
+#    LIVEKIT_API_SECRET=$(openssl rand -hex 32)
+#    TURN_SHARED_SECRET=$(openssl rand -hex 32)
+#    — and the matching value into turnserver.conf's static-auth-secret and
+#    livekit.yaml's rtc.turn_servers[0].secret above.
+
+# 3. Add to api.env (see api.env.example's "Video calling" section):
+#    LIVEKIT_URL=wss://video.spidnums.com
+
+# 4. Start the two new services (does not touch api/postgres/minio/frontend):
+docker compose up -d livekit coturn
+
+# 5. Confirm both came up:
+docker compose ps livekit coturn
+docker logs speednum-livekit --tail 50
+docker logs speednum-coturn --tail 50
+
+# 6. Reverse proxy — add video.spidnums.com's block to the VPS's existing Caddy
+#    (see deploy/Caddyfile.example — same separate-compose-project pattern as
+#    every other site block). Validate before reload, always:
+scp Caddyfile.example deploy@<vps>:/home/deploy/apps/caddy/Caddyfile
+ssh deploy@<vps> 'docker exec caddy caddy validate --config /etc/caddy/Caddyfile'
+ssh deploy@<vps> 'docker exec caddy caddy reload --config /etc/caddy/Caddyfile'
+
+# 7. Restart the api container so it picks up LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET:
+docker compose up -d api
+```
+
+### Monitoring (spec §9)
+
+No fixed concurrent-call capacity is promised anywhere in this feature — it must be measured
+against this actual VPS (Phase 13). At minimum, watch:
+
+```bash
+docker stats speednum-livekit speednum-coturn   # CPU/RAM/network, live
+docker logs -f speednum-livekit                  # room/participant lifecycle, reconnects
+```
+
+A proper metrics/alerting pipeline (Prometheus scrape of LiveKit's `/metrics`, coturn's own
+stats) is out of scope for the infrastructure phase — revisit once the application-level call
+feature is far enough along to generate real traffic to measure.

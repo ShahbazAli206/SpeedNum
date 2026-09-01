@@ -20,7 +20,8 @@ All commits for this feature use the `video-call:` message prefix so they're eas
 ## Current status
 
 **Phase 0 (repository analysis) — DONE.**
-Next up: **Phase 1 (LiveKit + coturn infrastructure)**.
+**Phase 1 (LiveKit + coturn infrastructure) — DONE**, with one explicitly-unverified step (see below).
+Next up: **Phase 2 (database models/migrations)**.
 
 ---
 
@@ -138,7 +139,62 @@ Record anything decided that isn't spelled out verbatim in the spec, so it's nev
 ### Phase 0 — Repository analysis — **DONE**
 See findings above. No code modified, per spec §31 ("do not modify code yet").
 
-### Phase 1 — LiveKit + coturn infrastructure — NOT STARTED
+### Phase 1 — LiveKit + coturn infrastructure — **DONE**
+
+Verified LiveKit's current (v1.13.6) self-hosting config schema and coturn integration against
+LiveKit's own `config-sample.yaml` and deployment docs before writing anything (not from
+memory alone — this ecosystem moves fast and getting `rtc.turn_servers` vs. the embedded
+`turn:` block wrong would have been a silent, hard-to-debug mistake). Confirmed:
+
+- `rtc.turn_servers[]` (host/port/protocol/secret/ttl) is how LiveKit points at an *external*
+  TURN server (our coturn) — distinct from the top-level `turn:` block, which configures
+  LiveKit's *own* embedded TURN server (left `enabled: false`, per the spec's explicit
+  "self-hosted coturn" decision, not LiveKit's built-in one).
+- `LIVEKIT_KEYS` env var (format `"key: secret"`) is a real, documented alternative to a
+  `keys:` block in the yaml file — used so the API key/secret never has to be written to disk
+  in `livekit.yaml` at all, only passed as an env var interpolated from `deploy/.env`.
+- Pinned versions: `livekit/livekit-server:v1.13.6` (current stable as of this writing),
+  `coturn/coturn:4.17.2` (current stable). Both should be bumped deliberately, not silently,
+  when actually deploying — check for newer stable tags first.
+
+**Files changed** (all infrastructure/config — no application logic):
+- `deploy/docker-compose.yml` — added `livekit` and `coturn` services, both `network_mode: host`
+  (not the `web`/`internal` networks everything else uses); added `LIVEKIT_API_KEY`/`_SECRET`
+  to the `api` service's environment; updated the stale header comment (it still said "four
+  services" and didn't mention `frontend`, which predates this work)
+- `deploy/livekit.yaml.example` (new), `deploy/turnserver.conf.example` (new)
+- `deploy/.env.example` — `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `TURN_SHARED_SECRET`
+- `deploy/api.env.example` — `LIVEKIT_URL`, `CALL_RINGING_TIMEOUT_SECONDS`
+- `deploy/Caddyfile.example` — `video.spidnums.com` block; documented (not resolved) how Caddy
+  reaches a host-networked LiveKit container
+- `backend/app/config.py` — `livekit_url`/`livekit_api_key`/`livekit_api_secret`/
+  `call_ringing_timeout_seconds` Settings fields + `livekit_is_configured` property
+- `backend/app/main.py` — boots-time warning when LiveKit isn't configured in production
+  (same pattern as the existing JWT/email/CORS warnings)
+- `backend/requirements.txt` — `livekit-api>=1.2,<2.0`
+- `.gitignore` — `deploy/livekit.yaml`, `deploy/turnserver.conf` (real secret-bearing configs;
+  `.example` versions are tracked, matching the existing `api.env`/`api.env.example` split)
+- `DEPLOYMENT.md` — new "Video calling (LiveKit + coturn)" section: DNS, coturn's own TLS cert
+  (Caddy doesn't cover it — not an HTTP host), UFW firewall rules, step-by-step deploy, monitoring
+
+**⚠️ Not verified — needs hands-on confirmation on the real VPS before this is actually deployed:**
+`livekit`/`coturn` use `network_mode: host` (the documented-correct pattern for WebRTC's large
+UDP port range — Docker's per-published-port iptables/proxy overhead is prohibitive otherwise),
+which means the container has no presence on the `web` bridge network the VPS's existing Caddy
+uses to reach `speednum-api`/`speednum-frontend` by container name. `Caddyfile.example`
+documents two candidate ways to bridge that gap (`host.docker.internal` via `extra_hosts` on
+Caddy's own compose config, or the Docker bridge gateway IP) but **neither has been tested
+against the actual host** — I have no SSH access to it from this environment. This is the one
+piece of Phase 1 that needs a human (or a future session with VPS access) to actually try both
+and confirm which one works, before `video.spidnums.com` will really route traffic. Flagged
+here and in `DEPLOYMENT.md` so it isn't quietly assumed to work.
+
+Also not yet done (deliberately deferred, not forgotten): actually running `docker compose up`
+against these services (no Docker daemon in this environment), obtaining real DNS records/TLS
+certs, and opening the UFW rules — all of that is real-VPS deploy work, tracked in
+`DEPLOYMENT.md`'s new section, not something to fake here.
+
+### Phase 2 — Database models/migrations — NOT STARTED
 
 ### Phase 2 — Database models/migrations — NOT STARTED
 
@@ -168,16 +224,25 @@ See findings above. No code modified, per spec §31 ("do not modify code yet").
 
 ## Environment variables introduced by this feature (running list)
 
-_None added yet — will be filled in as Phase 1 lands._
+| Variable | File | Purpose |
+|---|---|---|
+| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | `deploy/.env` | Shared secret between `livekit` and `api` services |
+| `TURN_SHARED_SECRET` | `deploy/.env` | Shared secret between `coturn` and `livekit` (short-lived TURN credential minting) |
+| `LIVEKIT_URL` | `deploy/api.env` | Public `wss://` URL returned to frontend clients |
+| `CALL_RINGING_TIMEOUT_SECONDS` | `deploy/api.env` | Default `30`, per spec §20 |
 
 ## Migrations added by this feature (running list)
 
-_None added yet — will be filled in as Phase 2 lands._
+_None yet — next up in Phase 2: `db/migrations/0028_video_calls.sql`._
 
 ## Known limitations (running list, per spec §32/definition of done)
 
-_Nothing implemented yet, so nothing to limit._
+- Caddy → LiveKit reachability (host-networked container) is documented but **not verified**
+  against the real VPS — see Phase 1 log above.
+- No infrastructure has actually been deployed/run yet — config and compose definitions only.
 
 ## Next step
 
-Start Phase 1: add pinned `livekit` and `coturn` services to `deploy/docker-compose.yml`, config templates, env var scaffolding in `backend/app/config.py`, and the `video.spidnums.com` Caddy block — infrastructure only, no application logic yet.
+Start Phase 2: `db/migrations/0028_video_calls.sql` (`call_sessions`, `call_participants`,
+`call_invitations`, `call_events`, `call_messages` — spec §12–16) plus the matching
+`backend/app/models.py` SQLAlchemy classes.

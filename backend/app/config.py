@@ -228,6 +228,28 @@ class Settings(BaseSettings):
     # something meaningful. No clean source of truth existed before this.
     app_version: str = Field(default="dev", alias="APP_VERSION")
 
+    # --- Video calling (self-hosted LiveKit) ------------------------------------
+    # See deploy/docker-compose.yml's `livekit`/`coturn` services and
+    # VIDEO_CALL_PROGRESS.md. `livekit_url` is the public wss:// hostname
+    # (deploy/Caddyfile.example's video.spidnums.com block) — returned
+    # directly to frontend clients in a call-token response, never an
+    # internal Docker address. The key/secret sign and verify short-lived
+    # room-access tokens server-side (services/livekit_tokens.py) and must
+    # never reach the browser. Deliberately not read from api.env for the
+    # key/secret — see deploy/docker-compose.yml's `api` service environment
+    # block, which injects them from deploy/.env instead (shared with the
+    # `livekit` service, same "define once" reasoning as DATABASE_URL).
+    livekit_url: str = Field(default="", alias="LIVEKIT_URL")
+    livekit_api_key: str = Field(default="", alias="LIVEKIT_API_KEY")
+    livekit_api_secret: str = Field(default="", alias="LIVEKIT_API_SECRET")
+    # How long an outgoing call rings before the caller's client marks it
+    # missed (implementation spec §20).
+    call_ringing_timeout_seconds: int = Field(default=30, alias="CALL_RINGING_TIMEOUT_SECONDS")
+
+    @property
+    def livekit_is_configured(self) -> bool:
+        return bool(self.livekit_url and self.livekit_api_key and self.livekit_api_secret)
+
     @field_validator("database_url")
     @classmethod
     def _normalise_database_url(cls, value: str) -> str:

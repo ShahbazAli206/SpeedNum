@@ -54,6 +54,11 @@ Desktop.ini
 # password). deploy/api.env.example is the tracked template.
 deploy/api.env
 deploy/api.env.bak*
+# Live LiveKit/coturn config — the TURN shared secret and (for coturn) the
+# VPS's own public IP. deploy/livekit.yaml.example and
+# deploy/turnserver.conf.example are the tracked templates.
+deploy/livekit.yaml
+deploy/turnserver.conf
 
 # ---- Local dev-only artifacts ----
 # Self-signed TLS cert/key for local HTTPS dev — never commit key material,

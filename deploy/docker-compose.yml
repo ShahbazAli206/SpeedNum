@@ -2,10 +2,13 @@
 #
 #   cd /opt/speednum/deploy && docker compose up -d --build
 #
-# Four services: api (public, via the host's Caddy), postgres and minio
-# (private, never published), migrate (a one-shot tool, not part of `up`).
+# Services: api and frontend (both public, via the host's Caddy), postgres
+# and minio (private, never published), migrate (a one-shot tool, not part
+# of `up`) — plus livekit and coturn for video calling (see their own
+# comments below; unlike everything else here they use network_mode: host,
+# not the two networks described below, for reasons specific to WebRTC).
 #
-# Two networks:
+# Two networks (used by every service except livekit/coturn):
 #   - `web`      external, created once with `docker network create web` and
 #                already owning the host's Caddy container (see
 #                /home/deploy/apps/caddy). `api` joins it so Caddy can reach
@@ -153,6 +156,13 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-speednum_app}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-speednum}?sslmode=disable
       S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      # Shared with the `livekit` service below (its LIVEKIT_KEYS) — defined
+      # once here rather than pasted into api.env too, same "one password,
+      # never a second copy to drift" reasoning as DATABASE_URL above. The
+      # api container only ever signs/verifies tokens locally with these; it
+      # never needs network access to the livekit container itself.
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
     depends_on:
       postgres:
         condition: service_healthy
@@ -216,6 +226,77 @@ services:
         max-file: "5"
     # No `ports:` — Caddy reaches it as `speednum-frontend:3000` over the `web` network, the
     # same way it reaches `speednum-api:8000` (see ../deploy/Caddyfile.example).
+
+  # Self-hosted WebRTC SFU (video calling) — see VIDEO_CALL_PROGRESS.md and
+  # DEPLOYMENT.md's "Video calling" section. `network_mode: host`, unlike
+  # every service above: LiveKit needs a large UDP port range (50000-60000)
+  # for WebRTC media, and Docker's bridge networking creates one iptables
+  # DNAT rule per *published* port — fine for the handful every other
+  # service here uses, prohibitively slow to stand up for ten thousand of
+  # them. Host networking is LiveKit's own documented recommendation for
+  # exactly this case and is what it binds 7880 (signaling)/7881 (ICE/TCP
+  # fallback)/the UDP range directly on the VPS's own interface with — no
+  # `ports:` list, and `network_mode: host` cannot be combined with
+  # `networks:` in Compose, so it is deliberately absent from both `web` and
+  # `internal`.
+  #
+  # Caddy (on the `web` network) therefore CANNOT reach this the way it
+  # reaches speednum-api/speednum-frontend by container name — see
+  # ../deploy/Caddyfile.example's video.spidnums.com block for the two ways
+  # to bridge that gap, and DEPLOYMENT.md for which one this VPS actually
+  # needs. Not yet verified against the real host.
+  livekit:
+    image: livekit/livekit-server:v1.13.6
+    container_name: speednum-livekit
+    restart: unless-stopped
+    network_mode: host
+    command: ["--config", "/etc/livekit.yaml"]
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    environment:
+      # Shared with the `api` service above — see its LIVEKIT_API_KEY/SECRET
+      # comment. LiveKit accepts this as an env-var alternative to a `keys:`
+      # block in the yaml file, so the actual secret is never written into
+      # livekit.yaml (which is otherwise not secret at all — see
+      # livekit.yaml.example's own header).
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # No healthcheck: with network_mode: host there is no container-private
+    # loopback to probe that would actually distinguish "container broken"
+    # from "host networking misconfigured" — a false negative would be worse
+    # than no signal. Watch `docker logs speednum-livekit` and the VPS's own
+    # port reachability instead until this has been run for real.
+
+  # Self-hosted TURN/STUN relay, for callers whose network blocks direct
+  # WebRTC UDP/TCP (corporate firewalls, some mobile carriers/hotels) — the
+  # implementation spec's explicit "self-hosted coturn" decision, not a
+  # managed TURN provider. Also `network_mode: host`, for the same reason as
+  # `livekit` above and because coturn's own documentation recommends host
+  # networking so its advertised relay address is unambiguously this VPS's
+  # real public IP rather than a NATed Docker bridge address.
+  coturn:
+    image: coturn/coturn:4.17.2
+    container_name: speednum-coturn
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+      # TLS cert/key for the TURN/TLS listener (turnserver.conf's
+      # tls-listening-port) — obtained separately from Caddy's own certs:
+      # Caddy only terminates TLS for the HTTP(S) hosts it reverse-proxies,
+      # and coturn speaks raw TURN-over-TLS, not HTTP, so it needs its own
+      # certificate on disk. See DEPLOYMENT.md for how to obtain/renew one
+      # for turn.spidnums.com.
+      - /home/deploy/certs/turn.spidnums.com:/etc/coturn/certs:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   # Schema migrations. Reuses the API image (asyncpg is already in it) so the
   # VPS needs no Python of its own.

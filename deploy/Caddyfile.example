@@ -134,6 +134,61 @@ test.spidnums.com {
 	}
 }
 
+# --- Video calling (LiveKit) — signaling/API only, NEVER media -------------
+# LiveKit's WebSocket/HTTPS signaling port (7880) only. The actual WebRTC
+# media (ICE/TCP on 7881, UDP on 50000-60000) must NEVER be routed through
+# Caddy — Caddy speaks HTTP(S), not raw WebRTC, and the implementation spec
+# is explicit that media must not go through it. Those ports are exposed
+# directly by the `livekit` service's `network_mode: host` (see
+# ../deploy/docker-compose.yml) and must be opened in the VPS firewall (UFW)
+# separately — see DEPLOYMENT.md.
+#
+# `network_mode: host` also means the `livekit` container has no presence on
+# the `web` bridge network this Caddy instance is on, so — unlike every
+# block above — this can't `reverse_proxy` a container name. Two ways to
+# reach it instead; NEITHER has been verified against the real VPS yet, do
+# that before relying on this block:
+#
+#   (a) If Caddy's own container/compose config can be given
+#       `extra_hosts: ["host.docker.internal:host-gateway"]` (Docker 20.10+,
+#       Linux — very likely true on a modern Hostinger VPS, but this repo
+#       doesn't own Caddy's own compose file to add it for you):
+#       reverse_proxy host.docker.internal:7880
+#   (b) Otherwise, the Docker bridge gateway address reaches the host's own
+#       network stack from any bridge-networked container. Find it with, on
+#       the VPS itself:
+#         docker network inspect web --format '{{(index .IPAM.Config 0).Gateway}}'
+#       and use that address in place of host.docker.internal below.
+#
+video.spidnums.com {
+	handle {
+		reverse_proxy host.docker.internal:7880
+	}
+
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	log {
+		output file /data/access-video.log {
+			roll_size 20mb
+			roll_keep 5
+		}
+	}
+}
+
+# turn.spidnums.com is deliberately NOT a Caddy site block: coturn
+# (network_mode: host, ../deploy/docker-compose.yml) owns its own TLS
+# listener directly on 5349 with its own certificate (see
+# ../deploy/turnserver.conf.example) — raw TURN-over-TLS is not HTTP(S), so
+# Caddy has nothing to reverse-proxy here. Only the DNS record needs to
+# exist; Caddy never touches this hostname's traffic.
+
 # --- Production API hostname — NOT ACTIVE YET ------------------------------
 # Uncomment this block only after api.spidnums.com's DNS record exists AND
 # has propagated (verify with `dig +short api.spidnums.com` before

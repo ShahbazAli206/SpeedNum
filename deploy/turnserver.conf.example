@@ -1,0 +1,65 @@
+# coturn TURN/STUN relay for SpidNums video calling — self-hosted, matches
+# the implementation spec's explicit "self-hosted coturn" decision (no
+# managed TURN provider). Copy to deploy/turnserver.conf:
+#
+#   cp turnserver.conf.example turnserver.conf && chmod 600 turnserver.conf
+#
+# Then fill in the two REPLACE_WITH_* placeholders below.
+
+# Matches TURN_SHARED_SECRET in deploy/.env. LiveKit generates short-lived,
+# per-session TURN credentials from this shared secret (RFC 5766 TURN REST
+# API "time-limited username" convention) rather than ever using a fixed,
+# long-lived TURN username/password — see rtc.turn_servers in
+# deploy/livekit.yaml.example.
+use-auth-secret
+static-auth-secret=REPLACE_WITH_TURN_SHARED_SECRET
+
+# Must match the domain the TLS cert below was issued for, and the `host`
+# LiveKit is told to hand clients (deploy/livekit.yaml.example's
+# rtc.turn_servers[0].host).
+realm=turn.spidnums.com
+
+# Plain STUN/TURN — UDP preferred, TCP as the first fallback when UDP is
+# blocked (implementation spec's connectivity order: ICE/UDP, TURN/UDP,
+# ICE/TCP, TURN/TLS).
+listening-port=3478
+
+# TURN/TLS — the last-resort fallback for networks that block everything
+# except outbound TLS. Deliberately NOT port 443: this VPS's Caddy already
+# owns 443 for every HTTPS host it serves, and Caddy's `reverse_proxy`
+# directive speaks HTTP(S), not raw TURN-over-TLS, so the two can't share
+# the port without an SNI-routing layer this deployment doesn't have. 5349
+# is the IANA-registered TURN/TLS port and works on any network that isn't
+# actively blocking WebRTC-specific ports (an increasingly rare posture
+# outside corporate/hotel firewalls, which is exactly who this fallback is
+# for — most of them still allow 5349 even when they block UDP wholesale;
+# a small minority allow only 443, which would need the SNI-routing
+# approach as a later, separate piece of work, not v1).
+tls-listening-port=5349
+cert=/etc/coturn/certs/fullchain.pem
+pkey=/etc/coturn/certs/privkey.pem
+
+# Relay (media-forwarding) port range — deliberately a different, narrower
+# range than LiveKit's own rtc.port_range (50000-60000 in
+# deploy/livekit.yaml.example) so the two self-hosted services on the same
+# VPS never contend for the same UDP ports.
+min-port=49152
+max-port=49999
+
+# This VPS's own public IP. `network_mode: host` means coturn binds
+# directly to the host's interface, but it still cannot reliably
+# autodetect which address to *advertise* to clients behind every hosting
+# provider's network — fill this in before deploying.
+external-ip=REPLACE_WITH_VPS_PUBLIC_IP
+
+# No web admin console, no CLI/telnet management interface — both are
+# attack surface this deployment has no use for.
+no-cli
+no-tls-web-admin
+no-web-admin
+
+# Plain stdout logging (captured by `docker logs speednum-coturn` /
+# Docker's json-file driver, same as every other service in
+# docker-compose.yml) rather than coturn's own log file rotation.
+simple-log
+log-file=stdout

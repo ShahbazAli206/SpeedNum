@@ -1,0 +1,52 @@
+# LiveKit SFU config for SpidNums video calling — self-hosted, no managed
+# video provider (implementation spec §2). Copy to deploy/livekit.yaml:
+#
+#   cp livekit.yaml.example livekit.yaml && chmod 600 livekit.yaml
+#
+# Then fill in the one placeholder below (rtc.turn_servers[0].secret) to
+# match TURN_SHARED_SECRET in deploy/.env.
+#
+# Nothing else in this file is secret. In particular, the LiveKit API
+# key/secret are deliberately NOT set here — see deploy/docker-compose.yml's
+# `livekit` service, which passes them as the LIVEKIT_KEYS environment
+# variable (interpolated from deploy/.env) instead. Never add a `keys:`
+# block to the real, deployed copy of this file.
+
+port: 7880
+log_level: info
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 60000
+  # This VPS is a single box with its own public IP, not behind a cloud load
+  # balancer — LiveKit needs to advertise that real IP in ICE candidates
+  # rather than whatever Docker-internal address network_mode: host would
+  # otherwise expose it as.
+  use_external_ip: true
+
+  # Self-hosted coturn (deploy/turnserver.conf.example) — NOT LiveKit's own
+  # embedded TURN server (see `turn:` below, left disabled). LiveKit mints a
+  # short-lived, per-session TURN credential from this shared secret (RFC
+  # 5766 TURN REST API "time-limited username" convention) rather than ever
+  # handing a client a fixed TURN username/password — see the spec's
+  # "TURN credentials are not long-lived application secrets" requirement.
+  turn_servers:
+    - host: turn.spidnums.com
+      port: 5349
+      protocol: tls
+      secret: "REPLACE_WITH_TURN_SHARED_SECRET"
+      ttl: 14400
+
+# LiveKit's own embedded TURN server. NOT used — deploy/turnserver.conf.example
+# (self-hosted coturn) is used instead, per the spec's explicit decision.
+# Left present-but-disabled rather than omitted so a future reader doesn't
+# wonder whether this was simply forgotten.
+turn:
+  enabled: false
+
+# No `redis:` block: this is a single-node deployment (implementation spec
+# §9 — "Initial: Application + LiveKit + TURN on current VPS"). Redis is
+# only needed for multi-instance LiveKit clustering, i.e. once/if a future
+# phase moves LiveKit to its own VPS behind more than one instance. Add it
+# then, not before — see VIDEO_CALL_PROGRESS.md's Phase 1 notes.

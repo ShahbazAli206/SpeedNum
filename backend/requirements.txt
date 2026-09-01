@@ -11,3 +11,8 @@ httpx>=0.27,<1.0
 openpyxl>=3.1,<4.0
 boto3>=1.34,<2.0
 bleach>=6.1,<7.0
+# Video calling: mints/verifies short-lived LiveKit room-access tokens
+# server-side (services/livekit_tokens.py). The self-hosted LiveKit SFU
+# itself runs as a separate Docker service, not a Python dependency — see
+# deploy/docker-compose.yml's `livekit` service.
+livekit-api>=1.2,<2.0
