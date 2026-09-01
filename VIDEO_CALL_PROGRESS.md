@@ -31,7 +31,13 @@ real `livekit-client` types; not yet run in a browser against a live LiveKit ser
 **Phase 12 (E2EE scaffolding + security-hardening review) — DONE as honestly-flagged
 scaffolding** — E2EE mechanism wired but OFF and unclaimed (key distribution unsolved by
 design); see `VIDEO_CALL_E2EE.md`.
-Next up: **Phase 13 (test scaffolding + perf/testing docs)**.
+**Phase 13 (test scaffolding + perf/testing docs) — DONE** — authorization matrix is executable
+and **passing (17 tests; full backend suite 465 passing, no regressions)**; functional/network/
+performance testing is a manual runbook (`VIDEO_CALL_TESTING.md`) that needs the live stack.
+
+**All 13 spec phases are now implemented in code.** What remains is entirely
+deployment/configuration + live verification — the user's stated "I'll do configurations at the
+end" step. See "What's left for the user" below.
 
 ---
 
@@ -486,7 +492,43 @@ did not.
 bundling of the dynamically-imported E2EE worker is unverified; no "encrypted call" UI copy was
 added (correctly — it would be false today).
 
-### Phase 13 — Test scaffolding + perf/testing docs — NOT STARTED
+### Phase 13 — Test scaffolding + perf/testing docs — **DONE**
+
+**Files:**
+- `backend/tests/test_calls_authorization.py` (new) — the §30 authorization matrix made
+  executable: 17 tests over `can_call`/`can_invite_to_call` with a DB-free fake session (suite
+  convention). **Run and passing.** The full backend suite (`python -m pytest -q`) is **465
+  passing, no regressions** from any of the Phase 0–12 backend changes (models, config, deps,
+  permissions, schemas, rate_limit, router).
+- `VIDEO_CALL_TESTING.md` (new) — maps §30 to automated-vs-manual, with the manual functional /
+  network (incl. the critical UDP-blocked→TURN fallback) / performance-benchmark runbook for
+  the real KVM 4, since those need live media/network/hardware that can't be faked.
+
+**Ran here:** `pytest` on Python 3.10 (deps present there, not on the 3.14 in PATH) — 17 new +
+465 total green. **Not run here:** the manual runbook (needs the deployed stack).
+
+---
+
+## What's left for the user (configuration + live verification)
+
+All code is written; everything below is deploy/config, matching "I'll do configurations at the
+end". In rough order:
+
+1. **Infra bring-up** (`DEPLOYMENT.md` "Video calling" section): DNS for `video.` + `turn.`,
+   coturn TLS cert, UFW ports, fill `deploy/.env` + `deploy/api.env` + `deploy/livekit.yaml` +
+   `deploy/turnserver.conf` from the `.example` templates, `docker compose up -d livekit coturn`,
+   add the Caddy `video.` block, restart `api`.
+2. **Verify the one unverified infra assumption**: Caddy → host-networked LiveKit reachability
+   (two candidate approaches documented in `deploy/Caddyfile.example` — try both on the real VPS).
+3. **Apply the migration**: `docker compose run --rm migrate apply` (0028).
+4. **`npm install`** in `frontend/` (livekit-client is in package.json/package-lock; node_modules
+   is gitignored) and rebuild the frontend image.
+5. **Run the manual test runbook** (`VIDEO_CALL_TESTING.md`) — functional, network (esp. UDP
+   blocked), and the performance benchmark on the real KVM 4 to establish actual capacity.
+6. **Decide E2EE** (`VIDEO_CALL_E2EE.md`): pick a key-distribution/trust model before enabling
+   or claiming it. Leave off until then.
+7. **Chat retention sweep** (spec §33.2): add the application-level `call_messages` retention
+   sweep (persistence exists; the sweep doesn't) before Canadian production.
 
 ---
 
