@@ -2018,3 +2018,66 @@ class DesktopReleaseCreate(BaseModel):
     installer_url: str = Field(min_length=1, max_length=500)
     sha256: str = Field(min_length=64, max_length=64)
     release_notes: str | None = Field(default=None, max_length=4000)
+
+
+# --- Video calling (self-hosted LiveKit) -------------------------------------
+CallType = Literal["audio", "video"]
+CallSessionStatus = Literal["ringing", "accepted", "declined", "missed", "cancelled", "ended", "failed"]
+CallParticipantRole = Literal["initiator", "participant", "moderator"]
+CallParticipantStatus = Literal["invited", "ringing", "joined", "declined", "left", "removed"]
+CallInvitationStatus = Literal["pending", "accepted", "declined", "expired", "cancelled"]
+
+
+class CallCreate(BaseModel):
+    """Start a call. Always at least one invitee — even a plain 1:1 call is
+    "invite this one person", per the spec's "a call is a session with N
+    participants, not a fixed caller+callee pair" (§11)."""
+
+    invitee_profile_ids: list[uuid.UUID] = Field(min_length=1, max_length=20)
+    call_type: CallType = "video"
+
+
+class CallParticipantRead(ORMModel):
+    id: uuid.UUID
+    profile_id: uuid.UUID
+    # Populated by the router via utils.read() (not on the ORM row itself) —
+    # a lightweight join onto Profile, not a full ProfileRead, since a
+    # participant list only ever needs to display who someone is.
+    full_name: str | None = None
+    email: str | None = None
+    role: CallParticipantRole
+    status: CallParticipantStatus
+    invited_at: datetime | None = None
+    joined_at: datetime | None = None
+    left_at: datetime | None = None
+
+
+class CallSessionRead(ORMModel):
+    id: uuid.UUID
+    room_name: str
+    initiator_profile_id: uuid.UUID | None = None
+    call_type: CallType
+    status: CallSessionStatus
+    started_at: datetime | None = None
+    connected_at: datetime | None = None
+    ended_at: datetime | None = None
+    duration_seconds: int | None = None
+    created_at: datetime | None = None
+    participants: list[CallParticipantRead] = Field(default_factory=list)
+
+
+class CallInviteCreate(BaseModel):
+    """POST .../participants/invite — never trust this profile_id without
+    can_invite_to_call re-checking it server-side (spec §21, §33.8)."""
+
+    invitee_profile_id: uuid.UUID
+
+
+class CallInvitationRead(ORMModel):
+    id: uuid.UUID
+    call_session_id: uuid.UUID
+    inviter_profile_id: uuid.UUID
+    invitee_profile_id: uuid.UUID
+    status: CallInvitationStatus
+    created_at: datetime | None = None
+    responded_at: datetime | None = None

@@ -23,7 +23,7 @@ from fastapi import HTTPException, Request, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..deps import SessionDep, TenantUserDep, client_ip
+from ..deps import CurrentUserDep, SessionDep, TenantUserDep, client_ip
 
 log = logging.getLogger(__name__)
 
@@ -118,14 +118,23 @@ def rate_limit_by_ip(
 
 def rate_limit_by_tenant(
     name: str, *, limit: int, window_seconds: int = 60
-) -> Callable[[SessionDep, TenantUserDep], Awaitable[None]]:
-    """For authenticated admin actions — keyed by tenant, not caller IP, so a
+) -> Callable[[SessionDep, CurrentUserDep], Awaitable[None]]:
+    """For authenticated actions — keyed by tenant, not caller IP, so a
     firm's staff sharing an office network aren't limited by each other, and
-    one firm's abuse can't exhaust another's quota. Requires TenantUserDep,
-    so this can only guard routes already behind that dependency (every
-    target route in this pass is)."""
+    one firm's abuse can't exhaust another's quota. Takes the loosest
+    dependency (CurrentUserDep — no tenant/portal/superadmin requirement at
+    all) rather than the stricter TenantUserDep, so this can never gate out
+    a caller the endpoint's own primary dependency already allows. Every
+    original call site here is on a staff-only router anyway (that route's
+    own TenantUserDep/AdminUserDep dependency enforces that separately), so
+    this only widens who *can* reuse the helper — it changes no existing
+    endpoint's behaviour. Needed by routers/calls.py, where a client-portal
+    account (clients can initiate calls too) AND a platform superadmin whose
+    own profile may have no tenant_id at all (see deps.get_callable_user's
+    docstring, same reasoning as support.py's separate SuperadminDep) both
+    legitimately reach the same rate-limited endpoints staff do."""
 
-    async def _check(session: SessionDep, user: TenantUserDep) -> None:
+    async def _check(session: SessionDep, user: CurrentUserDep) -> None:
         scope = user.tenant.id if user.tenant is not None else user.profile.id
         key = f"{name}:tenant:{scope}"
         count = await _hit(session, key=key, window_seconds=window_seconds)

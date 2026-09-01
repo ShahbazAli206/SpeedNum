@@ -26,7 +26,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .models import Client, Role, RolePermission
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .models import CallParticipant, CallSession, Client, Profile, Role, RolePermission
 
 PERMISSION_KEYS: tuple[str, ...] = (
     "clients.view_all",
@@ -221,3 +224,90 @@ def invoice_owner_clause(user):
     if has_permission(user, "invoices.view_all"):
         return None
     return Client.owner_id == user.profile.id
+
+
+# -----------------------------------------------------------------------------
+# Video calling — centralized calling-permission checks (implementation spec
+# §10). `caller` is untyped (a deps.CurrentUser in practice) for the same
+# reason has_permission's `user` param is above: deps.py imports from this
+# module, so this module cannot import CurrentUser from deps without a
+# circular import.
+#
+# Both functions define one *symmetric* relationship per pair of profiles —
+# "does an edge exist between these two people at all" — rather than a
+# caller-specific rule, then let either side call the other. The spec's own
+# calling matrix lists relationships from only one direction in places (e.g.
+# "Company Owner can call: any staff member" has no matching "staff can call
+# Owner" bullet), which would otherwise make answering a call impossible for
+# the callee — treating every listed relationship as bidirectional is the
+# only reading that produces a working call feature, and matches how the
+# closest existing precedent (client_messages.py's client<->assigned-staff-
+# or-Owner channel) already behaves once a thread exists.
+#
+# The full edge set this produces, deduplicating the spec's directional list:
+#   client            <-> their assigned staff member (Client.owner_id)
+#   client            <-> any company Owner (same tenant)
+#   company Owner     <-> any staff member (same tenant) — includes Owner<->Owner
+#   platform superadmin <-> any company Owner (cross-tenant, mirrors support.py)
+# A plain (non-Owner) staff member therefore has no calling relationship with
+# another plain staff member, or with a client they are not assigned to —
+# the spec's matrix never grants either, and inventing one here would be
+# scope creep beyond what was asked for.
+# -----------------------------------------------------------------------------
+async def can_call(session: AsyncSession, caller, target: Profile) -> bool:
+    """Whether `caller` (a deps.CurrentUser) may call `target` (a Profile).
+    Centralized here per spec §10 so no router/endpoint re-derives its own
+    version of the calling matrix — every call-related endpoint must call
+    this (or can_invite_to_call below) before doing anything else."""
+    me = caller.profile
+    if me.id == target.id or not target.is_active:
+        return False
+
+    me_platform, target_platform = bool(me.is_superadmin), bool(target.is_superadmin)
+    me_client, target_client = me.client_id is not None, target.client_id is not None
+
+    # Platform superadmin <-> company Owner — cross-tenant by design, mirrors
+    # support.py's OwnerOrSuperadminDep/SuperadminDep split. The platform
+    # never reaches a client directly, only a tenant's Owner.
+    if me_platform or target_platform:
+        if me_client or target_client:
+            return False
+        other = target if me_platform else me
+        return not other.is_superadmin and other.role == "owner"
+
+    # Every remaining relationship is intra-tenant only.
+    if me.tenant_id is None or me.tenant_id != target.tenant_id:
+        return False
+
+    # This feature defines no client<->client relationship.
+    if me_client and target_client:
+        return False
+
+    if me_client or target_client:
+        client_side, staff_side = (me, target) if me_client else (target, me)
+        if staff_side.role == "owner":
+            return True
+        client_row = await session.get(Client, client_side.client_id)
+        return client_row is not None and client_row.owner_id == staff_side.id
+
+    # Both sides are firm staff (no client_id on either): only an Owner may
+    # be on either end — the matrix names no staff-to-staff relationship.
+    return me.role == "owner" or target.role == "owner"
+
+
+async def can_invite_to_call(session: AsyncSession, caller, target: Profile, call: CallSession) -> bool:
+    """Whether `caller` may invite `target` into `call` mid-session (spec
+    §21, §33.8). An invitation can never reach further than a direct call
+    could — this reuses can_call's exact relationship rules — plus the
+    caller must already be a joined participant of this specific call.
+    Never trust a frontend-supplied target profile id without this check."""
+    already_joined = await session.scalar(
+        select(CallParticipant.id).where(
+            CallParticipant.call_session_id == call.id,
+            CallParticipant.profile_id == caller.profile.id,
+            CallParticipant.status == "joined",
+        )
+    )
+    if already_joined is None:
+        return False
+    return await can_call(session, caller, target)

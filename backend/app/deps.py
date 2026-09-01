@@ -223,6 +223,31 @@ async def get_firm_linked_user(user: CurrentUserDep) -> CurrentUser:
 AnyTenantUserDep = Annotated[CurrentUser, Depends(get_firm_linked_user)]
 
 
+async def get_callable_user(user: CurrentUserDep) -> CurrentUser:
+    """Firm staff, a client-portal account, OR a platform superadmin — the
+    three account kinds the video-calling feature's calling matrix (spec
+    §10 of spidnums_VIDEO_CALL_IMPLEMENTATION_SPEC.md) allows on either end
+    of a call. Deliberately broader than AnyTenantUserDep, which requires a
+    linked tenant (`get_firm_linked_user` 409s otherwise) and would
+    incorrectly reject a superadmin whose own profile has no tenant_id —
+    exactly why support.py already runs its platform-side admin_router on a
+    bare SuperadminDep instead of OwnerOrSuperadminDep/AnyTenantUserDep, not
+    a new problem introduced here. Still enforces the same
+    must-change-password gate get_firm_linked_user/require_superadmin each
+    apply on their own side, just for whichever of the three cases actually
+    applies to this caller."""
+    if user.profile.is_superadmin:
+        if user.profile.must_change_password:
+            raise HTTPException(
+                status.HTTP_428_PRECONDITION_REQUIRED, "Set a new password before continuing."
+            )
+        return user
+    return await get_firm_linked_user(user)
+
+
+CallableUserDep = Annotated[CurrentUser, Depends(get_callable_user)]
+
+
 async def get_tenant_user(user: AnyTenantUserDep) -> CurrentUser:
     """Firm staff only. A client-portal account (profile.client_id set) is
     rejected here, not just at individual actions — every firm-internal

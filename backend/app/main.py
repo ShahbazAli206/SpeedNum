@@ -21,6 +21,7 @@ from .routers import (
     admin_backups,
     admin_devices,
     auth,
+    calls,
     client_documents,
     client_documents_staff,
     client_engagements,
@@ -188,6 +189,7 @@ async def integrity_error_handler(request: Request, exc: IntegrityError) -> JSON
 
 for router in (
     auth.router,
+    calls.router,
     dashboard.router,
     clients.router,
     services.router,

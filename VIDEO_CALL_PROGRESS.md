@@ -22,7 +22,8 @@ All commits for this feature use the `video-call:` message prefix so they're eas
 **Phase 0 (repository analysis) — DONE.**
 **Phase 1 (LiveKit + coturn infrastructure) — DONE**, with one explicitly-unverified step (see below).
 **Phase 2 (database models/migrations) — DONE**, not yet applied to any real database.
-Next up: **Phase 3 (call authorization + REST APIs)**.
+**Phase 3 (call authorization + REST APIs) — DONE**, not yet run/tested against a live server.
+Next up: **Phase 4 (LiveKit token generation)**.
 
 ---
 
@@ -234,7 +235,79 @@ infrastructure not having actually been `docker compose up`'d. SQLAlchemy could 
 import-tested either (not installed in this environment) — reviewed by hand instead, cross-
 checking every enum/column/FK between the `.sql` file and `models.py` line by line.
 
-### Phase 3 — Call authorization and APIs — NOT STARTED
+### Phase 3 — Call authorization and APIs — **DONE**
+
+**A real problem found and fixed along the way — read this before touching auth on this
+router again:** the obvious choice, `AnyTenantUserDep` (used by client_messages.py for the
+same "staff or portal account" shape), silently breaks the platform-superadmin side of the
+calling matrix. `AnyTenantUserDep` requires `user.tenant is not None` (`get_firm_linked_user`
+409s otherwise) — but a superadmin's own profile may have no `tenant_id` at all, which is
+*why support.py already runs two separate routers* (`OwnerOrSuperadminDep` for the firm side,
+a bare `SuperadminDep` for the platform side) instead of one shared dependency. This router
+needs firm staff, portal clients, *and* a possibly-tenant-less superadmin on the *same*
+endpoints (a call can be created by any of the three), so neither existing composed dep fit.
+Fix: added `get_callable_user`/`CallableUserDep` to `deps.py` — superadmin gets the lightweight
+must-change-password-only check, everyone else defers to the existing `get_firm_linked_user`.
+Also had to widen `rate_limit_by_tenant`'s type hint from `TenantUserDep` down to the loosest
+`CurrentUserDep` (its body already handled `user.tenant is None` via a ternary — it just wasn't
+allowed to be called with a user shaped that way before) — otherwise `Depends(_call_create_rate_limit)`
+would 409 a superadmin even though `create_call`'s own `CallableUserDep` allows them through.
+Verified this doesn't change behavior for any of the four existing `rate_limit_by_tenant` call
+sites (clients.py, imports.py, team.py, users.py) — all four are on routers already gated by a
+stricter dependency for their actual logic, so only who *can reuse the rate limiter* changed.
+
+**Files changed:**
+- `backend/app/deps.py` — `get_callable_user`/`CallableUserDep` (see above)
+- `backend/app/services/rate_limit.py` — `rate_limit_by_tenant` now takes `CurrentUserDep`
+- `backend/app/permissions.py` — `can_call(session, caller, target)` and
+  `can_invite_to_call(session, caller, target, call)`. Both are written as *symmetric*
+  relationship checks (does an edge exist between these two people at all, then either side
+  may call the other) rather than caller-specific rules — the spec's own matrix lists some
+  relationships from only one direction (e.g. "Owner can call staff" has no matching "staff
+  can call Owner" bullet), and a one-directional reading would make answering a call
+  impossible for the callee. Full reasoning is in the module's own docstring above the
+  functions — read it before changing the matrix.
+- `backend/app/schemas.py` — `CallCreate`, `CallParticipantRead`, `CallSessionRead`,
+  `CallInviteCreate`, `CallInvitationRead` + 5 `Literal` type aliases
+- `backend/app/routers/calls.py` (new) — `POST/GET /calls`, `GET/POST /calls/{id}`,
+  `{id}/accept`, `{id}/decline`, `{id}/cancel`, `{id}/end`, `GET {id}/participants`,
+  `POST {id}/participants/invite`, `DELETE {id}/participants/{profile_id}`. Chat endpoints
+  (`GET/POST {id}/chat`) deliberately deferred to Phase 11, per spec §17's own note that not
+  every listed path needs to exist before its dedicated phase.
+- `backend/app/main.py` — registered `calls.router`
+
+**Other decisions made while writing this (all documented inline in calls.py too):**
+- A call's initiator gets their own `call_participants` row (`role="initiator"`,
+  `status="invited"`) at creation time, same as every invitee — no special-cased status. Every
+  participant (initiator included) transitions `invited/ringing -> joined` at the *same* event:
+  successful token fetch, which is Phase 4's job, not this router's. This means "accept" and
+  "actually join the LiveKit room" are treated as one event for v1 (no LiveKit
+  join-webhook-based confirmation) — a deliberate simplification, not an oversight.
+- `call_invitations` rows are created for *every* invite, including the initial ones at call
+  creation (not just mid-call adds) — gives one consistent audit/accept-decline trail for both
+  cases instead of two different code paths.
+- Missed-call expiry (30s ringing timeout, spec §20) is **lazy**, not a background sweep: a
+  stale "ringing" call flips to "missed" the next time its participant hits any call-reading
+  endpoint (`_expire_stale_ringing`). Known limitation, called out in the function's own
+  docstring: a call nobody ever looks at again stays "ringing" forever. Accepted for v1 rather
+  than standing up a new scheduler (`services/scheduler.py`-style) for one feature; revisit if
+  it matters once real usage exists.
+- `create_call` blocks genuinely cross-tenant calls (participants from two different
+  companies) but does *not* block a company Owner from mixing their own staff and the platform
+  superadmin into one call — that composition question is explicitly Phase 10 (group calls)
+  scope, not decided here; see the comment at that check in `calls.py`.
+- Ringing delivery reuses the existing `Notification`/`audit.notify()` system exactly as
+  decided in Phase 0 — no new push mechanism.
+
+**Not done yet, honestly:** no automated tests were written or run (no pytest/SQLAlchemy
+install in this environment to run them against, and this phase alone is a lot of new
+surface) — reviewed entirely by hand instead, endpoint by endpoint, cross-checking every
+status transition against the enums in `db/migrations/0028_video_calls.sql`. This has **not**
+been exercised against a running server or real database. Before trusting this further: run it
+locally against a real Postgres, hit every endpoint with each of the three account kinds
+(staff, portal client, superadmin), and write the authorization test matrix spec §30 already
+specifies (valid client→staff, valid client→owner, valid owner→staff/client/platform, invalid
+cross-tenant, unauthorized invite, unauthorized token) — that test file does not exist yet.
 
 ### Phase 4 — LiveKit token generation — NOT STARTED
 
@@ -282,10 +355,20 @@ checking every enum/column/FK between the `.sql` file and `models.py` line by li
   could not be import-tested (no SQLAlchemy install in this environment) — verified by hand
   instead. Run `python scripts/migrate.py apply --dry-run` against a real Postgres before
   trusting this further.
+- `routers/calls.py` has not been run against a live server — no automated tests exist yet
+  (spec §30's authorization test matrix is still TODO). Review by hand only so far.
+- Missed-call expiry is lazy (checked on read), not a background sweep — see Phase 3 log.
+- No LiveKit join/leave webhook integration — "joined"/"left" participant status is inferred
+  from this API's own token-fetch/end calls, not confirmed by LiveKit itself. Acceptable for
+  v1; a future phase could add `POST /calls/webhooks/livekit` for more accurate state.
 
 ## Next step
 
-Start Phase 3: `app/permissions.py`'s `can_call()`/`can_invite_to_call()`, the
-`backend/app/routers/calls.py` router (create/list/get/accept/decline/cancel/end,
-participants list/invite/remove — spec §17, chat endpoints deferred to Phase 11), matching
-Pydantic schemas, and registering the router in `main.py`.
+Start Phase 4: `backend/app/services/livekit_tokens.py` (mint a short-lived LiveKit access
+token via `livekit-api`, opaque `profile_<uuid>` identity per spec §19) and
+`POST /calls/{call_id}/token` in `calls.py`, which should transition the caller's own
+`call_participants` row from `invited`/`ringing` to `joined` (see Phase 3's log above — this
+is the event Phase 3 deferred that transition to). Must verify: caller belongs to the call,
+call is still joinable, participant identity matches the authenticated profile, and must never
+return the LiveKit API secret itself (spec §18) — only the WebSocket URL, the token, and the
+room name.
