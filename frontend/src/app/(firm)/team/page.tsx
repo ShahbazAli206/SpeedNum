@@ -11,7 +11,9 @@ export const metadata: Metadata = { title: "Staff" };
 
 export default async function TeamPage() {
   const live = await apiServer<TeamMember[]>("/team");
-  const team = live ? live.map(toTeamRow) : getTeam();
+  // The Owner isn't a staff member serving clients — they own the firm — so
+  // keep them off this roster (and out of its KPI tiles / member count).
+  const team = live ? live.filter((m) => m.role !== "owner").map(toTeamRow) : getTeam();
 
   return <TeamClient initialTeam={team} isLive={Boolean(live)} />;
 }
