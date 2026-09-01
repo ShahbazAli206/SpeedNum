@@ -65,6 +65,18 @@ PAY_RUN_STATUSES = ("draft", "scheduled", "processed")
 TAX_FILING_STATUSES = ("open", "filed", "overdue")
 DOCUMENT_KINDS = ("invoice", "receipt", "tax", "contract", "statement", "other")
 
+# Video calling (db/migrations/0028_video_calls.sql)
+CALL_TYPES = ("audio", "video")
+CALL_SESSION_STATUSES = ("ringing", "accepted", "declined", "missed", "cancelled", "ended", "failed")
+CALL_PARTICIPANT_ROLES = ("initiator", "participant", "moderator")
+CALL_PARTICIPANT_STATUSES = ("invited", "ringing", "joined", "declined", "left", "removed")
+CALL_INVITATION_STATUSES = ("pending", "accepted", "declined", "expired", "cancelled")
+CALL_EVENT_TYPES = (
+    "call_created", "call_ringing", "call_accepted", "call_declined", "call_missed",
+    "participant_invited", "participant_joined", "participant_left", "participant_removed",
+    "call_ended",
+)
+
 
 def _uuid_pk() -> Mapped[uuid.UUID]:
     return mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
@@ -1195,3 +1207,133 @@ class DesktopRelease(Base):
         UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL")
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# -----------------------------------------------------------------------------
+# Video calling (self-hosted LiveKit SFU). LiveKit itself owns WebRTC
+# signaling/media/realtime chat delivery — this is the FastAPI/Postgres side:
+# who is allowed in a call, its lifecycle, and a persisted audit trail/chat
+# history. See db/migrations/0028_video_calls.sql and VIDEO_CALL_PROGRESS.md.
+# -----------------------------------------------------------------------------
+class CallSession(Base):
+    """One row per call, from ringing to ended. Not a fixed caller+callee
+    pair — see CallParticipant for who is actually in it (spec §11)."""
+
+    __tablename__ = "call_sessions"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    # Nullable per the implementation spec — see the migration's comment on
+    # this column for why it is nonetheless always populated in practice
+    # under the calling matrix app/permissions.py::can_call enforces.
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE")
+    )
+    room_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    initiator_profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL")
+    )
+    call_type: Mapped[str] = mapped_column(pg_enum("call_type", *CALL_TYPES), default="video")
+    status: Mapped[str] = mapped_column(
+        pg_enum("call_session_status", *CALL_SESSION_STATUSES), default="ringing"
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    duration_seconds: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    participants: Mapped[list["CallParticipant"]] = relationship(
+        lazy="selectin", cascade="all, delete-orphan"
+    )
+
+
+class CallParticipant(Base):
+    """Who is/was in a call and their per-participant lifecycle state. One
+    row per (call_session_id, profile_id) — re-invites/re-joins update the
+    existing row rather than duplicating it."""
+
+    __tablename__ = "call_participants"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    call_session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("call_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    # No ondelete="SET NULL": profiles are soft-deactivated in this app, never
+    # hard-deleted in the ordinary flow — same plain-FK convention as
+    # Task.assignee_id/Client.owner_id, not the "denormalized actor" pattern.
+    profile_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id"), nullable=False)
+    role: Mapped[str] = mapped_column(
+        pg_enum("call_participant_role", *CALL_PARTICIPANT_ROLES), default="participant"
+    )
+    status: Mapped[str] = mapped_column(
+        pg_enum("call_participant_status", *CALL_PARTICIPANT_STATUSES), default="invited"
+    )
+    invited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    left_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CallInvitation(Base):
+    """A mid-call or initial invitation to join a call — distinct from
+    CallParticipant because an invitation can be declined/expired without
+    ever becoming a participant (spec §14, §21)."""
+
+    __tablename__ = "call_invitations"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    call_session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("call_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    inviter_profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id"), nullable=False
+    )
+    invitee_profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        pg_enum("call_invitation_status", *CALL_INVITATION_STATUSES), default="pending"
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CallEvent(Base):
+    """Append-only lifecycle audit trail for a call (spec §33.9's Canada
+    compliance requirement). Never holds media contents, LiveKit tokens or
+    E2EE keys — see the migration's table comment."""
+
+    __tablename__ = "call_events"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    call_session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("call_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    actor_profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL")
+    )
+    event_type: Mapped[str] = mapped_column(pg_enum("call_event_type", *CALL_EVENT_TYPES), nullable=False)
+    event_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CallMessage(Base):
+    """In-call chat history. LiveKit's realtime data channel is the actual
+    live-delivery path (spec §16) — this table is persistence/history, with
+    retention enforced at the application layer (spec §33.2), not a
+    schema-level expiry column."""
+
+    __tablename__ = "call_messages"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    call_session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("call_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    sender_profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL")
+    )
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

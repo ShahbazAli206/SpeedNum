@@ -21,7 +21,8 @@ All commits for this feature use the `video-call:` message prefix so they're eas
 
 **Phase 0 (repository analysis) — DONE.**
 **Phase 1 (LiveKit + coturn infrastructure) — DONE**, with one explicitly-unverified step (see below).
-Next up: **Phase 2 (database models/migrations)**.
+**Phase 2 (database models/migrations) — DONE**, not yet applied to any real database.
+Next up: **Phase 3 (call authorization + REST APIs)**.
 
 ---
 
@@ -194,9 +195,44 @@ against these services (no Docker daemon in this environment), obtaining real DN
 certs, and opening the UFW rules — all of that is real-VPS deploy work, tracked in
 `DEPLOYMENT.md`'s new section, not something to fake here.
 
-### Phase 2 — Database models/migrations — NOT STARTED
+### Phase 2 — Database models/migrations — **DONE**
 
-### Phase 2 — Database models/migrations — NOT STARTED
+**Files changed:**
+- `db/migrations/0028_video_calls.sql` (new) — `call_sessions`, `call_participants`,
+  `call_invitations`, `call_events`, `call_messages` (spec §12–16) with 6 new Postgres enum
+  types, indexes, table comments, and the guarded RLS block (same shape as `0023`/`0026`,
+  joining through `call_sessions.tenant_id` for the four child tables since none of them carry
+  their own `tenant_id`).
+- `backend/app/models.py` — matching SQLAlchemy classes (`CallSession`, `CallParticipant`,
+  `CallInvitation`, `CallEvent`, `CallMessage`) + 6 enum tuples, appended at the end of the
+  file (mirrors how `PlatformInvoice*`/`DesktopRelease` were appended for their own features).
+
+**Decisions made while writing this:**
+- `call_sessions.tenant_id` is nullable, per the spec's explicit instruction — but confirmed
+  it's always populated in practice under the calling matrix `can_call()` will enforce in
+  Phase 3 (every call — including platform↔Owner — resolves to exactly one concrete company
+  tenant, mirroring `support_threads.tenant_id`). Documented inline in both the migration and
+  the model so this doesn't get "fixed" to `NOT NULL` later without re-reading why it isn't.
+- `call_participants` FK columns follow the codebase's existing two-pattern split exactly:
+  `profile_id` (core identity, e.g. `Task.assignee_id`) gets no `ondelete`, while
+  `actor_profile_id`/`sender_profile_id` (denormalized historical actor, e.g.
+  `ClientMessage.sender_id`) get `ON DELETE SET NULL` so history survives account deletion.
+- The `unique (call_session_id, profile_id)` constraint on `call_participants` is enforced at
+  the DB level only, not mirrored as a SQLAlchemy `UniqueConstraint` — there is no existing
+  precedent for `__table_args__`/composite `UniqueConstraint` anywhere else in `models.py`
+  (checked), and `main.py` already has a generic `IntegrityError` → clean 409 handler that
+  covers a violation the same way it covers every other unique/FK constraint in this schema.
+- No chat-retention column on `call_messages` (spec §33.2 wants retention *configurable*, not
+  hardcoded) — deferred to whichever mechanism Phase 11 actually builds (most likely an
+  application-level sweep against `created_at`, same shape as `services/backup_retention.py`),
+  not decided prematurely here.
+
+**Not done yet:** the migration has not been applied to any database (no local Postgres in
+this environment) — `python scripts/migrate.py apply` (or `baseline`+`apply` per
+`DEPLOYMENT.md`'s existing migration runbook) is real deploy work, same caveat as Phase 1's
+infrastructure not having actually been `docker compose up`'d. SQLAlchemy could not be
+import-tested either (not installed in this environment) — reviewed by hand instead, cross-
+checking every enum/column/FK between the `.sql` file and `models.py` line by line.
 
 ### Phase 3 — Call authorization and APIs — NOT STARTED
 
@@ -233,16 +269,23 @@ certs, and opening the UFW rules — all of that is real-VPS deploy work, tracke
 
 ## Migrations added by this feature (running list)
 
-_None yet — next up in Phase 2: `db/migrations/0028_video_calls.sql`._
+- `db/migrations/0028_video_calls.sql` — `call_sessions`, `call_participants`,
+  `call_invitations`, `call_events`, `call_messages` + 6 enum types. Not yet applied to any
+  database.
 
 ## Known limitations (running list, per spec §32/definition of done)
 
 - Caddy → LiveKit reachability (host-networked container) is documented but **not verified**
   against the real VPS — see Phase 1 log above.
 - No infrastructure has actually been deployed/run yet — config and compose definitions only.
+- `0028_video_calls.sql` has not been applied to any database, and the new SQLAlchemy models
+  could not be import-tested (no SQLAlchemy install in this environment) — verified by hand
+  instead. Run `python scripts/migrate.py apply --dry-run` against a real Postgres before
+  trusting this further.
 
 ## Next step
 
-Start Phase 2: `db/migrations/0028_video_calls.sql` (`call_sessions`, `call_participants`,
-`call_invitations`, `call_events`, `call_messages` — spec §12–16) plus the matching
-`backend/app/models.py` SQLAlchemy classes.
+Start Phase 3: `app/permissions.py`'s `can_call()`/`can_invite_to_call()`, the
+`backend/app/routers/calls.py` router (create/list/get/accept/decline/cancel/end,
+participants list/invite/remove — spec §17, chat endpoints deferred to Phase 11), matching
+Pydantic schemas, and registering the router in `main.py`.
