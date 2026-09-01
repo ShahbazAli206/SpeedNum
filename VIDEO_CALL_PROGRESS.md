@@ -23,7 +23,8 @@ All commits for this feature use the `video-call:` message prefix so they're eas
 **Phase 1 (LiveKit + coturn infrastructure) — DONE**, with one explicitly-unverified step (see below).
 **Phase 2 (database models/migrations) — DONE**, not yet applied to any real database.
 **Phase 3 (call authorization + REST APIs) — DONE**, not yet run/tested against a live server.
-Next up: **Phase 4 (LiveKit token generation)**.
+**Phase 4 (LiveKit token generation) — DONE**, not yet run against a live LiveKit server.
+Next up: **Phase 5 (basic 1:1 audio/video frontend)**.
 
 ---
 
@@ -309,7 +310,35 @@ locally against a real Postgres, hit every endpoint with each of the three accou
 specifies (valid client→staff, valid client→owner, valid owner→staff/client/platform, invalid
 cross-tenant, unauthorized invite, unauthorized token) — that test file does not exist yet.
 
-### Phase 4 — LiveKit token generation — NOT STARTED
+### Phase 4 — LiveKit token generation — **DONE**
+
+Verified the exact `livekit-api` Python token API against the SDK source before writing it
+(`AccessToken(key, secret).with_identity().with_name().with_ttl(timedelta).with_grants(VideoGrants(...)).to_jwt()`)
+— not from memory.
+
+**Files changed:**
+- `backend/app/services/livekit_tokens.py` (new) — the only place the LiveKit API secret is
+  ever used. `participant_identity()`/`profile_id_from_identity()` (opaque `profile_<uuid>`,
+  spec §19, with the inverse ready for a future webhook handler), and `create_call_token()`.
+  `livekit-api` import is function-local (deferred, like `storage_s3.py`'s boto3) so the app
+  doesn't hard-depend on it unless a token is actually minted.
+- `backend/app/routers/calls.py` — `POST /calls/{id}/token` (+ `_call_token_rate_limit`,
+  looser window since it's hit on every reconnect, spec §27). This endpoint is the definitive
+  "join" transition Phase 3 deferred: fetching a token flips the caller's own participant row
+  to `joined`, and a non-initiator fetching one while the call is still ringing also flips the
+  call to `accepted` (connect == answer). Enforces spec §18's checklist server-side and turns
+  a missing LiveKit config into a 424 (storage.py's convention), not a 500.
+- `backend/app/schemas.py` — `CallTokenRead` (token + public wss URL + room name + own opaque
+  identity; **never** the API secret, spec §18).
+- `backend/app/config.py` + `deploy/api.env.example` — `livekit_token_ttl_seconds` (default
+  6h; the token must outlast a call because LiveKit reuses it on reconnect — "short-lived" in
+  the spec can't mean minutes here, documented inline).
+
+**Not done yet:** never run against a real LiveKit server — the actual token needs a live
+LiveKit to validate against (a signed JWT is only meaningful once LiveKit accepts it). Wiring
+looks right by inspection; real validation is deploy-time work.
+
+### Phase 5 — Basic 1:1 audio/video — NOT STARTED
 
 ### Phase 5 — Basic 1:1 audio/video — NOT STARTED
 

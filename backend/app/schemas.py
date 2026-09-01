@@ -2081,3 +2081,17 @@ class CallInvitationRead(ORMModel):
     status: CallInvitationStatus
     created_at: datetime | None = None
     responded_at: datetime | None = None
+
+
+class CallTokenRead(BaseModel):
+    """What the frontend needs to actually connect to the LiveKit room — and
+    nothing more. The LiveKit API secret is NEVER part of this (spec §18):
+    only the signed join token, the public wss URL, and the opaque room name."""
+
+    token: str
+    livekit_url: str
+    room_name: str
+    # The caller's own opaque LiveKit identity (profile_<uuid>), so the client
+    # can tell its own tracks apart from remote participants' without needing
+    # any PII to make the match.
+    identity: str

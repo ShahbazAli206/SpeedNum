@@ -245,6 +245,15 @@ class Settings(BaseSettings):
     # How long an outgoing call rings before the caller's client marks it
     # missed (implementation spec §20).
     call_ringing_timeout_seconds: int = Field(default=30, alias="CALL_RINGING_TIMEOUT_SECONDS")
+    # LiveKit room-access token lifetime. The spec calls for "short-lived"
+    # tokens (§18/§26) — but the token has to outlast the whole call, since
+    # LiveKit reuses it on automatic reconnection (a mid-call network drop
+    # re-authenticates with the same token). 6h is LiveKit's own default and
+    # the practical floor that still survives a long meeting; a token is only
+    # useful for *joining the one specific room* it was signed for anyway, so
+    # a longer window is not a broad grant. Lower it if calls are known to be
+    # short.
+    livekit_token_ttl_seconds: int = Field(default=6 * 60 * 60, alias="LIVEKIT_TOKEN_TTL_SECONDS")
 
     @property
     def livekit_is_configured(self) -> bool:

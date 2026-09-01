@@ -36,9 +36,10 @@ from ..schemas import (
     CallInviteCreate,
     CallParticipantRead,
     CallSessionRead,
+    CallTokenRead,
     Ok,
 )
-from ..services import audit
+from ..services import audit, livekit_tokens
 from ..services.rate_limit import rate_limit_by_tenant
 from ..utils import ensure_found, now_utc, read
 
@@ -52,6 +53,15 @@ _OPEN_PARTICIPANT_STATUSES = ("invited", "ringing", "joined")
 
 _call_create_rate_limit = rate_limit_by_tenant("calls-create", limit=30, window_seconds=3600)
 _call_invite_rate_limit = rate_limit_by_tenant("calls-invite", limit=60, window_seconds=3600)
+# Token requests are hit on every (re)connect and reconnect attempt, so this
+# window is much looser than create/invite — but still bounded per the spec's
+# "rate-limit token requests" requirement (§27).
+_call_token_rate_limit = rate_limit_by_tenant("calls-token", limit=120, window_seconds=3600)
+
+# call_sessions.status values from which a participant may still (re)join and
+# therefore fetch a token. A ringing call is joinable (that's how the caller
+# and an accepting callee both get in); a terminal one never is.
+_JOINABLE_CALL_STATUSES = ("ringing", "accepted")
 
 
 def _room_name(call_id: uuid.UUID) -> str:
@@ -261,6 +271,76 @@ async def get_call(call_id: uuid.UUID, session: SessionDep, user: CallableUserDe
     await _expire_stale_ringing(session, user)
     await _ensure_participant(session, call_id, user)
     return await _read_call(session, call_id)
+
+
+@router.post("/{call_id}/token", response_model=CallTokenRead, dependencies=[Depends(_call_token_rate_limit)])
+async def create_call_token(call_id: uuid.UUID, session: SessionDep, user: CallableUserDep) -> CallTokenRead:
+    """Mint the short-lived LiveKit token this caller connects to the room
+    with (spec §18). This IS the definitive "join" transition (see
+    VIDEO_CALL_PROGRESS.md Phase 3): fetching a token is what flips the
+    caller's own participant row to `joined`, for the initiator and every
+    invitee alike.
+
+    Enforces spec §18's checklist server-side: authenticated (CallableUserDep),
+    call exists and the caller belongs to it (_ensure_participant), the call
+    is still joinable, the caller hasn't declined/been removed, and the LiveKit
+    identity is derived from the authenticated profile here — never taken from
+    the client. The API secret never leaves the server (services/livekit_tokens)."""
+    await _expire_stale_ringing(session, user)
+    call = await _ensure_participant(session, call_id, user)
+    if call.status not in _JOINABLE_CALL_STATUSES:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This call is no longer joinable.")
+
+    participant = await _get_my_participant(session, call_id, user.profile.id)
+    if participant.status in ("declined", "removed"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You are no longer part of this call.")
+
+    now = now_utc()
+    if participant.status != "joined":
+        participant.status = "joined"
+        participant.joined_at = now
+        session.add(
+            CallEvent(call_session_id=call.id, actor_profile_id=user.profile.id, event_type="participant_joined")
+        )
+        # A non-initiator getting a token while the call is still ringing is
+        # the same thing as accepting it — connect == answer. The initiator
+        # joining their own outgoing call does NOT flip it to accepted (nobody
+        # has picked up yet), so the ringing state the callee's UI keys on is
+        # preserved.
+        if call.status == "ringing" and participant.role != "initiator":
+            call.status = "accepted"
+            call.connected_at = now
+            session.add(
+                CallEvent(call_session_id=call.id, actor_profile_id=user.profile.id, event_type="call_accepted")
+            )
+        await session.execute(
+            update(CallInvitation)
+            .where(
+                CallInvitation.call_session_id == call.id,
+                CallInvitation.invitee_profile_id == user.profile.id,
+                CallInvitation.status == "pending",
+            )
+            .values(status="accepted", responded_at=now)
+        )
+        await session.flush()
+
+    try:
+        token = livekit_tokens.create_call_token(
+            profile_id=user.profile.id,
+            display_name=user.profile.full_name or user.profile.email,
+            room_name=call.room_name,
+        )
+    except livekit_tokens.LiveKitNotConfigured as exc:
+        # 424, matching storage.py's "a required backing service isn't
+        # configured" convention — not a 500, so the cause is unambiguous.
+        raise HTTPException(status.HTTP_424_FAILED_DEPENDENCY, str(exc)) from exc
+
+    return CallTokenRead(
+        token=token,
+        livekit_url=settings.livekit_url,
+        room_name=call.room_name,
+        identity=livekit_tokens.participant_identity(user.profile.id),
+    )
 
 
 @router.post("/{call_id}/accept", response_model=CallSessionRead)
