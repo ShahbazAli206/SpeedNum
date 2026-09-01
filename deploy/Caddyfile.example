@@ -17,6 +17,41 @@
 	email sa38299793@gmail.com
 }
 
+# The frontend (see ../deploy/docker-compose.yml's `frontend` service) — self-hosted here
+# instead of Vercel. Canonical origin; api.env's PUBLIC_APP_URL/CORS_ORIGINS must match it.
+www.spidnums.com {
+	handle {
+		reverse_proxy speednum-frontend:3000
+	}
+
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	log {
+		output file /data/access-frontend.log {
+			roll_size 20mb
+			roll_keep 5
+		}
+	}
+}
+
+# Apex and the old Vercel-era hostname both fold into the canonical www host above, so
+# bookmarks and already-sent email links keep working. Caddy still issues each its own cert
+# before redirecting — that's ACME/TLS working as intended, not a config mistake.
+spidnums.com {
+	redir https://www.spidnums.com{uri} permanent
+}
+
+syedi.spidnums.com {
+	redir https://www.spidnums.com{uri} permanent
+}
+
 # Staging/validation hostname. Already resolves to this VPS (test A record
 # predates this app) — used here to prove the whole stack end-to-end before
 # any DNS is pointed at it for real. See DEPLOYMENT.md for the plan to move

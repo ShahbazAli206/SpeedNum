@@ -95,7 +95,8 @@ Rollback path (unchanged code, config-only): `DATABASE_URL` back to the Supabase
 
 | Layer | Status | URL / location |
 |---|---|---|
-| Frontend (Vercel) | ✅ **Deployed** (demo mode until env vars added) | https://syedi.spidnums.com |
+| Frontend (Hostinger VPS, self-hosted) | ✅ **Deployed** — moved off Vercel; see [Hostinger KVM 4 VPS — frontend runbook](#hostinger-kvm-4-vps--frontend-runbook) | https://www.spidnums.com (`spidnums.com` and `syedi.spidnums.com` 301-redirect to it) |
+| Frontend (Vercel, kept as fallback only) | Domain detached — deployment left running at `speed-num.vercel.app` in case a rollback is ever needed | https://speed-num.vercel.app |
 | Database (VPS Postgres) | ⬜ pending first deploy — compose service ready in [`deploy/`](deploy/); migrations run clean from empty (see below) | Docker-internal only, via the `api`/`migrate` services |
 | Database (Supabase, rollback target) | 🔴 **BLOCKER if used directly — migrations `0005`–`0007` not applied there.** `0005` adds `profiles.must_change_password`, which `deps.py` reads on *every authenticated request*: until it is applied, every signed-in request against this database 500s. Apply with the runner below. (`0001`–`0004` done: 22 tables, trigger + RLS; auth configured, ES256 signing) | `https://xftnqkmakeaqaandxyei.supabase.co` · Canada Central (`ca-central-1`) |
 | Object storage (VPS MinIO) | ⬜ pending first deploy — compose service ready in [`deploy/`](deploy/) | Docker-internal + Caddy-proxied `/storage-api/*` only |
@@ -106,7 +107,13 @@ Rollback path (unchanged code, config-only): `DATABASE_URL` back to the Supabase
 
 ## Platform configuration
 
-### Vercel (frontend)
+### Vercel (frontend) — superseded, kept as a fallback
+
+> **The frontend is now self-hosted on the VPS** — see
+> [Hostinger KVM 4 VPS — frontend runbook](#hostinger-kvm-4-vps--frontend-runbook). This
+> section is kept as-is (rather than deleted) because the Vercel project is intentionally left
+> running at `speed-num.vercel.app` as a rollback path; `spidnums.com`/`syedi.spidnums.com` are
+> detached from it so DNS fully controls where real traffic goes.
 
 | Setting | Value |
 |---|---|
@@ -532,6 +539,72 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/jso
 (no transport, sandbox sender, unauthenticated SMTP) without echoing any secret.
 `POST /settings/email/test` sends a real message — default recipient is the caller — so
 delivery is proven before a client is ever invited.
+
+---
+
+## Hostinger KVM 4 VPS — frontend runbook
+
+Same VPS, same Caddy, same Docker Compose project as the backend above — the frontend is just
+another service in [`deploy/docker-compose.yml`](deploy/docker-compose.yml) rather than a
+separate PaaS. `frontend/Dockerfile` builds the Next.js `output: "standalone"` bundle (see
+`frontend/next.config.ts`) into a small runtime image; `deploy/Caddyfile.example` adds
+`www.spidnums.com` (canonical) plus `spidnums.com`/`syedi.spidnums.com` (301 redirects to it).
+
+> **`NEXT_PUBLIC_*` vars are build args, not container env.** Next.js inlines them into the
+> client bundle at `next build` time — setting them as a running container's environment (the
+> way `api.env` works for the backend) would silently do nothing. They live in `deploy/.env`
+> instead (the same file compose already auto-loads to interpolate `${VAR}` inside
+> `docker-compose.yml` itself) and are passed via the `frontend` service's `build.args`. Any
+> change to either requires a rebuild, not just a restart:
+> `docker compose up -d --build frontend`.
+
+### Steps
+
+```bash
+cd /home/deploy/apps/speednum && git pull
+cd deploy
+
+# 1. NEXT_PUBLIC_API_URL / NEXT_PUBLIC_SITE_URL already live in .env from the backend
+#    setup above — add them if this is the first time (see .env.example).
+
+# 2. Build and start just the frontend — deliberately not `docker compose up -d` (which would
+#    also restart api/postgres/minio) since this is an independent, additive change.
+docker compose up -d --build frontend
+docker compose ps frontend   # expect "healthy"
+
+# 3. Reverse proxy — same VPS Caddy the backend already uses.
+scp Caddyfile.example deploy@2.25.108.16:/home/deploy/apps/caddy/Caddyfile
+ssh deploy@2.25.108.16 'docker exec caddy caddy validate --config /etc/caddy/Caddyfile'
+ssh deploy@2.25.108.16 'docker exec caddy caddy reload --config /etc/caddy/Caddyfile'
+
+# 4. Point the backend's own config at the new canonical origin (see deploy/api.env):
+#    PUBLIC_APP_URL=https://www.spidnums.com
+#    CORS_ORIGINS=https://www.spidnums.com
+docker compose up -d api   # picks up the edited api.env, no rebuild needed
+```
+
+DNS (Hostinger hPanel → `spidnums.com` → DNS/Nameservers — the domain's nameservers are
+Hostinger's own `atlas.dns-parking.com`/`hyperion.dns-parking.com`, so records are edited there,
+not at a registrar): `A` records for `@` (root), `www`, and `syedi` all point to `2.25.108.16`,
+replacing whatever previously pointed them at Vercel. `test` is untouched — it already points
+here and is unrelated to this change.
+
+### Verify the deployment
+
+```bash
+# Before touching DNS — proves the container + Caddy + ACME path independent of what
+# spidnums.com currently resolves to:
+curl -I --resolve www.spidnums.com:443:2.25.108.16 https://www.spidnums.com
+
+# After DNS has propagated:
+curl -I https://www.spidnums.com          # 200
+curl -I https://spidnums.com              # 301 -> https://www.spidnums.com
+curl -I https://syedi.spidnums.com        # 301 -> https://www.spidnums.com
+```
+
+Then sign in at `https://www.spidnums.com` and confirm a page that calls the API works with no
+CORS errors in the browser console — `CORS_ORIGINS` must exactly match the origin the browser
+is actually on.
 
 ---
 
