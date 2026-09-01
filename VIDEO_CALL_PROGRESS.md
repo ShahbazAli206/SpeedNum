@@ -28,7 +28,10 @@ All commits for this feature use the `video-call:` message prefix so they're eas
 real `livekit-client` types; not yet run in a browser against a live LiveKit server.
 **Phases 10–11 (call provider/ringing/launcher/invite + realtime chat & persistence) — DONE**,
 `tsc` + `eslint` clean; not yet run in a browser.
-Next up: **Phase 12 (E2EE + security hardening)**.
+**Phase 12 (E2EE scaffolding + security-hardening review) — DONE as honestly-flagged
+scaffolding** — E2EE mechanism wired but OFF and unclaimed (key distribution unsolved by
+design); see `VIDEO_CALL_E2EE.md`.
+Next up: **Phase 13 (test scaffolding + perf/testing docs)**.
 
 ---
 
@@ -449,9 +452,41 @@ errors remain).
 data-channel chat, and candidate authorization all need a live multi-user session to actually
 validate. Types + lint pass; behaviour is unverified.
 
-### Phase 12 — E2EE + security hardening — NOT STARTED
+### Phase 12 — E2EE + security hardening — **DONE (as honestly-flagged scaffolding)**
 
-### Phase 13 — Full network/performance testing — NOT STARTED
+The spec (§26, §33.10) is emphatic that E2EE must NOT be claimed until key generation,
+*distribution*, and client behaviour are implemented and tested — so this phase deliberately
+delivers the *mechanism*, off by default and clearly labelled, plus an honest threat-model
+doc, rather than a claimed-complete feature.
+
+**Files:**
+- `frontend/src/lib/livekit/e2ee.ts` (new) — builds LiveKit's `ExternalE2EEKeyProvider` + E2EE
+  Web Worker. Verified the exact API against the installed `livekit-client` `.d.ts` files
+  (`ExternalE2EEKeyProvider.setKey(passphrase)`, `E2EEOptions = { keyProvider, worker }`,
+  `room.setE2EEEnabled(true)`, worker at `livekit-client/e2ee-worker`).
+- `frontend/src/lib/livekit/room.ts` — `createCallRoom` takes an optional `E2EEOptions`.
+- `frontend/src/lib/livekit/use-call.ts` — `connect(url, token, { e2eePassphrase? })`
+  dynamically imports the e2ee module **only when a passphrase is supplied**, so the E2EE
+  worker never enters the default call bundle. Nothing passes a passphrase today → E2EE stays
+  off.
+- `VIDEO_CALL_E2EE.md` (new) — the threat model: what's actually in place (TLS/WSS/DTLS-SRTP,
+  short-lived tokens, opaque ids, server-side authz, rate limiting, audit trail, no
+  recording), why DTLS-SRTP ≠ E2EE in an SFU, the unsolved key-distribution problem with three
+  candidate models and their trust tradeoffs, and the checklist to satisfy before E2EE may be
+  turned on or claimed.
+
+**Security hardening** is not a separate code drop — it was built in throughout and is now
+inventoried in `VIDEO_CALL_E2EE.md`'s status table (server-side authorization on every
+endpoint, opaque ids, rate limits, no secrets to the browser, screen-share warning, audit
+events with no media contents, no recording/stored media). The one follow-up called out:
+configurable chat retention + sweep (spec §33.2) — persistence landed in Phase 11, the sweep
+did not.
+
+**Not done / not claimed:** E2EE is untested against a live LiveKit server; the Turbopack
+bundling of the dynamically-imported E2EE worker is unverified; no "encrypted call" UI copy was
+added (correctly — it would be false today).
+
+### Phase 13 — Test scaffolding + perf/testing docs — NOT STARTED
 
 ---
 

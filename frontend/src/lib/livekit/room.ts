@@ -10,6 +10,7 @@
  */
 
 import {
+  type E2EEOptions,
   type LocalVideoTrack,
   Room,
   RoomEvent,
@@ -62,7 +63,7 @@ export function captureResolutionFor(mode: QualityMode): VideoResolution {
  * Audio is left at LiveKit's defaults (Opus, with its own DTX/red) — audio is
  * the thing we protect, never the thing we degrade first (§3, §6).
  */
-export function createCallRoom(initialQuality: QualityMode = "auto"): Room {
+export function createCallRoom(initialQuality: QualityMode = "auto", e2ee?: E2EEOptions): Room {
   const options: RoomOptions = {
     adaptiveStream: true,
     dynacast: true,
@@ -82,6 +83,10 @@ export function createCallRoom(initialQuality: QualityMode = "auto"): Room {
     // Stop capture tracks when the tab is hidden to save the user's uplink,
     // but keep them ready to resume — LiveKit handles the resume on focus.
     stopLocalTrackOnUnpublish: true,
+    // Off by default — see lib/livekit/e2ee.ts and VIDEO_CALL_E2EE.md. Only
+    // set when a caller actually supplies an E2EE bundle, which nothing does
+    // yet (key distribution is unsolved).
+    ...(e2ee ? { e2ee } : {}),
   };
   return new Room(options);
 }

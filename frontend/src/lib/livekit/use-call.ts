@@ -92,7 +92,9 @@ export interface UseCall {
   isScreenSharing: boolean;
   quality: QualityMode;
   lowDataMode: boolean;
-  connect: (url: string, token: string) => Promise<void>;
+  /** `e2eePassphrase` is scaffolding only — see lib/livekit/e2ee.ts. Nothing
+   *  passes it today (key distribution is unsolved), so E2EE stays off. */
+  connect: (url: string, token: string, opts?: { e2eePassphrase?: string }) => Promise<void>;
   disconnect: () => Promise<void>;
   toggleMic: () => Promise<void>;
   toggleCamera: () => Promise<void>;
@@ -166,7 +168,7 @@ export function useCall(): UseCall {
   );
 
   const connect = useCallback(
-    async (url: string, token: string) => {
+    async (url: string, token: string, opts?: { e2eePassphrase?: string }) => {
       // A hook instance owns at most one room at a time; a stale one is torn
       // down first so a re-connect never leaks the previous media session.
       // roomRef (not the `room` state) so this reads the latest without the
@@ -174,13 +176,22 @@ export function useCall(): UseCall {
       if (roomRef.current) {
         await roomRef.current.disconnect().catch(() => {});
       }
-      const next = createCallRoom(quality);
+      // E2EE is opt-in scaffolding (see lib/livekit/e2ee.ts) — the module is
+      // imported dynamically ONLY when a passphrase is actually supplied, so
+      // the E2EE worker never enters the default call bundle.
+      let e2ee;
+      if (opts?.e2eePassphrase) {
+        const { buildE2EE } = await import("./e2ee");
+        e2ee = (await buildE2EE(opts.e2eePassphrase)).options;
+      }
+      const next = createCallRoom(quality, e2ee);
       attach(next);
       setRoom(next);
       setError(null);
       setConnectionState("connecting");
       try {
         await next.connect(url, token, CONNECT_OPTIONS);
+        if (e2ee) await next.setE2EEEnabled(true).catch(() => {});
         setConnectionState("connected");
         bump();
       } catch (err) {
