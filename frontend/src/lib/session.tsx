@@ -54,6 +54,13 @@ export interface SessionValue {
    *  loads, matching `isAdmin`: a page shows the fuller view until the real
    *  answer arrives rather than flashing controls away. */
   isOwner: boolean;
+  /** True only for a real platform superadmin, straight off `profile.is_superadmin`
+   *  — never optimistic before load or in demo mode (unlike isAdmin/isOwner
+   *  above), since this is what gates the cross-tenant admin console (see
+   *  (firm)/admin/layout.tsx and proxy.ts's /admin edge check). A page that
+   *  needs to know "can this account reach /admin" should read this, not
+   *  string-match `portalRoleLabel`. */
+  isSuperadmin: boolean;
   /** True when a platform superadmin is viewing this firm via impersonation. */
   isImpersonating: boolean;
   /** Which portal this login belongs to, for the role chip in the rail —
@@ -199,6 +206,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         ? profile.role === "owner" || profile.role === "admin" || profile.is_superadmin
         : true,
       isOwner: profile ? profile.role === "owner" || Boolean(profile.is_superadmin) : true,
+      isSuperadmin: isLive && Boolean(profile?.is_superadmin),
       isImpersonating: isLive ? (me?.is_impersonating ?? false) : false,
       portalRoleLabel: isLive ? portalRoleLabelOf(profile) : "Admin",
       hasPermission: (key) => (isLive ? (me?.permissions?.[key] ?? false) : true),
@@ -277,6 +285,7 @@ export function useSession(): SessionValue {
     isFirmStaff: true,
     isAdmin: true,
     isOwner: true,
+    isSuperadmin: false,
     isImpersonating: false,
     portalRoleLabel: "Admin",
     hasPermission: () => true,

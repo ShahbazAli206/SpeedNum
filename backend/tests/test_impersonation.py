@@ -68,6 +68,10 @@ class TestImpersonationToken:
         assert claims.metadata["tenant_id"] == str(acting)
         assert claims.metadata["is_staff"] is True
         assert claims.metadata["is_portal"] is False
+        # Real superadmin status rides along even while impersonating, so
+        # proxy.ts can still tell this apart from the impersonated firm's own
+        # staff (see the frontend's /admin route guard).
+        assert claims.metadata["is_superadmin"] is True
         # Still the superadmin's own identity — audit attributes to them.
         assert claims.user_id == str(profile.id)
         assert claims.email == "root@spidnums.com"
@@ -76,6 +80,11 @@ class TestImpersonationToken:
         profile = _profile(superadmin=True, tenant_id=None)
         claims = verify_token(create_access_token(profile))
         assert "act_as_tenant" not in claims.raw
+
+    def test_an_ordinary_staff_token_is_not_flagged_superadmin(self):
+        profile = _profile(superadmin=False, tenant_id=uuid.uuid4())
+        claims = verify_token(create_access_token(profile))
+        assert claims.metadata["is_superadmin"] is False
 
 
 # --- dependency layer --------------------------------------------------------

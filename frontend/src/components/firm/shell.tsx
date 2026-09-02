@@ -136,12 +136,12 @@ function FirmShellInner({ children }: { children: ReactNode }) {
   const current = FIRM_NAV_FLAT.find((item) => pathname.startsWith(item.href));
 
   // Admin console / Reach / Platform settings / Backup & Recovery are
-  // enforced server-side to the platform superadmin role (SuperadminDep) —
-  // a tenant owner/admin (isAdmin true) gets a 403 EmptyState if they click
-  // through. Hide the links themselves rather than let a firm admin discover
-  // that the hard way. `portalRoleLabel` is "Super Admin" only for a real
+  // enforced server-side to the platform superadmin role (SuperadminDep), at
+  // the edge in proxy.ts, and client-side in (firm)/admin/layout.tsx. Hide
+  // the links themselves too rather than let a firm admin discover the gate
+  // by clicking through. `session.isSuperadmin` is true only for a real
   // `profile.is_superadmin`, whether or not they're impersonating a tenant.
-  const isSuperadmin = session.portalRoleLabel === "Super Admin";
+  const isSuperadmin = session.isSuperadmin;
   // `portalRoleLabel` collapses owner and admin into the same "Admin" chip
   // (see lib/session.tsx), so telling them apart for `hiddenFromAdmin` needs
   // the real role column instead — a plain admin, not an owner who also
@@ -192,6 +192,35 @@ function FirmShellInner({ children }: { children: ReactNode }) {
   const isBlockedForProviderOnly =
     isProviderOnly &&
     !PROVIDER_ALLOWED_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+  // The mirror-image gap: a plain firm account reaching a role-restricted
+  // page it was never meant to see (superadminOnly, ownerOnly,
+  // hiddenFromAdmin — same flags visibleNav below filters the *nav link* on)
+  // via a direct URL, a stale bookmark, or browser history. Nav-hiding alone
+  // never stopped that, and only some of these pages implement their own
+  // 403-on-fetch EmptyState — (firm)/admin/support and its [tenantId] page
+  // are Server Components that silently render an empty inbox instead. This
+  // is one shared check instead of a page-by-page one, and — since it's
+  // recomputed every render off the live, polled session — it also closes
+  // the "role/impersonation changed while this tab sat open" window: the
+  // moment the next poll updates isSuperadmin/isOwner/isPlainAdmin, whatever
+  // was on screen gets replaced by the denial instead of lingering.
+  // Longest-matching href wins so a stricter child route (e.g. ownerOnly
+  // /team/roles) isn't shadowed by a looser parent (hiddenFromAdmin /team).
+  const restrictedNavItem = useMemo(() => {
+    let best: (typeof FIRM_NAV_FLAT)[number] | null = null;
+    for (const item of FIRM_NAV_FLAT) {
+      if (!item.superadminOnly && !item.ownerOnly && !item.hiddenFromAdmin) continue;
+      if (pathname !== item.href && !pathname.startsWith(`${item.href}/`)) continue;
+      if (!best || item.href.length > best.href.length) best = item;
+    }
+    return best;
+  }, [pathname]);
+  const isBlockedByRole =
+    !session.isLoading &&
+    restrictedNavItem !== null &&
+    ((restrictedNavItem.superadminOnly && !isSuperadmin) ||
+      (restrictedNavItem.ownerOnly && !isOwner) ||
+      (Boolean(restrictedNavItem.hiddenFromAdmin) && isPlainAdmin));
   const visibleNav = useMemo(
     () =>
       FIRM_NAV.map((group) => ({
@@ -613,6 +642,25 @@ function FirmShellInner({ children }: { children: ReactNode }) {
                 title="There's no firm here"
                 description="You're signed in as the platform provider, with no company of your own. Open a company from the Admin console to work inside it, or use one of the pages in the sidebar."
                 action={<ButtonLink href="/admin">Go to Admin console</ButtonLink>}
+              />
+            ) : isBlockedByRole ? (
+              <EmptyState
+                icon={<ShieldOff className="size-6" />}
+                title={
+                  restrictedNavItem?.superadminOnly
+                    ? "Superadmin access required"
+                    : restrictedNavItem?.ownerOnly
+                      ? "Owner access required"
+                      : "You don't have access to this page"
+                }
+                description={
+                  restrictedNavItem?.superadminOnly
+                    ? "This page is restricted to the SpidNums platform superadmin role."
+                    : restrictedNavItem?.ownerOnly
+                      ? "This page is restricted to the firm's Owner (or the platform superadmin)."
+                      : "Your role doesn't include access to this page."
+                }
+                action={<ButtonLink href="/overview">Back to Dashboard</ButtonLink>}
               />
             ) : (
               children
