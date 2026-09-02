@@ -119,6 +119,40 @@ export interface Me {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Timesheet — GET/PATCH /timesheet/*. See backend/app/routers/timesheet.py.  */
+/* -------------------------------------------------------------------------- */
+
+/** One profile's attendance for one day. worked_seconds is 0 while
+ * end_time is null — no confirmed logout yet that day. */
+export interface AttendanceDay {
+  id: string;
+  profile_id: string;
+  profile_name: string | null;
+  role: UserRole | null;
+  work_date: string;
+  start_time: string;
+  end_time: string | null;
+  worked_seconds: number;
+}
+
+/** One (task, assignee) time-tracking row for the "Client task hours" tab —
+ * reuses TaskTimer (see routers/task_timers.py), not a separate table. */
+export interface TaskHourEntry {
+  id: string;
+  task_id: string;
+  task_title: string;
+  client_id: string | null;
+  client_name: string | null;
+  assignee_id: string;
+  assignee_name: string | null;
+  status: "running" | "stopped";
+  accumulated_seconds: number;
+  started_at: string | null;
+  last_stopped_at: string | null;
+  total_seconds: number;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Roles & permissions — GET/POST/PATCH/DELETE /roles.                        */
 /* -------------------------------------------------------------------------- */
 

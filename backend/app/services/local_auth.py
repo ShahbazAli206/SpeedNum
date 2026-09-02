@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..models import Profile, Tenant
-from . import jwt_keys, oauth_google
+from . import attendance, jwt_keys, oauth_google
 from .oauth_google import OAuthProviderError
 from .password_hash import hash_password, needs_rehash, verify_password
 
@@ -117,7 +117,9 @@ def _generate_raw_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def _routing_metadata(*, tenant_id: uuid.UUID | None, client_id: uuid.UUID | None) -> dict[str, object]:
+def _routing_metadata(
+    *, tenant_id: uuid.UUID | None, client_id: uuid.UUID | None, is_superadmin: bool = False
+) -> dict[str, object]:
     """Same shape as accounts.py's old Supabase-metadata helper — the
     frontend's proxy.ts reads these exact keys out of the JWT to route a
     signed-in user to the firm app or the client portal without a database
@@ -128,6 +130,7 @@ def _routing_metadata(*, tenant_id: uuid.UUID | None, client_id: uuid.UUID | Non
         "client_id": str(client_id) if client_id is not None else None,
         "is_portal": client_id is not None,
         "is_staff": client_id is None,
+        "is_superadmin": is_superadmin,
     }
 
 
@@ -150,9 +153,18 @@ def create_access_token(profile: Profile, *, act_as_tenant: uuid.UUID | None = N
             "client_id": None,
             "is_portal": False,
             "is_staff": True,
+            # Real (not impersonated) superadmin status — always the acting
+            # superadmin's own, never the impersonated firm's, so proxy.ts can
+            # still tell an impersonating superadmin apart from that firm's
+            # own staff (who never carry an act_as_tenant claim at all).
+            "is_superadmin": bool(profile.is_superadmin),
         }
     else:
-        metadata = _routing_metadata(tenant_id=profile.tenant_id, client_id=profile.client_id)
+        metadata = _routing_metadata(
+            tenant_id=profile.tenant_id,
+            client_id=profile.client_id,
+            is_superadmin=bool(profile.is_superadmin),
+        )
     payload = {
         "sub": str(profile.id),
         "email": profile.email,
@@ -193,6 +205,12 @@ async def _issue_refresh_token(
 async def issue_tokens(
     session: AsyncSession, profile: Profile, *, user_agent: str | None, ip_address: str | None
 ) -> TokenPair:
+    # Called by register/login/consume_magic_link/complete_oauth only — never
+    # by refresh(), which rotates tokens without a fresh "sign-in" happening.
+    # That's what makes this the right place to stamp "first login of the
+    # day" for the Timesheet page (services/attendance.py) rather than
+    # instrumenting every one of those call sites separately.
+    await attendance.record_login(session, profile)
     raw_refresh, expires_at = await _issue_refresh_token(
         session, profile_id=profile.id, user_agent=user_agent, ip_address=ip_address
     )

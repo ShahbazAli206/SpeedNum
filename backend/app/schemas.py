@@ -874,6 +874,55 @@ class TaskTimerRead(ORMModel):
     started_at: datetime | None = None
 
 
+# --- Timesheet: attendance ------------------------------------------------
+class AttendanceDayRead(ORMModel):
+    """One profile's attendance for one day — see routers/timesheet.py and
+    services/attendance.py. worked_seconds is 0 while end_time is null (no
+    confirmed logout yet)."""
+
+    id: uuid.UUID
+    profile_id: uuid.UUID
+    profile_name: str | None = None
+    role: UserRole | None = None
+    work_date: date
+    start_time: datetime
+    end_time: datetime | None = None
+    worked_seconds: int = 0
+
+
+class AttendanceDayUpdate(BaseModel):
+    """Owner-only correction of a staff member's recorded times."""
+
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+
+
+# --- Timesheet: client task hours (reads/adjusts TaskTimer) --------------
+class TaskHourRead(ORMModel):
+    """One (task, assignee) time-tracking row, hydrated with client/assignee
+    names for the Timesheet's "Client task hours" tab. Reuses TaskTimer —
+    see routers/task_timers.py — rather than a new table."""
+
+    id: uuid.UUID
+    task_id: uuid.UUID
+    task_title: str
+    client_id: uuid.UUID | None = None
+    client_name: str | None = None
+    assignee_id: uuid.UUID
+    assignee_name: str | None = None
+    status: Literal["running", "stopped"] = "stopped"
+    accumulated_seconds: int = 0
+    started_at: datetime | None = None
+    last_stopped_at: datetime | None = None
+    total_seconds: int = 0
+
+
+class TaskHourUpdate(BaseModel):
+    """Owner-only correction of the banked time on a task/assignee pair."""
+
+    accumulated_seconds: int = Field(ge=0)
+
+
 class TaskAttachmentCreate(BaseModel):
     name: str = Field(min_length=1, max_length=260)
     kind: DocumentKind = "other"

@@ -4,10 +4,13 @@ import { LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 
+import { useConfirm } from "@/components/confirm";
 import { useTimer } from "@/components/tasks/timer-provider";
 import { cn } from "@/lib/cn";
+import { post } from "@/lib/api";
 import { AUTH_CONFIGURED } from "@/lib/auth";
 import { logout } from "@/lib/auth-client";
+import { useSession } from "@/lib/session";
 
 /**
  * Signs the user out for real.
@@ -27,8 +30,30 @@ export function useSignOut() {
   // TimerProvider — see components/tasks/timer-provider.tsx's fallback), so
   // this is safe to call from either shell without checking which one first.
   const { stopIfRunning } = useTimer();
+  const confirm = useConfirm();
+  const session = useSession();
 
   return useCallback(async () => {
+    // Timesheet attendance is a firm-staff concept only (Profile.client_id
+    // null) — a client-portal login (isFirmStaff false) skips straight to
+    // signing out, same as before this feature existed.
+    if (session.isFirmStaff && session.isLive) {
+      const confirmedEndOfDay = await confirm({
+        title: "End your work day?",
+        description: "Is this your job end time? Confirming marks it as today's sign-off on your Timesheet.",
+        confirmLabel: "Yes, that's my end time",
+        cancelLabel: "No, just sign out",
+      });
+      if (confirmedEndOfDay) {
+        try {
+          await post("/timesheet/attendance/logout-confirm");
+        } catch {
+          // Signing out should never hang on this — worst case today's row
+          // stays unconfirmed, exactly like declining the prompt.
+        }
+      }
+    }
+
     await stopIfRunning();
     try {
       if (AUTH_CONFIGURED) {
@@ -41,7 +66,7 @@ export function useSignOut() {
     // refresh() re-runs the proxy so the server forgets the session cookie too.
     router.replace("/login");
     router.refresh();
-  }, [router, stopIfRunning]);
+  }, [confirm, router, session.isFirmStaff, session.isLive, stopIfRunning]);
 }
 
 export function SignOutButton({ className }: { className?: string }) {

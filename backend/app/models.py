@@ -438,6 +438,30 @@ class TaskTimer(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class AttendanceDay(Base):
+    """One staff profile's attendance for one calendar day — the Timesheet
+    page's clock-in/clock-out record. `start_time` is set once, on the first
+    real sign-in of the day, and never overwritten. `end_time` stays null
+    until the staff member explicitly confirms a Logout as their end-of-day;
+    a later confirmed logout the same day overwrites it. See
+    services/attendance.py and routers/timesheet.py."""
+
+    __tablename__ = "attendance_days"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    work_date: Mapped[date] = mapped_column(Date, nullable=False)
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Deadline(Base):
     __tablename__ = "deadlines"
 

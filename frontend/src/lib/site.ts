@@ -155,6 +155,15 @@ export const FIRM_NAV: { group: string; items: DashboardNavItem[] }[] = [
         description: "Projects and tasks, table or Kanban",
       },
       {
+        // Everyone sees this — an Owner gets the full roster view with edit/
+        // export, everyone else sees only their own attendance and task
+        // hours. See src/app/(firm)/timesheet/timesheet-client.tsx.
+        label: "Timesheet",
+        href: "/timesheet",
+        icon: "clock",
+        description: "Daily sign-in/out and hours spent on client tasks",
+      },
+      {
         label: "Deadlines",
         href: "/deadlines",
         icon: "calendar-clock",

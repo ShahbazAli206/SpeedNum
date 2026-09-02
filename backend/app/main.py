@@ -58,6 +58,7 @@ from .routers import (
     task_attachments,
     task_timers,
     team,
+    timesheet,
     users,
     workflows,
 )
@@ -197,6 +198,7 @@ for router in (
     workflows.router,
     task_attachments.router,
     task_timers.router,
+    timesheet.router,
     client_documents_staff.router,
     deadlines.router,
     engagements.router,

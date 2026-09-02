@@ -17,6 +17,7 @@ const FIRM_ROUTES = [
   "/billing",
   "/clients",
   "/workflows",
+  "/timesheet",
   "/deadlines",
   "/reminders",
   "/services",
@@ -62,7 +63,7 @@ function matches(pathname: string, routes: string[]): boolean {
  * permissive here is deliberate — a wrong guess would lock a legitimate
  * user out of their own app.
  */
-function accountKindFromAccessToken(token: string | undefined): "firm" | "portal" | "provider" | null {
+function decodeAccessTokenMetadata(token: string | undefined): Record<string, unknown> | null {
   if (!token) return null;
   try {
     const payloadSegment = token.split(".")[1];
@@ -70,23 +71,43 @@ function accountKindFromAccessToken(token: string | undefined): "firm" | "portal
     const base64 = payloadSegment.replace(/-/g, "+").replace(/_/g, "/");
     const json = atob(base64);
     const payload = JSON.parse(json) as { user_metadata?: Record<string, unknown> };
-    const metadata = payload.user_metadata;
-    if (!metadata) return null;
-    const clientId = metadata.client_id;
-    if (typeof clientId === "string" && clientId.length > 0) return "portal";
-    if (metadata.is_portal === true) return "portal";
-    if (metadata.is_staff === true) {
-      // A staff login with no tenant_id at all is the pure platform-provider
-      // account (superadmin owning no firm of its own) — see
-      // components/firm/shell.tsx's isProviderOnly for the matching nav
-      // filter. A superadmin who also owns a firm still has tenant_id set,
-      // so they land on FIRM_HOME like any other owner, unaffected.
-      return metadata.tenant_id ? "firm" : "provider";
-    }
-    return null;
+    return payload.user_metadata ?? null;
   } catch {
     return null;
   }
+}
+
+function accountKindFromMetadata(
+  metadata: Record<string, unknown> | null,
+): "firm" | "portal" | "provider" | null {
+  if (!metadata) return null;
+  const clientId = metadata.client_id;
+  if (typeof clientId === "string" && clientId.length > 0) return "portal";
+  if (metadata.is_portal === true) return "portal";
+  if (metadata.is_staff === true) {
+    // A staff login with no tenant_id at all is the pure platform-provider
+    // account (superadmin owning no firm of its own) — see
+    // components/firm/shell.tsx's isProviderOnly for the matching nav
+    // filter. A superadmin who also owns a firm still has tenant_id set,
+    // so they land on FIRM_HOME like any other owner, unaffected.
+    return metadata.tenant_id ? "firm" : "provider";
+  }
+  return null;
+}
+
+/**
+ * True/false when the token positively states superadmin status, null when
+ * the signal is missing or unreadable (no access-token cookie yet between
+ * refreshes, a malformed token, demo mode). Mirrors `accountKindFromMetadata`'s
+ * "permissive on unknown" philosophy: the /admin redirect below only fires on
+ * an explicit `false`, never on `null` — a wrong guess here would lock a
+ * legitimate superadmin out of their own console mid-session, and the real
+ * enforcement is (firm)/admin/layout.tsx plus every backend SuperadminDep
+ * route regardless of what this edge check decides.
+ */
+function isSuperadminFromMetadata(metadata: Record<string, unknown> | null): boolean | null {
+  if (!metadata || typeof metadata.is_superadmin !== "boolean") return null;
+  return metadata.is_superadmin;
 }
 
 export function proxy(request: NextRequest) {
@@ -113,7 +134,8 @@ export function proxy(request: NextRequest) {
   }
 
   if (signedIn) {
-    const kind = accountKindFromAccessToken(request.cookies.get(ACCESS_COOKIE)?.value);
+    const metadata = decodeAccessTokenMetadata(request.cookies.get(ACCESS_COOKIE)?.value);
+    const kind = accountKindFromMetadata(metadata);
 
     // Leaving /login or /signup: send them to their own home, not always the
     // client portal. `?next=` from the redirect above wins, so a deep link
@@ -139,6 +161,34 @@ export function proxy(request: NextRequest) {
     if (kind === "portal" && matches(pathname, FIRM_ROUTES)) {
       const redirect = request.nextUrl.clone();
       redirect.pathname = PORTAL_HOME;
+      redirect.search = "";
+      return NextResponse.redirect(redirect);
+    }
+
+    // The mirror direction: firm staff/owner or the platform provider have no
+    // business on the client portal either. Only fires on a positive "firm" or
+    // "provider" read (never on `null`, same permissive-on-unknown reasoning
+    // as everywhere else in this function) — deps.get_book_scope would happily
+    // let firm staff browse it with client_id unset otherwise, showing a
+    // broken/empty portal shell instead of redirecting them to their own app.
+    if ((kind === "firm" || kind === "provider") && matches(pathname, ["/dashboard"])) {
+      const redirect = request.nextUrl.clone();
+      redirect.pathname = kind === "provider" ? PROVIDER_HOME : FIRM_HOME;
+      redirect.search = "";
+      return NextResponse.redirect(redirect);
+    }
+
+    // The cross-tenant platform console: an ordinary firm account (owner,
+    // admin, any tenant staff) has no business here, direct URL or stale
+    // bookmark included. Only fires on a token that positively says
+    // "not superadmin" — see isSuperadminFromMetadata's doc comment — so an
+    // impersonating superadmin (whose token still carries their own real
+    // is_superadmin: true) is unaffected. Backed up by
+    // (firm)/admin/layout.tsx client-side and SuperadminDep on every /admin
+    // API route server-side; this is just the earliest possible stop.
+    if (matches(pathname, ["/admin"]) && isSuperadminFromMetadata(metadata) === false) {
+      const redirect = request.nextUrl.clone();
+      redirect.pathname = kind === "portal" ? PORTAL_HOME : FIRM_HOME;
       redirect.search = "";
       return NextResponse.redirect(redirect);
     }
