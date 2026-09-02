@@ -93,14 +93,18 @@ async def my_attendance(
     return await _hydrate_attendance(session, list(rows))
 
 
-@router.post("/attendance/logout-confirm", response_model=AttendanceDayRead)
-async def confirm_logout(session: SessionDep, user: TenantUserDep) -> AttendanceDayRead:
+@router.post("/attendance/logout-confirm", response_model=AttendanceDayRead | None)
+async def confirm_logout(session: SessionDep, user: TenantUserDep) -> AttendanceDayRead | None:
     """Staff explicitly answered "yes" to "Is this your job end time?" on
     Logout. Banks now() as today's end_time — overwriting an earlier
     confirmed logout the same day, since the ask is "first login, *last*
     confirmed logout" of the day. Called just before the actual sign-out
-    request while the access token is still valid."""
+    request while the access token is still valid. Returns null for an
+    Owner/superadmin — attendance tracking is staff-only, see
+    services.attendance._tracks_attendance."""
     row = await record_logout_confirm(session, user.profile)
+    if row is None:
+        return None
     hydrated = await _hydrate_attendance(session, [row])
     return hydrated[0]
 

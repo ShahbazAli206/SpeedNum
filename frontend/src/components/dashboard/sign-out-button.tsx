@@ -34,10 +34,12 @@ export function useSignOut() {
   const session = useSession();
 
   return useCallback(async () => {
-    // Timesheet attendance is a firm-staff concept only (Profile.client_id
-    // null) — a client-portal login (isFirmStaff false) skips straight to
-    // signing out, same as before this feature existed.
-    if (session.isFirmStaff && session.isLive) {
+    // Timesheet attendance is a non-owner-staff concept only (Profile.client_id
+    // null AND not the company Owner/a superadmin) — a client-portal login
+    // (isFirmStaff false) or the Owner (isOwner true) skips straight to
+    // signing out, same as before this feature existed. Mirrors the backend's
+    // own exclusion in services/attendance._tracks_attendance.
+    if (session.isFirmStaff && !session.isOwner && session.isLive) {
       const confirmedEndOfDay = await confirm({
         title: "End your work day?",
         description: "Is this your job end time? Confirming marks it as today's sign-off on your Timesheet.",
@@ -66,7 +68,7 @@ export function useSignOut() {
     // refresh() re-runs the proxy so the server forgets the session cookie too.
     router.replace("/login");
     router.refresh();
-  }, [confirm, router, session.isFirmStaff, session.isLive, stopIfRunning]);
+  }, [confirm, router, session.isFirmStaff, session.isOwner, session.isLive, stopIfRunning]);
 }
 
 export function SignOutButton({ className }: { className?: string }) {
