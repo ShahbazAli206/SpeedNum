@@ -395,9 +395,13 @@ function FirmShellInner({ children }: { children: ReactNode }) {
                       </Link>
                     </li>
                   );
-                  // Video Call sits directly under Messages: its own sibling
-                  // row (a button that opens the contact picker, not a link).
-                  return item.href === "/messages" ? (
+                  // Video Call sits directly under Messages. The platform
+                  // super-admin ("firm owner") has no Messages row — their nav
+                  // uses "Support inbox" (/admin/support) instead — so anchor
+                  // the button there for them. The two hrefs never coexist in
+                  // one account's nav, so this never double-inserts.
+                  const showCall = item.href === "/messages" || item.href === "/admin/support";
+                  return showCall ? (
                     <Fragment key={item.href}>
                       {row}
                       <CallNavItem collapsed={collapsed} />

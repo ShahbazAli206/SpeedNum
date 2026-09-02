@@ -24,7 +24,7 @@ import uuid
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 
 from ..config import settings
 from ..deps import CallableUserDep, SessionDep
@@ -304,14 +304,21 @@ async def list_call_candidates(session: SessionDep, user: CallableUserDep) -> li
             )
         ).all()
     elif user.profile.tenant_id is not None:
-        # Everyone active in the caller's own tenant; can_call narrows it to the
-        # subset the matrix actually permits (bounded by tenant size).
+        # Everyone active in the caller's own tenant, PLUS the platform
+        # super-admin(s) — so a company Owner can reach the platform (the
+        # "firm owner"). can_call then narrows the pool to what the matrix
+        # actually permits: a company Owner keeps the super-admin, but a plain
+        # staff member or a client has can_call(them, superadmin) == False, so
+        # the super-admin never appears in *their* list. (bounded by tenant size)
         pool = (
             await session.scalars(
                 select(Profile).where(
-                    Profile.tenant_id == user.profile.tenant_id,
                     Profile.is_active.is_(True),
                     Profile.id != user.profile.id,
+                    or_(
+                        Profile.tenant_id == user.profile.tenant_id,
+                        Profile.is_superadmin.is_(True),
+                    ),
                 )
             )
         ).all()
