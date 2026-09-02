@@ -65,6 +65,17 @@ export function Topbar({
     }
   };
 
+  // Opening the bell is the client portal's equivalent of visiting the firm's
+  // notifications page: the panel has no separate page to route to, so seeing it
+  // is the read event. Fetch the list, then mark the feed read so the badge
+  // stops blinking its old count the moment the panel opens — matching the
+  // "looked at it, so it's read" behaviour the firm shell now has. The optimistic
+  // zero inside markAllRead keeps the badge from lingering during the round-trip.
+  const openBell = async () => {
+    await loadItems();
+    await markAllRead();
+  };
+
   const signOut = async () => {
     if (AUTH_CONFIGURED) {
       try {
@@ -171,7 +182,7 @@ export function Topbar({
             type="button"
             onClick={() => {
               setBellOpen((open) => !open);
-              if (!bellOpen) void loadItems();
+              if (!bellOpen) void openBell();
             }}
             aria-expanded={bellOpen}
             aria-label={

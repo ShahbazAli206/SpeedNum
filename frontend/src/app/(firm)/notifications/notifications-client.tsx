@@ -2,7 +2,7 @@
 
 import { CalendarClock, CheckCheck, Kanban, LifeBuoy, Mail, Signature, Users, Zap } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
 
 import { DashboardHeader } from "@/components/dashboard/page-shell";
@@ -61,12 +61,49 @@ export function NotificationsClient({
   const isRead = (item: NotificationView) => read[item.id] ?? item.is_read;
   const unread = notifications.filter((item) => !isRead(item)).length;
 
-  // This server-rendered list is the authoritative view — reconcile the
-  // bell/sidebar badge (which only otherwise repolls every 60s) against it
-  // the moment someone actually looks at this page, not just after a mark-read
-  // click. Fixes the badge showing a stale count that was already resolved.
+  // Opening this page IS reading the feed: every route into it — the header
+  // bell, the sidebar "Notifications" row, the account menu — exists to answer
+  // "what's new", and the user's mental model is that having looked, nothing is
+  // unread any more. So on mount we mark the whole feed read rather than only
+  // reconciling the count: clear it on the server (so it stays cleared across
+  // the 60s poll and reloads), drop the badge to zero immediately, and reflect
+  // it in the list. Before this, visiting left the bell/sidebar badge blinking
+  // its old count because nothing had actually been marked read.
+  const clearedOnOpen = useRef(false);
   useEffect(() => {
-    session.refresh();
+    if (clearedOnOpen.current) return;
+    clearedOnOpen.current = true;
+
+    const hasUnread = notifications.some((item) => !item.is_read);
+    if (!hasUnread) {
+      // Still reconcile, in case the badge is stale-high from a read that
+      // happened elsewhere since this page was server-rendered.
+      session.refresh();
+      return;
+    }
+
+    const markEverythingRead = () =>
+      setRead(Object.fromEntries(notifications.map((item) => [item.id, true])));
+
+    if (!isLive) {
+      // Demo mode has no backend to persist against, but the badge should still
+      // fall to zero so the behaviour is visible without an API.
+      markEverythingRead();
+      session.setUnread(0);
+      return;
+    }
+
+    session.setUnread(0); // optimistic: the badge shouldn't wait on the round-trip
+    post("/notifications/read-all")
+      .then(() => {
+        markEverythingRead();
+        session.refresh();
+      })
+      .catch(() => {
+        // Couldn't persist — pull the true count back so the badge doesn't lie,
+        // and leave the "Mark all read" button as the manual fallback.
+        session.refresh();
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
