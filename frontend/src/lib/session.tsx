@@ -72,6 +72,9 @@ export interface SessionValue {
   refresh: () => void;
   /** Adjust the unread count locally so the badge reacts without a round-trip. */
   setUnread: (next: number | ((current: number) => number)) => void;
+  /** Same idea as `setUnread`, for the Reminders badge's unacknowledged count —
+   *  set optimistically after an acknowledge action, before `refresh()` confirms it. */
+  setRemindersUnacknowledged: (next: number | ((current: number) => number)) => void;
 }
 
 const EMPTY_REMINDERS: ReminderCounts = {
@@ -98,6 +101,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [isLive, setIsLive] = useState(false);
   const [isLoading, setIsLoading] = useState(AUTH_CONFIGURED);
   const [unreadOverride, setUnreadOverride] = useState<number | null>(null);
+  const [remindersUnacknowledgedOverride, setRemindersUnacknowledgedOverride] = useState<
+    number | null
+  >(null);
 
   // A ref, not state: the poll only needs to know whether a fetch is already in
   // flight, and writing that to state would re-render every tick for nothing.
@@ -111,6 +117,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setMe(profile);
       setIsLive(true);
       setUnreadOverride(null);
+      setRemindersUnacknowledgedOverride(null);
 
       // Reminder counts are firm-side only; a portal login has no access and
       // the 403 would be noise.
@@ -168,8 +175,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return {
       me,
       // Same reasoning as `serverUnread`: the /reminders badge should show the
-      // demo board's real shape rather than a flat zero.
-      reminders: isLive ? reminders : getReminderCounts(),
+      // demo board's real shape rather than a flat zero. The unacknowledged
+      // field can be optimistically overridden the same way `unread` is, so
+      // the sidebar badge clears immediately after an acknowledge action
+      // instead of waiting on the next poll.
+      reminders: isLive
+        ? {
+            ...reminders,
+            unacknowledged: remindersUnacknowledgedOverride ?? reminders.unacknowledged,
+          }
+        : getReminderCounts(),
       isLive,
       isLoading,
       displayName,
@@ -192,8 +207,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setUnreadOverride((current) =>
           typeof next === "function" ? next(current ?? serverUnread) : next,
         ),
+      setRemindersUnacknowledged: (next) =>
+        setRemindersUnacknowledgedOverride((current) =>
+          typeof next === "function" ? next(current ?? reminders.unacknowledged) : next,
+        ),
     };
-  }, [me, reminders, isLive, isLoading, unreadOverride, load]);
+  }, [me, reminders, isLive, isLoading, unreadOverride, remindersUnacknowledgedOverride, load]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
@@ -263,5 +282,6 @@ export function useSession(): SessionValue {
     hasPermission: () => true,
     refresh: () => {},
     setUnread: () => {},
+    setRemindersUnacknowledged: () => {},
   };
 }

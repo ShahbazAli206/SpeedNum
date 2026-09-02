@@ -15,7 +15,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState, type ComponentType } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 
 import { KpiTile } from "@/components/charts";
 import { DashboardHeader, KpiRow } from "@/components/dashboard/page-shell";
@@ -144,6 +144,62 @@ export function RemindersClient({
   const [snoozeFloor, setSnoozeFloor] = useState("");
 
   const counts = useMemo(() => recount(rows), [rows]);
+
+  // Opening this page IS reading the reminders board — same reasoning as the
+  // Notifications feed (notifications-client.tsx): every route in here (the
+  // sidebar badge, the header bell's "Manage renewals" style links) exists to
+  // answer "what needs chasing", and the user's mental model is that having
+  // looked, the badge should stop nagging. So on mount we acknowledge every
+  // currently-open reminder — the same low-stakes action "Acknowledge all"
+  // already performs — rather than only reconciling the count. Before this,
+  // visiting left the sidebar badge showing its old count because nothing had
+  // actually been acknowledged.
+  const acknowledgedOnOpen = useRef(false);
+  useEffect(() => {
+    if (acknowledgedOnOpen.current) return;
+    acknowledgedOnOpen.current = true;
+
+    const hasOpen = rows.some((row) => row.status === "open");
+    if (!hasOpen) {
+      // Still reconcile, in case the badge is stale-high from an acknowledge
+      // that happened elsewhere (another tab, "Acknowledge all") since this
+      // page was server-rendered.
+      session.refresh();
+      return;
+    }
+
+    const markAllAcknowledged = () => {
+      const stamp = new Date().toISOString();
+      setRows((current) =>
+        current.map((item) =>
+          item.status === "open"
+            ? { ...item, status: "acknowledged", acknowledged_at: stamp }
+            : item,
+        ),
+      );
+    };
+
+    if (!isLive) {
+      // Demo mode has no backend to persist against, but the badge should
+      // still fall to zero so the behaviour is visible without an API.
+      markAllAcknowledged();
+      session.setRemindersUnacknowledged(0);
+      return;
+    }
+
+    session.setRemindersUnacknowledged(0); // optimistic: don't wait on the round-trip
+    post("/reminders/acknowledge-all")
+      .then(() => {
+        markAllAcknowledged();
+        session.refresh();
+      })
+      .catch(() => {
+        // Couldn't persist — pull the true count back so the badge doesn't
+        // lie, and leave the manual "Acknowledge" actions as the fallback.
+        session.refresh();
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const visible = useMemo(
     () =>

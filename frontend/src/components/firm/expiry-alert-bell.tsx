@@ -24,6 +24,37 @@ import type { ExpiryAlert, ExpiryTarget } from "@/lib/types";
 const POLL_MS = 5 * 60 * 1000; // expiry moves by the day — a light 5-min poll is plenty
 const URGENT_WITHIN_DAYS = 7; // blink threshold; anything overdue is urgent too
 
+// There's no per-alert "read" state on the server — an expiry alert isn't a
+// row you acknowledge, it's a live fact ("this plan expires in 12 days") that
+// keeps existing until the plan is renewed. So "read" is tracked client-side:
+// once the superadmin has opened the panel and seen an alert, it stops
+// contributing to the badge/pulse until something about it actually changes
+// (a different expiry date — i.e. a genuinely new alert). Keyed by browser,
+// which matches how this bell is used in practice (one admin console).
+const SEEN_STORAGE_KEY = "speednum-expiry-alerts-seen";
+
+function alertKey(alert: ExpiryAlert): string {
+  return `${alert.tenant_id}:${alert.target}:${alert.expires_at}`;
+}
+
+function loadSeenKeys(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(SEEN_STORAGE_KEY);
+    return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function saveSeenKeys(keys: Set<string>): void {
+  try {
+    window.localStorage.setItem(SEEN_STORAGE_KEY, JSON.stringify([...keys]));
+  } catch {
+    // Private-mode quota failure — the badge just won't stay cleared across reloads.
+  }
+}
+
 const TARGET_LABEL: Record<ExpiryTarget, string> = {
   plan: "Plan",
   service: "Server/domain",
@@ -45,19 +76,52 @@ function severityTone(severity: ExpiryAlert["severity"]): string {
 export function ExpiryAlertBell() {
   const { data, refresh } = useApi<ExpiryAlert[]>("/admin/expiry-alerts");
   const [open, setOpen] = useState(false);
+  const [seen, setSeen] = useState<Set<string>>(() => loadSeenKeys());
   const ref = useRef<HTMLDivElement>(null);
 
   const alerts = useMemo(() => data ?? [], [data]);
   const total = alerts.length;
-  const urgent = useMemo(
-    () => alerts.some((a) => a.days_remaining <= URGENT_WITHIN_DAYS),
-    [alerts],
+  const unseen = useMemo(
+    () => alerts.filter((a) => !seen.has(alertKey(a))),
+    [alerts, seen],
   );
+  const urgent = useMemo(
+    () => unseen.some((a) => a.days_remaining <= URGENT_WITHIN_DAYS),
+    [unseen],
+  );
+
+  // Drop seen keys that no longer match a live alert (the plan/service was
+  // renewed, or it's aged out of the 30-day window) so the stored set doesn't
+  // grow without bound.
+  useEffect(() => {
+    if (data === undefined) return;
+    const live = new Set(alerts.map(alertKey));
+    // Pruning depends on `data`, which only exists once the fetch resolves —
+    // there's no synchronous initial value to compute this from, so it can't
+    // be lazy useState init the way the localStorage read above is.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSeen((current) => {
+      const pruned = new Set([...current].filter((key) => live.has(key)));
+      if (pruned.size !== current.size) saveSeenKeys(pruned);
+      return pruned;
+    });
+    // Only re-run when a fresh alert list arrives, not when `seen` itself
+    // changes (that would immediately undo the mark-as-seen below).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   useEffect(() => {
     const timer = setInterval(() => void refresh(), POLL_MS);
     return () => clearInterval(timer);
   }, [refresh]);
+
+  const markAllSeen = () => {
+    setSeen((current) => {
+      const merged = new Set([...current, ...alerts.map(alertKey)]);
+      saveSeenKeys(merged);
+      return merged;
+    });
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -72,23 +136,35 @@ export function ExpiryAlertBell() {
     <div ref={ref} className="relative">
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          setOpen((o) => {
+            const next = !o;
+            // Opening the panel is the read event — same reasoning as the
+            // Notifications feed and the Reminders board: seeing the list IS
+            // reading it, so the badge clears the moment it's opened rather
+            // than requiring a separate action per row.
+            if (next) markAllSeen();
+            return next;
+          });
+        }}
         aria-expanded={open}
-        aria-label={total ? `Expiries, ${total} upcoming` : "Expiries, none upcoming"}
+        aria-label={
+          unseen.length ? `Expiries, ${unseen.length} new` : total ? `Expiries, ${total} upcoming` : "Expiries, none upcoming"
+        }
         className="relative grid size-9 place-items-center rounded-lg border border-line text-ink-soft transition hover:bg-surface-2"
       >
         {urgent ? (
           <span aria-hidden className="animate-ring absolute inset-0 rounded-lg bg-danger/25" />
         ) : null}
         <CalendarClock className={cn("relative size-4", urgent && "animate-blink text-danger")} />
-        {total > 0 ? (
+        {unseen.length > 0 ? (
           <span
             className={cn(
               "absolute -top-1 -right-1 grid size-4.5 place-items-center rounded-full px-1 text-[9.5px] font-bold text-white",
               urgent ? "animate-blink bg-danger" : "bg-warn",
             )}
           >
-            {total > 99 ? "99+" : total}
+            {unseen.length > 99 ? "99+" : unseen.length}
           </span>
         ) : null}
       </button>
