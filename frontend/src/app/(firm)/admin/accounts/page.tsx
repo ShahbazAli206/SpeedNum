@@ -20,6 +20,7 @@ import {
 import { del, patch, post } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { useAction, useApi, useDebounced } from "@/lib/hooks";
+import { useSession } from "@/lib/session";
 import type { CredentialResult } from "@/lib/types";
 
 /**
@@ -68,6 +69,8 @@ const SOURCE_OPTIONS = [
 
 export default function AccountsPage() {
   const toast = useToast();
+  const { me } = useSession();
+  const ownProfileId = me?.profile.id ?? null;
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounced(search, 300);
   const [tenantId, setTenantId] = useState("");
@@ -87,6 +90,7 @@ export default function AccountsPage() {
 
   const [credentials, setCredentials] = useState<CredentialResult | null>(null);
   const [removing, setRemoving] = useState<Account | null>(null);
+  const [suspending, setSuspending] = useState<Account | null>(null);
 
   const forbidden = accounts.error?.status === 403;
   if (forbidden) {
@@ -106,13 +110,27 @@ export default function AccountsPage() {
       await accounts.reload();
     });
 
-  const toggleActive = (account: Account) =>
+  const setActive = async (account: Account, isActive: boolean) => {
+    await patch(`/admin/accounts/${account.id}`, { is_active: isActive });
+    toast.success(isActive ? `${account.full_name ?? account.email} reactivated` : `${account.full_name ?? account.email} suspended`);
+    await accounts.reload();
+  };
+
+  const toggleActive = (account: Account) => mutate.run(() => setActive(account, !account.is_active));
+
+  const requestToggleActive = (account: Account) => {
+    if (account.is_active) {
+      setSuspending(account);
+    } else {
+      void toggleActive(account);
+    }
+  };
+
+  const confirmSuspend = () =>
     mutate.run(async () => {
-      await patch(`/admin/accounts/${account.id}`, { is_active: !account.is_active });
-      toast.success(
-        account.is_active ? `${account.full_name ?? account.email} suspended` : `${account.full_name ?? account.email} reactivated`,
-      );
-      await accounts.reload();
+      if (!suspending) return;
+      await setActive(suspending, false);
+      setSuspending(null);
     });
 
   const confirmRemove = () =>
@@ -210,24 +228,28 @@ export default function AccountsPage() {
                       >
                         <KeyRound className="size-4" />
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => void toggleActive(account)}
-                        className="grid size-8 place-items-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-ink"
-                        aria-label={account.is_active ? "Suspend" : "Reactivate"}
-                        title={account.is_active ? "Suspend access" : "Reactivate access"}
-                      >
-                        {account.is_active ? <Ban className="size-4" /> : <CheckCircle2 className="size-4" />}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setRemoving(account)}
-                        className="grid size-8 place-items-center rounded-lg text-muted transition hover:bg-danger-soft hover:text-danger"
-                        aria-label="Remove access"
-                        title="Remove access permanently"
-                      >
-                        <Trash2 className="size-4" />
-                      </button>
+                      {account.id !== ownProfileId ? (
+                        <button
+                          type="button"
+                          onClick={() => requestToggleActive(account)}
+                          className="grid size-8 place-items-center rounded-lg text-muted transition hover:bg-surface-2 hover:text-ink"
+                          aria-label={account.is_active ? "Suspend" : "Reactivate"}
+                          title={account.is_active ? "Suspend access" : "Reactivate access"}
+                        >
+                          {account.is_active ? <Ban className="size-4" /> : <CheckCircle2 className="size-4" />}
+                        </button>
+                      ) : null}
+                      {account.id !== ownProfileId ? (
+                        <button
+                          type="button"
+                          onClick={() => setRemoving(account)}
+                          className="grid size-8 place-items-center rounded-lg text-muted transition hover:bg-danger-soft hover:text-danger"
+                          aria-label="Delete permanently"
+                          title="Delete this account permanently"
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      ) : null}
                     </span>
                   </TD>
                 </tr>
@@ -242,15 +264,15 @@ export default function AccountsPage() {
       <Modal
         open={removing !== null}
         onClose={() => setRemoving(null)}
-        title="Remove access"
-        description="This cannot be undone from here — the account would need to be recreated."
+        title="Delete account permanently"
+        description="This cannot be undone — the account is removed from the database entirely and would need to be recreated from scratch."
         footer={
           <>
             <Button variant="secondary" onClick={() => setRemoving(null)}>
               Cancel
             </Button>
             <Button variant="danger" loading={mutate.pending} icon={<Trash2 className="size-4" />} onClick={() => void confirmRemove()}>
-              Remove access
+              Delete permanently
             </Button>
           </>
         }
@@ -258,7 +280,33 @@ export default function AccountsPage() {
         {removing ? (
           <p className="text-[13.5px] text-ink-soft">
             <strong className="font-semibold text-ink">{removing.full_name || removing.email}</strong>{" "}
-            ({removing.tenant_name ?? "no tenant"}) will lose access immediately.
+            ({removing.tenant_name ?? "no tenant"}) will lose access immediately and their account record will be
+            permanently deleted. If they still own tasks, clients or documents, this will be rejected — suspend
+            them instead in that case.
+          </p>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={suspending !== null}
+        onClose={() => setSuspending(null)}
+        title="Suspend access"
+        description="They'll be signed out and blocked from signing back in until you reactivate the account."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setSuspending(null)}>
+              Cancel
+            </Button>
+            <Button variant="danger" loading={mutate.pending} icon={<Ban className="size-4" />} onClick={() => void confirmSuspend()}>
+              Suspend access
+            </Button>
+          </>
+        }
+      >
+        {suspending ? (
+          <p className="text-[13.5px] text-ink-soft">
+            <strong className="font-semibold text-ink">{suspending.full_name || suspending.email}</strong>{" "}
+            ({suspending.tenant_name ?? "no tenant"}) will be suspended and unable to sign in.
           </p>
         ) : null}
       </Modal>

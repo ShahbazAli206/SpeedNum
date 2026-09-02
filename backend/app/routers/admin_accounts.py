@@ -22,6 +22,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 
 from ..deps import SessionDep, SuperadminDep, client_ip
 from ..models import Client, Profile, Tenant
@@ -113,7 +114,7 @@ async def update_account(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "A client-portal login cannot be given a firm role. Create a separate staff account.",
         )
-    if profile.role == "owner" and payload.is_active is False:
+    if profile.role == "owner" and profile.tenant_id is not None and payload.is_active is False:
         remaining = await session.scalar(
             select(func.count(Profile.id)).where(
                 Profile.tenant_id == profile.tenant_id,
@@ -222,14 +223,19 @@ async def delete_account(
     request: Request,
     revoke_login: bool = True,
 ) -> Ok:
-    """Same shape as users.py's delete_user — staff are deactivated, a
-    client-portal login is removed outright — just reachable across every
-    tenant instead of only an impersonated one."""
+    """Permanently removes the account row — unlike users.py's delete_user
+    (which deactivates staff and only hard-deletes client-portal logins,
+    since portal logins own nothing), this always attempts a real delete. A
+    staff profile that still has tasks, owned clients, uploaded documents,
+    comments or audit history attached is protected by the database's
+    foreign keys (see Task.assignee_id, Client.owner_id, etc. — deliberately
+    plain FKs, not ON DELETE CASCADE/SET NULL), so that case is rejected with
+    a 409 telling the caller to suspend the account instead."""
     profile = await _load(session, profile_id)
 
     if profile.id == user.profile.id:
         raise HTTPException(status.HTTP_409_CONFLICT, "You cannot remove your own account.")
-    if profile.role == "owner" and profile.client_id is None:
+    if profile.role == "owner" and profile.client_id is None and profile.tenant_id is not None:
         remaining = await session.scalar(
             select(func.count(Profile.id)).where(
                 Profile.tenant_id == profile.tenant_id,
@@ -249,27 +255,27 @@ async def delete_account(
         client = await session.get(Client, profile.client_id)
         if client is not None:
             client.portal_enabled = False
-        await session.delete(profile)
-    else:
-        profile.is_active = False
-    await session.flush()
+
+    await session.delete(profile)
+    try:
+        await session.flush()
+    except IntegrityError:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{label} still has tasks, clients, documents or other records tied to their account and "
+            "can't be permanently deleted. Suspend the account instead, or reassign that work first.",
+        )
 
     await audit.record(
         session,
         tenant_id=profile.tenant_id,
         actor_id=user.profile.id,
         actor_email=user.profile.email,
-        action="deleted" if is_portal else "deactivated",
+        action="deleted",
         entity="profile",
         entity_id=profile_id,
-        summary=f"[cross-tenant console] Removed {label}'s access",
+        summary=f"[cross-tenant console] Permanently deleted {label}'s account",
         metadata={"login_revoked": login_revoked, "portal": is_portal},
         ip_address=client_ip(request),
     )
-    return Ok(
-        message=(
-            f"{label} removed and their login revoked."
-            if login_revoked
-            else f"{label} can no longer sign in."
-        )
-    )
+    return Ok(message=f"{label} was permanently deleted.")
