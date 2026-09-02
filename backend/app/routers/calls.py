@@ -107,7 +107,28 @@ async def _read_call(session: SessionDep, call_id: uuid.UUID) -> CallSessionRead
         read(CallParticipantRead, participant, full_name=name, email=email)
         for participant, name, email in rows
     ]
-    return read(CallSessionRead, call, participants=participants)
+    # Build from the loaded scalar columns explicitly rather than
+    # read(CallSessionRead, call, ...): read() runs model_validate(call)
+    # first, and Pydantic (from_attributes) would try to read the lazy
+    # `participants` relationship off the ORM object. When `call` came from a
+    # session.get() identity-map hit (e.g. right after create_call flushed it),
+    # that relationship was never selectin-loaded, so the access triggers a
+    # lazy load inside async validation → MissingGreenlet. We already have the
+    # participants (with their Profile names) from the join above, so bypass
+    # the relationship entirely.
+    return CallSessionRead(
+        id=call.id,
+        room_name=call.room_name,
+        initiator_profile_id=call.initiator_profile_id,
+        call_type=call.call_type,
+        status=call.status,
+        started_at=call.started_at,
+        connected_at=call.connected_at,
+        ended_at=call.ended_at,
+        duration_seconds=call.duration_seconds,
+        created_at=call.created_at,
+        participants=participants,
+    )
 
 
 async def _expire_stale_ringing(session: SessionDep, user) -> None:
