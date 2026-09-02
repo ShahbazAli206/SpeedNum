@@ -3,7 +3,9 @@
 import { PanelLeftClose, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Fragment } from "react";
 
+import { CallNavItem } from "@/components/calls/call-nav-item";
 import { Icon } from "@/components/icon";
 import { Logo } from "@/components/logo";
 import { Badge, Skeleton } from "@/components/ui";
@@ -97,7 +99,7 @@ export function Sidebar({
             <ul className="space-y-0.5">
               {group.items.map((item) => {
                 const active = isActive(item.href);
-                return (
+                const row = (
                   <li key={item.href}>
                     <Link
                       href={item.href}
@@ -116,6 +118,16 @@ export function Sidebar({
                       {!collapsed ? <span className="truncate">{item.label}</span> : null}
                     </Link>
                   </li>
+                );
+                // Video Call sits directly under Messages: its own sibling row
+                // (a button that opens the contact picker, not a nav link).
+                return item.href === "/dashboard/messages" ? (
+                  <Fragment key={item.href}>
+                    {row}
+                    <CallNavItem collapsed={collapsed} />
+                  </Fragment>
+                ) : (
+                  row
                 );
               })}
             </ul>

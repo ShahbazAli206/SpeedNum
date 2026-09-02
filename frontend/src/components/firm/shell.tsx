@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { AlertBell, UnreadDot } from "@/components/dashboard/alert-bell";
 import { CommandPalette } from "@/components/dashboard/command-palette";
@@ -27,7 +27,7 @@ import { ExpiryAlertBell } from "@/components/firm/expiry-alert-bell";
 import { PlanExpiryBanner } from "@/components/firm/plan-expiry-banner";
 import { Icon } from "@/components/icon";
 import { Logo } from "@/components/logo";
-import { CallLauncher } from "@/components/calls/call-launcher";
+import { CallNavItem } from "@/components/calls/call-nav-item";
 import { CallProvider } from "@/components/calls/call-provider";
 import { TaskTimerWidget } from "@/components/tasks/task-timer-widget";
 import { TimerProvider } from "@/components/tasks/timer-provider";
@@ -358,7 +358,7 @@ function FirmShellInner({ children }: { children: ReactNode }) {
                   // Alert counts blink; a plain "3 clients" style count would not.
                   const alerting = badge > 0 && item.href !== "/clients";
 
-                  return (
+                  const row = (
                     <li key={item.href}>
                       <Link
                         href={item.href}
@@ -394,6 +394,16 @@ function FirmShellInner({ children }: { children: ReactNode }) {
                         ) : null}
                       </Link>
                     </li>
+                  );
+                  // Video Call sits directly under Messages: its own sibling
+                  // row (a button that opens the contact picker, not a link).
+                  return item.href === "/messages" ? (
+                    <Fragment key={item.href}>
+                      {row}
+                      <CallNavItem collapsed={collapsed} />
+                    </Fragment>
+                  ) : (
+                    row
                   );
                 })}
               </ul>
@@ -536,9 +546,6 @@ function FirmShellInner({ children }: { children: ReactNode }) {
             </button>
 
             <ThemeToggle className="hidden md:inline-flex" />
-
-            {/* Start a video call with an authorized contact (video-calling). */}
-            <CallLauncher />
 
             {/* Superadmin-only: the blinking "expiries" bell for companies whose
                 plan / server-domain access is due or overdue. */}
