@@ -283,6 +283,20 @@ services:
     container_name: speednum-coturn
     restart: unless-stopped
     network_mode: host
+    # The image's default CMD is `--log-file=stdout --external-ip=$(detect-external-ip)`
+    # with no `-c`, so without this override turnserver.conf below is mounted
+    # but never actually read — coturn silently falls back to built-in
+    # defaults (no auth secret, no TLS cert, no custom relay port range),
+    # which makes TURN relay fail for any client that needs it, with no
+    # error visible anywhere except this log line at container startup:
+    # "Cannot find config file: turnserver.conf. Default and command-line
+    # settings will be used." Confirmed live on this VPS 2026-09-03.
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+    # turnserver.conf and the TLS cert/key below are owned by deploy (uid
+    # 1000) with turnserver.conf at 600 since it holds the shared TURN
+    # secret. The image's default user is nobody (uid 65534), which cannot
+    # read either — this must match the host file owner.
+    user: "1000:1000"
     volumes:
       - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
       # TLS cert/key for the TURN/TLS listener (turnserver.conf's
