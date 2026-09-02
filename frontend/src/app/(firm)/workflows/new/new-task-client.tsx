@@ -3,12 +3,13 @@
 import { ListChecks } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useToast } from "@/components/toast";
 import { Button, Field, Input, Select, Textarea } from "@/components/ui";
 import { post } from "@/lib/api";
 import type { ClientRow, TeamRow } from "@/lib/firm-demo";
+import { useSession } from "@/lib/session";
 import type { Task, TaskPriority, TaskStatus, TaskType } from "@/lib/types";
 
 /** Pull a human-readable reason out of an ApiError without leaking `[object]`. */
@@ -40,6 +41,18 @@ const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
 export function NewTaskClient({ clients, team }: { clients: ClientRow[]; team: TeamRow[] }) {
   const toast = useToast();
   const router = useRouter();
+  const session = useSession();
+
+  // Creating and assigning tasks is Owner-only (backend: workflows.create_task
+  // gates on permissions.is_firm_owner). A non-Owner who reaches this page by
+  // hand is bounced back to the board rather than shown a form the API rejects.
+  const blocked = session.isLive && !session.isOwner;
+  useEffect(() => {
+    if (blocked) {
+      toast.error("Only the company owner can create tasks", "Ask your owner to assign work to you.");
+      router.replace("/workflows");
+    }
+  }, [blocked, router, toast]);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -83,6 +96,8 @@ export function NewTaskClient({ clients, team }: { clients: ClientRow[]; team: T
       setSubmitting(false);
     }
   };
+
+  if (blocked) return null;
 
   return (
     <>

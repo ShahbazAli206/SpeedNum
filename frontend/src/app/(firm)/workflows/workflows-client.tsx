@@ -9,7 +9,9 @@ import {
   Layers,
   ListChecks,
   Pencil,
+  Play,
   Plus,
+  Square,
   Table2,
   Timer,
   Trash2,
@@ -22,12 +24,15 @@ import { KpiTile } from "@/components/charts";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { DashboardHeader } from "@/components/dashboard/page-shell";
 import { useConfirm } from "@/components/confirm";
+import { useTimer } from "@/components/tasks/timer-provider";
+import { useStartWork } from "@/components/tasks/use-start-work";
 import { useToast } from "@/components/toast";
 import { ButtonLink, Select } from "@/components/ui";
 import { del, patch } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { daysFromToday, type Task } from "@/lib/firm-demo";
 import { dueLabel, formatDate, formatDurationShort, titleCase } from "@/lib/format";
+import { useSession } from "@/lib/session";
 import type { TaskStatus, TaskType } from "@/lib/types";
 
 const COLUMNS: { status: TaskStatus; label: string; dot: string }[] = [
@@ -93,6 +98,9 @@ export function WorkflowsClient({
   const toast = useToast();
   const confirm = useConfirm();
   const router = useRouter();
+  const session = useSession();
+  const { activeTimer } = useTimer();
+  const { startWork, stopWork, busyTaskId } = useStartWork();
   const [view, setView] = useState<"board" | "table">("board");
   const [typeFilter, setTypeFilter] = useState<"all" | TaskType>("all");
   const [assignee, setAssignee] = useState("all");
@@ -103,6 +111,34 @@ export function WorkflowsClient({
 
   const statusOf = (task: Task): TaskStatus => moved[task.id] ?? task.status;
   const live = useMemo(() => tasks.filter((task) => !removed.has(task.id)), [tasks, removed]);
+
+  // Creating/assigning/deleting is Owner-only; a staff member runs the tasks
+  // assigned to them — they may change those tasks' status and time-track them,
+  // but nothing else. Mirrors the backend gates in workflows.py so the board
+  // never offers an action the API would reject.
+  const myId = session.me?.profile.id ?? null;
+  const isOwner = session.isOwner;
+  const isMine = (task: Task) => Boolean(myId) && task.assignee_id === myId;
+  const canChangeStatus = (task: Task) => isOwner || isMine(task);
+  const isRunningHere = (task: Task) =>
+    activeTimer?.task_id === task.id && activeTimer.status === "running";
+
+  const startWorkOn = (task: Task) =>
+    startWork(
+      {
+        id: task.id,
+        title: task.title,
+        status: statusOf(task),
+        client_id: task.client_id,
+        client_name: task.client_name,
+      },
+      {
+        onChange: ({ progressed }) => {
+          if (progressed) setMoved((current) => ({ ...current, [task.id]: "in_progress" }));
+        },
+      },
+    );
+  const stopWorkOn = (task: Task) => stopWork({ id: task.id, title: task.title });
 
   // KPIs always reflect every task regardless of the type/assignee/search
   // filters below them — the reference keeps these fixed while the list
@@ -241,22 +277,29 @@ export function WorkflowsClient({
     {
       key: "status",
       header: "Status",
-      cell: (row) => (
-        // The row itself is clickable — swallow the click so opening the menu
-        // doesn't also navigate to the task.
-        <span onClick={(event) => event.stopPropagation()}>
-          <Select
-            value={statusOf(row)}
-            onValueChange={(next) => move(row, next as TaskStatus)}
-            aria-label={`Status for ${row.title}`}
-            options={STATUS_OPTIONS}
-            size="xs"
-            variant="unstyled"
-            fullWidth={false}
-            className={cn("rounded-full font-semibold", STATUS_TONE[statusOf(row)])}
-          />
-        </span>
-      ),
+      cell: (row) =>
+        canChangeStatus(row) ? (
+          // The row itself is clickable — swallow the click so opening the menu
+          // doesn't also navigate to the task.
+          <span onClick={(event) => event.stopPropagation()}>
+            <Select
+              value={statusOf(row)}
+              onValueChange={(next) => move(row, next as TaskStatus)}
+              aria-label={`Status for ${row.title}`}
+              options={STATUS_OPTIONS}
+              size="xs"
+              variant="unstyled"
+              fullWidth={false}
+              className={cn("rounded-full font-semibold", STATUS_TONE[statusOf(row)])}
+            />
+          </span>
+        ) : (
+          // Not the Owner and not this task's assignee — status is read-only
+          // (the API would reject the change anyway).
+          <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold", STATUS_TONE[statusOf(row)])}>
+            {STATUS_OPTIONS.find((option) => option.value === statusOf(row))?.label ?? statusOf(row)}
+          </span>
+        ),
       sortValue: (row) => statusOf(row),
     },
     {
@@ -265,6 +308,33 @@ export function WorkflowsClient({
       align: "right",
       cell: (row) => (
         <div className="flex items-center justify-end gap-1" onClick={(event) => event.stopPropagation()}>
+          {isMine(row) ? (
+            isRunningHere(row) ? (
+              <button
+                type="button"
+                onClick={() => void stopWorkOn(row)}
+                disabled={busyTaskId === row.id}
+                aria-label={`Stop timer on ${row.title}`}
+                title="Stop timer"
+                className="inline-flex items-center gap-1 rounded-lg border border-line px-2 py-1 text-[12px] font-medium text-brand transition hover:bg-brand-soft disabled:opacity-50"
+              >
+                <Square className="size-3" fill="currentColor" />
+                Stop
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void startWorkOn(row)}
+                disabled={busyTaskId === row.id}
+                aria-label={`Start work on ${row.title}`}
+                title="Start work"
+                className="inline-flex items-center gap-1 rounded-lg border border-line px-2 py-1 text-[12px] font-medium text-ink transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand disabled:opacity-50"
+              >
+                <Play className="size-3" />
+                Start
+              </button>
+            )
+          ) : null}
           <Link
             href={`/workflows/${row.id}`}
             aria-label={`View ${row.title}`}
@@ -272,21 +342,25 @@ export function WorkflowsClient({
           >
             <Eye className="size-4" />
           </Link>
-          <Link
-            href={`/workflows/${row.id}?edit=1`}
-            aria-label={`Edit ${row.title}`}
-            className="rounded-lg p-1.5 text-muted transition hover:bg-surface-2 hover:text-ink"
-          >
-            <Pencil className="size-4" />
-          </Link>
-          <button
-            type="button"
-            onClick={() => remove(row)}
-            aria-label={`Delete ${row.title}`}
-            className="rounded-lg p-1.5 text-muted transition hover:bg-danger-soft hover:text-danger"
-          >
-            <Trash2 className="size-4" />
-          </button>
+          {isOwner ? (
+            <>
+              <Link
+                href={`/workflows/${row.id}?edit=1`}
+                aria-label={`Edit ${row.title}`}
+                className="rounded-lg p-1.5 text-muted transition hover:bg-surface-2 hover:text-ink"
+              >
+                <Pencil className="size-4" />
+              </Link>
+              <button
+                type="button"
+                onClick={() => remove(row)}
+                aria-label={`Delete ${row.title}`}
+                className="rounded-lg p-1.5 text-muted transition hover:bg-danger-soft hover:text-danger"
+              >
+                <Trash2 className="size-4" />
+              </button>
+            </>
+          ) : null}
         </div>
       ),
     },
@@ -298,9 +372,11 @@ export function WorkflowsClient({
         title="Task Master"
         subtitle="Internal, client and other work — assigned to your team with deadline reminders."
         actions={
-          <ButtonLink href="/workflows/new" icon={<Plus className="size-4" />}>
-            New task
-          </ButtonLink>
+          isOwner ? (
+            <ButtonLink href="/workflows/new" icon={<Plus className="size-4" />}>
+              New task
+            </ButtonLink>
+          ) : null
         }
       />
 
@@ -400,7 +476,10 @@ export function WorkflowsClient({
                   </div>
 
                   <ul className="space-y-2">
-                    {columnTasks.map((task) => (
+                    {columnTasks.map((task) => {
+                      const running = isRunningHere(task) || task.timer_running;
+                      const mine = isMine(task);
+                      return (
                       <li
                         key={task.id}
                         onClick={() => router.push(`/workflows/${task.id}`)}
@@ -434,43 +513,82 @@ export function WorkflowsClient({
                           <span className="text-[11.5px] tabular-nums text-muted">{task.estimate_hours ?? 0}h</span>
                         </div>
 
-                        {task.timer_running || task.time_spent_seconds > 0 ? (
+                        {running || task.time_spent_seconds > 0 ? (
                           <div
                             className={cn(
                               "mt-2 flex items-center gap-1 text-[11px] font-medium",
-                              task.timer_running ? "text-brand" : "text-muted",
+                              running ? "text-brand" : "text-muted",
                             )}
                           >
-                            {task.timer_running ? (
+                            {running ? (
                               <span className="size-1.5 animate-pulse rounded-full bg-brand" />
                             ) : (
                               <Timer className="size-3" />
                             )}
                             {formatDurationShort(task.time_spent_seconds)}
-                            {task.timer_running ? " · running" : ""}
+                            {running ? " · running" : ""}
                           </div>
                         ) : null}
 
-                        {/* Inline status change — no need to open the card */}
-                        <span
-                          className="mt-2.5 block"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <Select
-                            value={statusOf(task)}
-                            onValueChange={(next) => move(task, next as TaskStatus)}
-                            aria-label={`Status for ${task.title}`}
-                            options={COLUMNS.map((option) => ({
-                              value: option.status,
-                              label: option.label,
-                            }))}
-                            size="xs"
-                            variant="pill"
-                            className="rounded-md"
-                          />
-                        </span>
+                        <div className="mt-2.5 flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
+                          {/* Inline status change — no need to open the card. Read-only
+                              for tasks the viewer neither owns nor is assigned to. */}
+                          {canChangeStatus(task) ? (
+                            <Select
+                              value={statusOf(task)}
+                              onValueChange={(next) => move(task, next as TaskStatus)}
+                              aria-label={`Status for ${task.title}`}
+                              options={COLUMNS.map((option) => ({
+                                value: option.status,
+                                label: option.label,
+                              }))}
+                              size="xs"
+                              variant="pill"
+                              className="flex-1 rounded-md"
+                            />
+                          ) : (
+                            <span
+                              className={cn(
+                                "flex-1 rounded-md px-2 py-0.5 text-[11px] font-semibold",
+                                STATUS_TONE[statusOf(task)],
+                              )}
+                            >
+                              {COLUMNS.find((option) => option.status === statusOf(task))?.label ?? statusOf(task)}
+                            </span>
+                          )}
+
+                          {/* The assignee's own Start work / Stop control. */}
+                          {mine ? (
+                            running ? (
+                              <button
+                                type="button"
+                                onClick={() => void stopWorkOn(task)}
+                                disabled={busyTaskId === task.id}
+                                aria-label={`Stop timer on ${task.title}`}
+                                title="Stop timer"
+                                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-line px-2 py-1 text-[11px] font-medium text-brand transition hover:bg-brand-soft disabled:opacity-50"
+                              >
+                                <Square className="size-2.5" fill="currentColor" />
+                                Stop
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => void startWorkOn(task)}
+                                disabled={busyTaskId === task.id}
+                                aria-label={`Start work on ${task.title}`}
+                                title="Start work"
+                                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-line px-2 py-1 text-[11px] font-medium text-ink transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand disabled:opacity-50"
+                              >
+                                <Play className="size-2.5" />
+                                Start
+                              </button>
+                            )
+                          ) : null}
+                        </div>
                       </li>
-                    ))}
+                      );
+                    })}
                     {columnTasks.length === 0 ? (
                       <li className="rounded-xl border border-dashed border-line px-3 py-6 text-center text-[12px] text-muted">
                         Nothing here

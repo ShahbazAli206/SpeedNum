@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useConfirm } from "@/components/confirm";
 import { useTimer } from "@/components/tasks/timer-provider";
+import { useStartWork } from "@/components/tasks/use-start-work";
 import { useToast } from "@/components/toast";
 import { Button, EmptyState, Field, Input, LoadingBlock, Select, Textarea } from "@/components/ui";
 import { del, patch, post } from "@/lib/api";
@@ -82,10 +83,21 @@ export function TaskDetailClient({
   const toast = useToast();
   const confirm = useConfirm();
   const router = useRouter();
+  const session = useSession();
+
+  // Creating, editing and reassigning a task is the company Owner's job;
+  // staff receive and run tasks. Mirrors the backend gate
+  // (permissions.is_firm_owner / can_update_task_fields) so the UI never
+  // offers an action the API would reject.
+  const isOwner = session.isOwner;
+  const isAssignee = Boolean(session.me?.profile.id) && session.me?.profile.id === task.assignee_id;
 
   const [deleted, setDeleted] = useState(false);
   const [status, setStatus] = useState<TaskStatus>(task.status);
 
+  // A non-Owner can land on ?edit=1 by hand, but the edit form only renders
+  // when `editing && isOwner` and the "Edit task" button is Owner-gated, so a
+  // stale editing=true simply shows the read-only view — no reset needed.
   const [editing, setEditing] = useState(initialEditing);
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
@@ -185,7 +197,7 @@ export function TaskDetailClient({
           </div>
           <p className="mt-0.5 text-[14px] text-muted">{titleCase(taskType)} task</p>
         </div>
-        {!editing ? (
+        {isOwner && !editing ? (
           <Button variant="secondary" icon={<Pencil className="size-4" />} onClick={() => setEditing(true)}>
             Edit task
           </Button>
@@ -199,7 +211,7 @@ export function TaskDetailClient({
             <p className="mt-0.5 text-[13px] text-muted">Everything captured for this task.</p>
           </div>
 
-          {editing ? (
+          {editing && isOwner ? (
             <div className="space-y-4 p-5">
               <Field label="Title" required>
                 <Input value={title} onChange={(event) => setTitle(event.target.value)} />
@@ -313,25 +325,39 @@ export function TaskDetailClient({
         <section className="h-fit rounded-xl border border-line bg-surface shadow-[var(--shadow-card)]">
           <div className="border-b border-line px-5 py-4">
             <h2 className="text-[15px] font-semibold text-ink">Manage</h2>
-            <p className="mt-0.5 text-[13px] text-muted">Update status or remove this task.</p>
+            <p className="mt-0.5 text-[13px] text-muted">
+              {isOwner
+                ? "Update status or remove this task."
+                : isAssignee
+                  ? "Update the status of your task."
+                  : "Current status."}
+            </p>
           </div>
           <div className="space-y-4 p-5">
             <Field label="Status">
-              <Select
-                value={status}
-                onValueChange={(next) => changeStatus(next as TaskStatus)}
-                options={STATUS_OPTIONS}
-              />
+              {isOwner || isAssignee ? (
+                <Select
+                  value={status}
+                  onValueChange={(next) => changeStatus(next as TaskStatus)}
+                  options={STATUS_OPTIONS}
+                />
+              ) : (
+                <span className={cn("inline-flex rounded-full px-2.5 py-1 text-[12px] font-semibold", STATUS_TONE[status])}>
+                  {statusLabel(status)}
+                </span>
+              )}
             </Field>
-            <Button
-              variant="danger"
-              icon={<Trash2 className="size-4" />}
-              className="w-full"
-              loading={deleting}
-              onClick={removeTask}
-            >
-              Delete task
-            </Button>
+            {isOwner ? (
+              <Button
+                variant="danger"
+                icon={<Trash2 className="size-4" />}
+                className="w-full"
+                loading={deleting}
+                onClick={removeTask}
+              >
+                Delete task
+              </Button>
+            ) : null}
           </div>
         </section>
       </div>
@@ -339,7 +365,7 @@ export function TaskDetailClient({
       {isLive ? (
         <>
           <div className="mt-5">
-            <TaskTimerCard task={task} />
+            <TaskTimerCard task={task} status={status} onStatusChange={setStatus} />
           </div>
           <div className="mt-5 grid gap-5 lg:grid-cols-2">
             <TaskAttachments taskId={task.id} />
@@ -364,24 +390,33 @@ function MetaItem({ icon, label, value }: { icon?: ReactNode; label: string; val
 }
 
 /**
- * Time tracking for one task. Everyone who can already see this task's
- * detail page sees the total logged; only the task's own assignee gets the
- * Start/Resume/Stop control — matching backend/app/routers/task_timers.py's
- * own reach exactly.
+ * Time tracking for one task. Everyone who can already see this task's detail
+ * page sees the total logged; only the task's own assignee gets the Start
+ * work / Resume / Stop control — matching backend/app/routers/task_timers.py's
+ * reach. "Start work" both starts the timer and, on a fresh To-do task, moves
+ * it to In Progress (via the shared useStartWork hook), so the board reflects
+ * that someone is actually on it. `status` / `onStatusChange` are threaded from
+ * the parent so that flip shows immediately without a refetch.
  */
-function TaskTimerCard({ task }: { task: Task }) {
+function TaskTimerCard({
+  task,
+  status,
+  onStatusChange,
+}: {
+  task: Task;
+  status: TaskStatus;
+  onStatusChange: (next: TaskStatus) => void;
+}) {
   const session = useSession();
-  const confirm = useConfirm();
-  const toast = useToast();
-  const { activeTimer, start, stop } = useTimer();
+  const { activeTimer } = useTimer();
+  const { startWork, stopWork, busyTaskId } = useStartWork();
   const myTimer = useApi<TaskTimerState>(`/tasks/${task.id}/timer`);
-  const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   const isAssignee = Boolean(session.me?.profile.id) && session.me?.profile.id === task.assignee_id;
   const isRunningHere = activeTimer?.task_id === task.id && activeTimer.status === "running";
-  const isRunningElsewhere = Boolean(activeTimer) && activeTimer!.status === "running" && activeTimer!.task_id !== task.id;
   const banked = myTimer.data?.accumulated_seconds ?? 0;
+  const busy = busyTaskId === task.id;
 
   useEffect(() => {
     if (!isRunningHere) return;
@@ -391,75 +426,30 @@ function TaskTimerCard({ task }: { task: Task }) {
 
   const displaySeconds = isRunningHere && activeTimer ? liveSeconds(activeTimer, now) : task.time_spent_seconds;
 
-  const doStart = async () => {
-    if (isRunningElsewhere && activeTimer) {
-      const switchOk = await confirm({
-        title: "Stop your other timer?",
-        description: `You already have a timer running on "${activeTimer.task_title}". Stop it and start this one instead?`,
-        confirmLabel: "Switch timer",
-      });
-      if (!switchOk) return;
-      setBusy(true);
-      try {
-        await stop();
-      } catch (error) {
-        toast.error("Could not stop the other timer", message(error, "Please try again."));
-        setBusy(false);
-        return;
-      }
-    }
+  const onStart = () =>
+    startWork(
+      { id: task.id, title: task.title, status, client_id: task.client_id, client_name: task.client_name },
+      {
+        resuming: banked > 0,
+        onChange: async ({ progressed }) => {
+          await myTimer.reload();
+          if (progressed) onStatusChange("in_progress");
+        },
+      },
+    );
 
-    const resuming = banked > 0;
-    const forClient = task.client_id ? ` for ${task.client_name}` : "";
-    const ok = await confirm({
-      title: resuming ? "Resume this timer?" : "Start this timer?",
-      description: `Are you sure you're ${resuming ? "resuming" : "starting"} work on "${task.title}"${forClient}?`,
-      confirmLabel: resuming ? "Resume timer" : "Start timer",
-      cancelLabel: "Not now",
-    });
-    if (!ok) {
-      setBusy(false);
-      return;
-    }
-
-    setBusy(true);
-    try {
-      await start(task.id);
-      await myTimer.reload();
-      toast.success(resuming ? "Timer resumed" : "Timer started", task.title);
-    } catch (error) {
-      toast.error("Could not start the timer", message(error, "Please try again."));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const doStop = async () => {
-    const ok = await confirm({
-      title: "Stop the timer?",
-      description: `Stop tracking time on "${task.title}"? You can resume later from right where you left off.`,
-      confirmLabel: "Stop timer",
-      cancelLabel: "Keep running",
-    });
-    if (!ok) return;
-    setBusy(true);
-    try {
-      await stop();
-      await myTimer.reload();
-      toast.success("Timer stopped", task.title);
-    } catch (error) {
-      toast.error("Could not stop the timer", message(error, "Please try again."));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const onStop = () => stopWork({ id: task.id, title: task.title }, { onChange: () => myTimer.reload() });
 
   return (
     <section className="rounded-xl border border-line bg-surface shadow-[var(--shadow-card)]">
       <div className="border-b border-line px-5 py-4">
         <h2 className="text-[15px] font-semibold text-ink">Time tracking</h2>
         <p className="mt-0.5 text-[13px] text-muted">
-          {isAssignee ? "Your time logged against this task." : "Time logged against this task."}
+          {isAssignee
+            ? status === "todo" && !isRunningHere
+              ? "Start work to begin your timer and move this task to In Progress."
+              : "Your time logged against this task."
+            : "Time logged against this task."}
         </p>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 p-5">
@@ -482,13 +472,13 @@ function TaskTimerCard({ task }: { task: Task }) {
               variant="secondary"
               icon={<Square className="size-3.5" fill="currentColor" />}
               loading={busy}
-              onClick={() => void doStop()}
+              onClick={() => void onStop()}
             >
               Stop
             </Button>
           ) : (
-            <Button icon={<Play className="size-4" />} loading={busy} onClick={() => void doStart()}>
-              {banked > 0 ? "Resume" : "Start"}
+            <Button icon={<Play className="size-4" />} loading={busy} onClick={() => void onStart()}>
+              {banked > 0 ? "Resume" : "Start work"}
             </Button>
           )
         ) : null}

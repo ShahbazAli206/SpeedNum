@@ -181,6 +181,34 @@ def has_permission(user, key: str) -> bool:
     )
 
 
+def is_firm_owner(user) -> bool:
+    """The company Owner — or a platform superadmin acting inside the tenant.
+
+    Task *management* (creating, reassigning, editing details, deleting) is
+    gated on this rather than on the owner-configurable `tasks.manage` grant:
+    the product decision is that only the Owner sets up and hands out work,
+    while staff *execute* it. An Admin carries `tasks.manage` in the legacy
+    defaults, so `has_permission(user, "tasks.manage")` would let them create
+    and reassign — this narrower check is what keeps those actions Owner-only.
+    Kept a plain function (like has_permission) so routers have one obvious
+    import and tests can call it on an in-memory CurrentUser."""
+    return user.profile.role == "owner" or bool(user.profile.is_superadmin)
+
+
+def can_update_task_fields(user, assignee_id, changed_fields: set[str]) -> bool:
+    """Whether `user` may apply a task update touching exactly `changed_fields`.
+
+    An Owner (or superadmin) may change anything. Anyone else may change only
+    the task's `status`, and only on a task assigned to them — that's the
+    "staff run their own tasks" execution path (moving To do -> In Progress ->
+    Complete, including the status flip the Start-work action performs). Any
+    other field, or a task assigned to someone else, is Owner-only. An empty
+    change set is a harmless no-op, so it rides the same subset check."""
+    if is_firm_owner(user):
+        return True
+    return assignee_id is not None and user.profile.id == assignee_id and changed_fields <= {"status"}
+
+
 async def seed_default_roles(session, tenant_id) -> None:
     """Give a brand-new tenant the same three starter roles (Admin/Member/
     Viewer) that db/migrations/0018_roles_permissions.sql backfilled onto

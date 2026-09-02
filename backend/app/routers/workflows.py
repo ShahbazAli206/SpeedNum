@@ -11,7 +11,7 @@ from sqlalchemy import func, or_, select
 from ..config import settings
 from ..deps import SessionDep, TenantUserDep, client_ip
 from ..models import Client, Profile, Project, Task, TaskTimer
-from ..permissions import client_owner_clause, has_permission
+from ..permissions import can_update_task_fields, client_owner_clause, has_permission, is_firm_owner
 from ..services.email import deliver, task_assigned_html
 from ..schemas import (
     Ok,
@@ -337,8 +337,12 @@ async def _notify_assignee(session: SessionDep, *, tenant_id: uuid.UUID, tenant_
 async def create_task(
     payload: TaskCreate, session: SessionDep, user: TenantUserDep, request: Request
 ) -> TaskRead:
-    if not has_permission(user, "tasks.manage"):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: tasks.manage")
+    # Creating and assigning work is Owner-only, deliberately narrower than the
+    # configurable tasks.manage grant (which an Admin carries by default) — see
+    # permissions.is_firm_owner. Staff receive and execute tasks, they don't
+    # hand them out.
+    if not is_firm_owner(user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the company Owner can create tasks.")
     data = payload.model_dump()
     if data.get("project_id"):
         # Checked unconditionally, not only when client_id is also absent —
@@ -392,12 +396,21 @@ async def get_task(task_id: uuid.UUID, session: SessionDep, user: TenantUserDep)
 async def update_task(
     task_id: uuid.UUID, payload: TaskUpdate, session: SessionDep, user: TenantUserDep
 ) -> TaskRead:
-    if not has_permission(user, "tasks.manage"):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: tasks.manage")
     task = await session.scalar(
         select(Task).where(Task.id == task_id, Task.tenant_id == user.tenant_id)
     )
     ensure_found(task, "Task")
+
+    # Owner edits anything; the task's own assignee may change only its status
+    # (their execution path — including the To do -> In Progress flip that
+    # Start-work performs). Everything else is Owner-only. See
+    # permissions.can_update_task_fields.
+    changed = set(payload.model_dump(exclude_unset=True))
+    if not can_update_task_fields(user, task.assignee_id, changed):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only the company Owner can edit a task. You can change the status of tasks assigned to you.",
+        )
 
     await _validate_task_references(session, user.tenant_id, payload.model_dump(exclude_unset=True))
 
@@ -422,16 +435,19 @@ async def update_task(
 async def move_task(
     task_id: uuid.UUID, payload: TaskMove, session: SessionDep, user: TenantUserDep
 ) -> TaskRead:
-    # Same tasks.manage gate as update_task — there's no separate "move only
-    # my own assigned tasks" permission in this pass (see PLATFORM_IMPLEMENTATION_LOG.md),
-    # so a role with tasks.manage off cannot drag-and-drop a task's status
-    # either, even one assigned to them. Flagged as a known simplification.
-    if not has_permission(user, "tasks.manage"):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: tasks.manage")
     task = await session.scalar(
         select(Task).where(Task.id == task_id, Task.tenant_id == user.tenant_id)
     )
     ensure_found(task, "Task")
+
+    # A board drag is a status change — the same execution action update_task
+    # allows: the Owner may move any card, and a staff member may move a card
+    # assigned to them, but no one else can reorder another person's work.
+    if not (is_firm_owner(user) or task.assignee_id == user.profile.id):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only the company Owner can move a task. You can move tasks assigned to you.",
+        )
 
     previous_status = task.status
     task.status = payload.status
@@ -465,8 +481,8 @@ async def move_task(
 
 @router.delete("/tasks/{task_id}", response_model=Ok)
 async def delete_task(task_id: uuid.UUID, session: SessionDep, user: TenantUserDep) -> Ok:
-    if not has_permission(user, "tasks.manage"):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: tasks.manage")
+    if not is_firm_owner(user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the company Owner can delete tasks.")
     task = await session.scalar(
         select(Task).where(Task.id == task_id, Task.tenant_id == user.tenant_id)
     )

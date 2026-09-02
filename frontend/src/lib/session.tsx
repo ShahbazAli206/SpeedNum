@@ -49,6 +49,11 @@ export interface SessionValue {
   /** Firm staff (or demo mode). False only for a client-portal login. */
   isFirmStaff: boolean;
   isAdmin: boolean;
+  /** True for the company Owner (or a platform superadmin). Task creation and
+   *  assignment are Owner-only. Defaults to true in demo mode and before `me`
+   *  loads, matching `isAdmin`: a page shows the fuller view until the real
+   *  answer arrives rather than flashing controls away. */
+  isOwner: boolean;
   /** True when a platform superadmin is viewing this firm via impersonation. */
   isImpersonating: boolean;
   /** Which portal this login belongs to, for the role chip in the rail —
@@ -178,6 +183,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       isAdmin: profile
         ? profile.role === "owner" || profile.role === "admin" || profile.is_superadmin
         : true,
+      isOwner: profile ? profile.role === "owner" || Boolean(profile.is_superadmin) : true,
       isImpersonating: isLive ? (me?.is_impersonating ?? false) : false,
       portalRoleLabel: isLive ? portalRoleLabelOf(profile) : "Admin",
       hasPermission: (key) => (isLive ? (me?.permissions?.[key] ?? false) : true),
@@ -251,6 +257,7 @@ export function useSession(): SessionValue {
     unread: 0,
     isFirmStaff: true,
     isAdmin: true,
+    isOwner: true,
     isImpersonating: false,
     portalRoleLabel: "Admin",
     hasPermission: () => true,

@@ -843,7 +843,10 @@ export function ClientDetailClient({
             title="Tasks"
             description={`${allTasks.length} task${allTasks.length === 1 ? "" : "s"} for this client`}
             action={
-              isLive ? (
+              // Creating/assigning tasks is Owner-only (backend:
+              // workflows.create_task gates on permissions.is_firm_owner), so
+              // only the Owner gets the quick-add here — matching Task Master.
+              isLive && session.isOwner ? (
                 <Button size="sm" icon={<Plus className="size-3.5" />} onClick={() => setTaskModalOpen(true)}>
                   Add task
                 </Button>
