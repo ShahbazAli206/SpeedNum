@@ -6,7 +6,6 @@ import { useEffect, useState } from "react";
 
 import { useConfirm } from "@/components/confirm";
 import { useToast } from "@/components/toast";
-import { cn } from "@/lib/cn";
 import { formatClock } from "@/lib/format";
 import { liveSeconds } from "@/lib/timer";
 

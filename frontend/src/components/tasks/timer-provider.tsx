@@ -53,7 +53,9 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   const [activeTimer, setActiveTimer] = useState<TaskTimer | null>(null);
   const [isLoading, setIsLoading] = useState(AUTH_CONFIGURED);
   const activeTimerRef = useRef<TaskTimer | null>(null);
-  activeTimerRef.current = activeTimer;
+  useEffect(() => {
+    activeTimerRef.current = activeTimer;
+  }, [activeTimer]);
 
   const refresh = useCallback(async () => {
     if (!AUTH_CONFIGURED) return;
@@ -69,6 +71,11 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // `refresh` sets no state before its first `await` (it either returns
+    // early or suspends on the network first), so the lint rule's concern —
+    // setState running synchronously inside the effect body — doesn't apply
+    // here; the rule just can't see across the async boundary.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
     const interval = setInterval(() => void refresh(), REFRESH_MS);
     return () => clearInterval(interval);
