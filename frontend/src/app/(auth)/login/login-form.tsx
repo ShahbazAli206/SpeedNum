@@ -47,11 +47,19 @@ export function LoginForm() {
   const searchParams = useSearchParams();
   // A deep link captured by the proxy's redirect wins over the role default.
   const requested = searchParams.get("next");
+  // Set by lib/session.tsx (a poll found the session already dead — expired
+  // refresh token, suspended firm, deactivated account) or
+  // session-idle-guard.tsx (this tab timed out from inactivity) — both do a
+  // hard redirect here rather than leaving a stale, still-looking-signed-in
+  // tab behind. Worth a word of explanation instead of landing back on a
+  // bare login form with no context for why.
+  const signOutReason = searchParams.get("reason");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [reasonDismissed, setReasonDismissed] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -106,6 +114,20 @@ export function LoginForm() {
           <Alert tone="info" title="Demo mode">
             No backend is configured, so any valid-looking email and a 6-character password
             will open the portal with sample data.
+          </Alert>
+        </div>
+      ) : null}
+
+      {signOutReason && !reasonDismissed ? (
+        <div className="mt-5">
+          <Alert
+            tone="info"
+            title={signOutReason === "idle" ? "Signed out for inactivity" : "Your session ended"}
+            onDismiss={() => setReasonDismissed(true)}
+          >
+            {signOutReason === "idle"
+              ? "You were signed out after a period of inactivity, to protect your account. Sign in again to continue."
+              : "Your session is no longer valid — sign in again to continue."}
           </Alert>
         </div>
       ) : null}

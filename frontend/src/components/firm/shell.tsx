@@ -22,6 +22,7 @@ import { DesktopAppButton } from "@/components/dashboard/desktop-app-button";
 import { ForcePasswordModal } from "@/components/dashboard/force-password-modal";
 import { ImpersonationBanner } from "@/components/dashboard/impersonation-banner";
 import { SignOutButton, useSignOut } from "@/components/dashboard/sign-out-button";
+import { SessionIdleGuard } from "@/components/session-idle-guard";
 import { UrgentDeadlineBanner } from "@/components/dashboard/urgent-deadline-banner";
 import { ExpiryAlertBell } from "@/components/firm/expiry-alert-bell";
 import { PlanExpiryBanner } from "@/components/firm/plan-expiry-banner";
@@ -681,6 +682,8 @@ function FirmShellInner({ children }: { children: ReactNode }) {
       <Suspense fallback={null}>
         <ForcePasswordModal />
       </Suspense>
+
+      <SessionIdleGuard />
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState, type ReactNode } from "react";
 
 import { CallProvider } from "@/components/calls/call-provider";
+import { SessionIdleGuard } from "@/components/session-idle-guard";
 import { SessionProvider } from "@/lib/session";
 
 import { CommandPalette } from "./command-palette";
@@ -100,6 +101,8 @@ function DashboardShellInner({ children }: { children: ReactNode }) {
       <Suspense fallback={null}>
         <ForcePasswordModal />
       </Suspense>
+
+      <SessionIdleGuard />
     </div>
   );
 }

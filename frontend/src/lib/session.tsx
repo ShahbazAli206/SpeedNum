@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { get } from "./api";
+import { ApiError, get } from "./api";
 import { AUTH_CONFIGURED } from "./auth";
 import { FIRM, getFirmOverview, getReminderCounts } from "./firm-demo";
 import type { Me, ReminderCounts } from "./types";
@@ -115,6 +115,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // A ref, not state: the poll only needs to know whether a fetch is already in
   // flight, and writing that to state would re-render every tick for nothing.
   const inFlight = useRef(false);
+  // Whether this tab has ever actually held a signed-in session. Distinguishes
+  // "never signed in / demo mode" (a load() failure here is normal — show the
+  // demo identity, as always) from "was signed in and the poll just found out
+  // it no longer is" (the access token expired AND the refresh-cookie retry
+  // in lib/api.ts's 401 handler also failed — a dead refresh token, a firm
+  // suspended mid-session, or the account deactivated). The second case used
+  // to just flip `isLive` false while leaving the last-fetched `me` sitting in
+  // state: every value derived from `me` (the role badge, `isSuperadmin`,
+  // nav visibility) either fell back to a hardcoded default (portalRoleLabel
+  // baldly became "Admin") or kept reading the now-stale profile — a tab left
+  // open past its session's real lifetime could show a confusing mix of
+  // "Admin" chrome over whatever page happened to be open, which read as a
+  // cross-role leak even though nothing was actually being fetched anymore.
+  const hadLiveSession = useRef(false);
 
   const load = useCallback(async () => {
     if (!AUTH_CONFIGURED || inFlight.current) return;
@@ -123,6 +137,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const profile = await get<Me>("/auth/me");
       setMe(profile);
       setIsLive(true);
+      hadLiveSession.current = true;
       setUnreadOverride(null);
       setRemindersUnacknowledgedOverride(null);
 
@@ -136,8 +151,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           setReminders(EMPTY_REMINDERS);
         }
       }
-    } catch {
-      // Not signed in, or the API is asleep. Demo identity stands in.
+    } catch (error) {
+      if (hadLiveSession.current && error instanceof ApiError && error.status === 401) {
+        // A real session just ended for real (dead refresh token, suspended
+        // firm, deactivated account) rather than never having existed. A hard
+        // reload is deliberate, same reasoning as auth-client.ts's
+        // handleImpersonationLost: it's the only way to guarantee every
+        // other piece of client-side state built on the old session — every
+        // mounted page's own fetched data included — gets thrown away
+        // instead of lingering under a wrong-looking badge.
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+        window.location.href = "/login?reason=expired";
+        return;
+      }
+      // Never signed in, or the API is asleep. Demo identity stands in.
       setIsLive(false);
     } finally {
       inFlight.current = false;
