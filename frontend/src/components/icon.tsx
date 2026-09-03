@@ -1,11 +1,38 @@
 import { cn } from "@/lib/cn";
 
 /**
+ * Hand-picked flat colour icon art (public/nav-icons/*.png, cut from the
+ * designer-supplied set in public/sidebar icons/ with a transparent
+ * background) for the names that have one. Takes priority over the emoji
+ * fallback below — this is real icon art, not a substitute for it.
+ */
+const IMAGES: Record<string, string> = {
+  "bar-chart-3": "/nav-icons/bar-chart-3.png",
+  bell: "/nav-icons/bell.png",
+  "bell-ring": "/nav-icons/bell-ring.png",
+  "calendar-clock": "/nav-icons/calendar-clock.png",
+  clock: "/nav-icons/clock.png",
+  "credit-card": "/nav-icons/credit-card.png",
+  "file-signature": "/nav-icons/file-signature.png",
+  "file-spreadsheet": "/nav-icons/file-spreadsheet.png",
+  "file-text": "/nav-icons/file-text.png",
+  kanban: "/nav-icons/kanban.png",
+  "layout-dashboard": "/nav-icons/layout-dashboard.png",
+  "message-square": "/nav-icons/message-square.png",
+  network: "/nav-icons/network.png",
+  plug: "/nav-icons/plug.png",
+  receipt: "/nav-icons/receipt.png",
+  "sliders-horizontal": "/nav-icons/sliders-horizontal.png",
+  tag: "/nav-icons/tag.png",
+  users: "/nav-icons/users.png",
+  "video-call": "/nav-icons/video-call.png",
+};
+
+/**
  * Maps the string icon names used in content records (site.ts, features.ts) to
  * flat, full-colour emoji glyphs, so content files stay plain data and never
  * import from an icon library. Emoji render their own colour per the host OS's
- * emoji font, which is the point: every nav item gets a distinct, recognisable
- * colour for free instead of one flat monochrome tint.
+ * emoji font — a fallback for every name that isn't in IMAGES above.
  */
 const EMOJI: Record<string, string> = {
   "arrow-left-right": "🔁",
@@ -46,6 +73,19 @@ const EMOJI: Record<string, string> = {
 };
 
 export function Icon({ name, className }: { name: string; className?: string }) {
+  const image = IMAGES[name];
+  if (image) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={image}
+        alt=""
+        className={cn("inline-block shrink-0 object-contain", className)}
+        aria-hidden
+      />
+    );
+  }
+
   const emoji = EMOJI[name] ?? "🌐";
   return (
     <span

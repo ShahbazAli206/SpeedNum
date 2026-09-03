@@ -114,7 +114,7 @@ export function Sidebar({
                           : "text-ink-soft hover:bg-surface-2 hover:text-ink",
                       )}
                     >
-                      <Icon name={item.icon} className="w-6 text-[21px]" />
+                      <Icon name={item.icon} className="size-6 text-[21px]" />
                       {!collapsed ? <span className="truncate">{item.label}</span> : null}
                     </Link>
                   </li>

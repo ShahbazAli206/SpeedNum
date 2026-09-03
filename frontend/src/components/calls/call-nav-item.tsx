@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { useState } from "react";
 import { createPortal } from "react-dom";
 
+import { Icon } from "@/components/icon";
 import { cn } from "@/lib/cn";
 
 import { useCalls } from "./call-provider";
@@ -37,9 +38,7 @@ export function CallNavItem({ collapsed = false }: { collapsed?: boolean }) {
           "text-ink-soft hover:bg-surface-2 hover:text-ink",
         )}
       >
-        <span className="inline-flex w-6 shrink-0 items-center justify-center text-[21px] leading-none" role="img" aria-label="Video Call">
-          📹
-        </span>
+        <Icon name="video-call" className="size-6 text-[21px]" />
         {!collapsed ? <span className="flex-1 truncate text-left">Video Call</span> : null}
       </button>
 
