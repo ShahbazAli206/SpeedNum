@@ -166,6 +166,19 @@ class Settings(BaseSettings):
     # reminder digest has no human sender, for instance.
     email_reply_to: str = Field(default="", alias="EMAIL_REPLY_TO")
 
+    # Non-production recipient redirect. Staging runs on a full copy of live
+    # data, so every address in the database is a real customer's. When
+    # EMAIL_REDIRECT_TO is set, the transport rewrites the recipient of every
+    # outgoing message to it (services/email.py's _redirect_recipient) — the
+    # send stays completely real, but nothing lands on a real customer,
+    # including the reminder scheduler's automatic digests. UNSET on live, where
+    # the redirect is a complete no-op. EMAIL_REDIRECT_ALLOWLIST is a
+    # comma-separated list of addresses (a@b.com) or domains (@b.com / b.com)
+    # that are delivered unchanged, so the operator's own test addresses still
+    # receive their mail for a genuine end-to-end check.
+    email_redirect_to: str = Field(default="", alias="EMAIL_REDIRECT_TO")
+    email_redirect_allowlist: str = Field(default="", alias="EMAIL_REDIRECT_ALLOWLIST")
+
     # --- Vercel Web Analytics (superadmin "Reach" page) -------------------------
     # Server-only credentials the /admin/reach endpoint uses to read the public
     # Web Analytics query API (https://api.vercel.com/v1/query/web-analytics).

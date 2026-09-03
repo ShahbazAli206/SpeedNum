@@ -115,6 +115,51 @@ def _valid_recipient(to: str) -> bool:
     return bool(address) and "@" in address and "." in address.rsplit("@", 1)[-1]
 
 
+def _is_allowlisted(address: str) -> bool:
+    """Whether an address escapes the redirect. Entries in
+    `EMAIL_REDIRECT_ALLOWLIST` are matched either exactly (`a@b.com`) or by
+    domain (`@b.com` or bare `b.com`), case-insensitively."""
+    address = (address or "").strip().lower()
+    if not address:
+        return False
+    addresses: set[str] = set()
+    domains: set[str] = set()
+    for raw in (settings.email_redirect_allowlist or "").split(","):
+        entry = raw.strip().lower()
+        if not entry:
+            continue
+        if entry.startswith("@"):
+            domains.add(entry[1:])
+        elif "@" in entry:
+            addresses.add(entry)
+        else:
+            domains.add(entry)
+    return address in addresses or address.rsplit("@", 1)[-1] in domains
+
+
+def _redirect_recipient(to: str, subject: str) -> tuple[str, str]:
+    """Rewrite the recipient in a non-production environment.
+
+    Staging runs on a full copy of live data, so every stored address is a real
+    customer's. With `EMAIL_REDIRECT_TO` set, every message is delivered to that
+    one address instead — the send stays completely real (so deliverability is
+    genuinely exercised), but no real customer is ever contacted, including by
+    the reminder scheduler's automatic digests. The intended recipient is kept
+    in the subject so the operator can see who each message was for.
+
+    A complete no-op when `EMAIL_REDIRECT_TO` is unset, which is how live runs —
+    so this can never change production behaviour. Addresses/domains in
+    `EMAIL_REDIRECT_ALLOWLIST` are delivered unchanged.
+    """
+    target = (settings.email_redirect_to or "").strip()
+    if not target:
+        return to, subject
+    _, address = parseaddr(to or "")
+    if _is_allowlisted(address):
+        return to, subject
+    return target, f"[staging -> {address}] {subject}"
+
+
 # --- transports ---------------------------------------------------------------
 async def _deliver_resend(
     *, sender: str, to: str, subject: str, html: str, text: str, reply_to: str | None
@@ -257,6 +302,10 @@ async def deliver(
 
     if not _valid_recipient(to):
         return DeliveryResult(False, provider, f"{to!r} is not a usable email address.")
+
+    # Non-production safety: on staging (EMAIL_REDIRECT_TO set) this rewrites the
+    # recipient to the operator's own address; on live it is a no-op.
+    to, subject = _redirect_recipient(to, subject)
 
     text = html_to_text(html)
     sender = _sender(from_name)
