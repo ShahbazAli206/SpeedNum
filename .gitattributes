@@ -3,3 +3,8 @@
 *.mp4 filter=lfs diff=lfs merge=lfs -text
 *.zip filter=lfs diff=lfs merge=lfs -text
 *.avi filter=lfs diff=lfs merge=lfs -text
+
+# Shell scripts must keep LF endings — they run on the Linux VPS, where a CRLF
+# would make the shebang/`\r` fail ("bad interpreter"). Force LF regardless of
+# the checkout platform's core.autocrlf.
+*.sh text eol=lf
