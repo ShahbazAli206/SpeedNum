@@ -133,7 +133,7 @@ export function CommandPalette({
                   )}
                 >
                   <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-brand-soft text-brand">
-                    <Icon name={item.icon} className="size-4" />
+                    <Icon name={item.icon} className="text-[18px]" />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-[14px] font-semibold text-ink">{item.label}</span>

@@ -403,7 +403,7 @@ function FirmShellInner({ children }: { children: ReactNode }) {
                         )}
                       >
                         <span className="relative">
-                          <Icon name={item.icon} className="size-4.5 shrink-0" />
+                          <Icon name={item.icon} className="w-6 text-[21px]" />
                           <UnreadDot show={collapsed && alerting} />
                         </span>
                         {!collapsed ? (

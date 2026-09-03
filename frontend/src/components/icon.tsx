@@ -1,90 +1,61 @@
-import {
-  ArrowLeftRight,
-  ArrowRight,
-  Bell,
-  BellRing,
-  CalendarCheck,
-  CalendarClock,
-  ChartColumn,
-  ChartLine,
-  Clock,
-  CreditCard,
-  FileSpreadsheet,
-  FileText,
-  Folder,
-  Globe,
-  HardDrive,
-  Kanban,
-  Landmark,
-  LayoutDashboard,
-  LifeBuoy,
-  Lock,
-  Mail,
-  MapPin,
-  MessageSquare,
-  Network,
-  Palette,
-  Plug,
-  Receipt,
-  Settings,
-  ShieldCheck,
-  Signature,
-  SlidersHorizontal,
-  Tag,
-  UserPlus,
-  Users,
-  Wallet,
-  type LucideIcon,
-} from "lucide-react";
+import { cn } from "@/lib/cn";
 
 /**
  * Maps the string icon names used in content records (site.ts, features.ts) to
- * components, so content files stay plain data and never import from lucide.
- *
- * Note: lucide-react v1 dropped the brand glyphs (LinkedIn, Facebook, …), so
- * those live in `SocialIcon` below as inline paths rather than in this map.
+ * flat, full-colour emoji glyphs, so content files stay plain data and never
+ * import from an icon library. Emoji render their own colour per the host OS's
+ * emoji font, which is the point: every nav item gets a distinct, recognisable
+ * colour for free instead of one flat monochrome tint.
  */
-const ICONS: Record<string, LucideIcon> = {
-  "arrow-left-right": ArrowLeftRight,
-  "arrow-right": ArrowRight,
-  "bar-chart-3": ChartColumn,
-  "line-chart": ChartLine,
-  bell: Bell,
-  "bell-ring": BellRing,
-  "calendar-check": CalendarCheck,
-  "calendar-clock": CalendarClock,
-  clock: Clock,
-  "credit-card": CreditCard,
-  "file-signature": Signature,
-  "file-spreadsheet": FileSpreadsheet,
-  "file-text": FileText,
-  folder: Folder,
-  globe: Globe,
-  "hard-drive": HardDrive,
-  kanban: Kanban,
-  landmark: Landmark,
-  "layout-dashboard": LayoutDashboard,
-  "life-buoy": LifeBuoy,
-  lock: Lock,
-  mail: Mail,
-  "map-pin": MapPin,
-  "message-square": MessageSquare,
-  network: Network,
-  palette: Palette,
-  plug: Plug,
-  receipt: Receipt,
-  settings: Settings,
-  "shield-check": ShieldCheck,
-  "sliders-horizontal": SlidersHorizontal,
-  tag: Tag,
-  "user-plus": UserPlus,
-  users: Users,
-  wallet: Wallet,
+const EMOJI: Record<string, string> = {
+  "arrow-left-right": "🔁",
+  "arrow-right": "➡️",
+  "bar-chart-3": "📈",
+  "line-chart": "📉",
+  bell: "🔔",
+  "bell-ring": "🔔",
+  "calendar-check": "🗓️",
+  "calendar-clock": "📅",
+  clock: "🕐",
+  "credit-card": "💳",
+  "file-signature": "🤝",
+  "file-spreadsheet": "📤",
+  "file-text": "📄",
+  folder: "📁",
+  globe: "🌐",
+  "hard-drive": "💾",
+  kanban: "📋",
+  landmark: "🏛️",
+  "layout-dashboard": "📊",
+  "life-buoy": "🛟",
+  lock: "🔒",
+  mail: "✉️",
+  "map-pin": "📍",
+  "message-square": "💬",
+  network: "🧑‍🤝‍🧑",
+  palette: "🎨",
+  plug: "🧩",
+  receipt: "🧾",
+  settings: "⚙️",
+  "shield-check": "🛡️",
+  "sliders-horizontal": "🎚️",
+  tag: "🏷️",
+  "user-plus": "🙋",
+  users: "👥",
+  wallet: "💰",
 };
 
 export function Icon({ name, className }: { name: string; className?: string }) {
-  const Component = ICONS[name] ?? Globe;
-  return <Component className={className} aria-hidden />;
+  const emoji = EMOJI[name] ?? "🌐";
+  return (
+    <span
+      className={cn("inline-flex shrink-0 items-center justify-center leading-none not-italic", className)}
+      role="img"
+      aria-label={name}
+    >
+      {emoji}
+    </span>
+  );
 }
 
 /* -------------------------------------------------------------------------- */

@@ -1,6 +1,6 @@
 "use client";
 
-import { Video, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -37,7 +37,9 @@ export function CallNavItem({ collapsed = false }: { collapsed?: boolean }) {
           "text-ink-soft hover:bg-surface-2 hover:text-ink",
         )}
       >
-        <Video className="size-4.5 shrink-0" />
+        <span className="inline-flex w-6 shrink-0 items-center justify-center text-[21px] leading-none" role="img" aria-label="Video Call">
+          📹
+        </span>
         {!collapsed ? <span className="flex-1 truncate text-left">Video Call</span> : null}
       </button>
 
