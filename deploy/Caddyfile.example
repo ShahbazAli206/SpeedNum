@@ -189,6 +189,98 @@ video.spidnums.com {
 # Caddy has nothing to reverse-proxy here. Only the DNS record needs to
 # exist; Caddy never touches this hostname's traffic.
 
+# --- STAGING (production.spidnums.com) -------------------------------------
+# The staging environment — a second, isolated stack on this same VPS (see
+# ../deploy/docker-compose.staging.yml and STAGING.md). Reverse-proxies to the
+# `speednum-staging-*` containers on the shared `web` network, exactly as the
+# live blocks above reach `speednum-*`. Add these two blocks only after the DNS
+# A records for production.spidnums.com and api.production.spidnums.com resolve
+# to this VPS (Caddy will otherwise retry ACME against a non-resolving name).
+# Always `caddy validate` before `caddy reload` — a bad edit here must never
+# take the live www/test blocks above down.
+
+# Staging FRONTEND. Gated with HTTP basic auth so the public (and search
+# engines) cannot reach a site running on a full copy of real customer data.
+# The gate is only on the frontend: the SPA's browser fetch and Next.js's
+# server-side fetch to the API cannot carry basic-auth credentials, so gating
+# api.production.spidnums.com the same way would break staging. That host is
+# protected by the app's own JWT login instead (same as the live API).
+production.spidnums.com {
+	# Generate the hash on the VPS with:
+	#   docker exec caddy caddy hash-password --plaintext 'your-staging-password'
+	# and paste its output below. `basic_auth` is the current directive name;
+	# on Caddy older than v2.8 use `basicauth` instead.
+	basic_auth {
+		staging REPLACE_WITH_caddy_hash-password_OUTPUT
+	}
+
+	handle {
+		reverse_proxy speednum-staging-frontend:3000
+	}
+
+	header /_next/static/* Cache-Control "public, max-age=31536000, immutable"
+	encode zstd gzip
+
+	header {
+		# Keep a full copy of real data out of every search index.
+		X-Robots-Tag "noindex, nofollow"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	log {
+		output file /data/access-staging-frontend.log {
+			roll_size 20mb
+			roll_keep 5
+		}
+	}
+}
+
+# Staging API + object storage. Mirrors the test.spidnums.com block above but
+# points at the staging containers. No basic_auth (see the frontend block's
+# note) — the app's login gates the data. If you want to lock it to your own IP
+# as well, add a matcher:  @office remote_ip 203.0.113.5  and `handle @office`.
+api.production.spidnums.com {
+	# Presigned-URL traffic, path-style S3 — matched on the bucket name and
+	# never rewritten (a SigV4 signature covers the exact path). See the
+	# test.spidnums.com block for the full reasoning.
+	handle /documents/* {
+		reverse_proxy speednum-staging-minio:9000
+	}
+	handle /backups/* {
+		reverse_proxy speednum-staging-minio:9000
+	}
+	handle /desktop-releases/* {
+		reverse_proxy speednum-staging-minio:9000
+	}
+
+	handle {
+		request_body {
+			max_size 12MB
+		}
+		reverse_proxy speednum-staging-api:8000
+	}
+
+	encode gzip
+
+	header {
+		X-Robots-Tag "noindex, nofollow"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	log {
+		output file /data/access-staging-api.log {
+			roll_size 20mb
+			roll_keep 5
+		}
+	}
+}
+
 # --- Production API hostname — NOT ACTIVE YET ------------------------------
 # Uncomment this block only after api.spidnums.com's DNS record exists AND
 # has propagated (verify with `dig +short api.spidnums.com` before
