@@ -27,6 +27,9 @@ yarn-error.log*
 .env
 .env.*
 !.env.example
+# Staging equivalents: the real .env.staging holds secrets and is ignored by
+# the `.env.*` rule above; the tracked template must be re-included explicitly.
+!.env.staging.example
 # Local-only secret store for deployment credentials (DB password, keys, tokens).
 # This file holds live secrets and must NEVER be pushed. DEPLOYMENT.md (committed)
 # documents where each secret lives and how to retrieve it instead.
@@ -55,6 +58,9 @@ Desktop.ini
 # password). deploy/api.env.example is the tracked template.
 deploy/api.env
 deploy/api.env.bak*
+# Staging API secrets (not matched by the .env.* rule since it doesn't start
+# with `.env`). deploy/api.staging.env.example is the tracked template.
+deploy/api.staging.env
 # Live LiveKit/coturn config — the TURN shared secret and (for coturn) the
 # VPS's own public IP. deploy/livekit.yaml.example and
 # deploy/turnserver.conf.example are the tracked templates.

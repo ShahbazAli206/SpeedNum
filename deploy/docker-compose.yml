@@ -249,6 +249,12 @@ services:
     image: livekit/livekit-server:v1.13.6
     container_name: speednum-livekit
     restart: unless-stopped
+    # Video is behind the `video` profile so a plain `docker compose up -d` does
+    # NOT start it — on this host video runs in the staging stack while it is
+    # being fixed (see deploy/docker-compose.staging.yml and STAGING.md), and
+    # livekit/coturn bind fixed host ports that only one stack can own at a time.
+    # To run video on live, bring the stack up with `--profile video`.
+    profiles: ["video"]
     network_mode: host
     command: ["--config", "/etc/livekit.yaml"]
     volumes:
@@ -282,6 +288,9 @@ services:
     image: coturn/coturn:4.17.2
     container_name: speednum-coturn
     restart: unless-stopped
+    # Behind the `video` profile for the same reason as `livekit` above — the two
+    # go together, and both bind fixed host ports only one stack can own.
+    profiles: ["video"]
     network_mode: host
     # The image's default CMD is `--log-file=stdout --external-ip=$(detect-external-ip)`
     # with no `-c`, so without this override turnserver.conf below is mounted

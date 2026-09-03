@@ -1,0 +1,252 @@
+# SpeedNum STAGING stack — production.spidnums.com — on the SAME VPS as live.
+#
+#   cd /opt/speednum-staging/deploy
+#   docker compose -p speednum-staging --env-file .env.staging \
+#     -f docker-compose.staging.yml --profile video up -d --build
+#
+# (deploy/deploy-staging.sh wraps exactly that.)
+#
+# This is a DELIBERATE, standalone copy of docker-compose.yml, not a
+# `-f base -f override` merge: Compose concatenates list-valued keys (env_file,
+# volumes) across merged files, which would silently load live's ./api.env and
+# live's data volumes into staging. Keeping staging in its own file guarantees
+# it reads ONLY ./api.staging.env and its own data dirs. The trade-off is drift:
+# when you change a service in docker-compose.yml (a new env var, a healthcheck,
+# an image bump), mirror it here. The two files are intentionally structured the
+# same so that is a small diff. See docker-compose.yml for the full rationale
+# behind each service — comments here cover only what STAGING changes.
+#
+# Isolation from live:
+#   - project name `speednum-staging` (never the default `speednum`)
+#   - container names `speednum-staging-*`
+#   - data dirs /home/deploy/data/speednum-staging/* (live uses .../speednum/*)
+#   - its own compose-scoped `internal` network (postgres/minio unreachable from live)
+#   - api runs 1 worker, so staging cannot starve the live app of CPU
+# The only shared resources are the external `web` network (so the host's single
+# Caddy reaches staging by its distinct container names) and, while video is
+# being fixed, the host's WebRTC ports (live no longer binds them — its
+# livekit/coturn are behind a `video` profile it does not enable).
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: speednum-staging-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-speednum}
+      POSTGRES_USER: ${POSTGRES_USER:-speednum}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.staging}
+    volumes:
+      - /home/deploy/data/speednum-staging/postgres:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-speednum} -d $${POSTGRES_DB:-speednum}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  minio:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    container_name: speednum-staging-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env.staging}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env.staging}
+      MINIO_BROWSER: "off"
+    volumes:
+      - /home/deploy/data/speednum-staging/minio:/data
+    networks:
+      - internal
+      - web
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  minio-init:
+    image: minio/mc:RELEASE.2024-10-08T09-37-26Z
+    container_name: speednum-staging-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - internal
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env.staging}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env.staging}
+      S3_BUCKET: ${S3_BUCKET:-documents}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-backups}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
+        mc mb --ignore-existing "local/$$S3_BUCKET" &&
+        mc anonymous set none "local/$$S3_BUCKET" &&
+        mc mb --ignore-existing "local/$$BACKUP_S3_BUCKET" &&
+        mc anonymous set none "local/$$BACKUP_S3_BUCKET"
+    restart: "no"
+
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    image: speednum-staging-api:latest
+    container_name: speednum-staging-api
+    restart: unless-stopped
+    env_file:
+      - ./api.staging.env
+    environment:
+      PORT: "8000"
+      # 1 worker on staging (live uses 4): keep staging's footprint small so it
+      # never competes with the live app for the VPS's CPU.
+      WEB_CONCURRENCY: "1"
+      # Same interpolation-from-.env.staging mechanism as live (see
+      # docker-compose.yml's `api` block). `postgres` resolves to THIS project's
+      # staging postgres over its own `internal` network.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-speednum_app}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-speednum}?sslmode=disable
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - web
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)",
+        ]
+      interval: 60s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      # NEXT_PUBLIC_* is inlined at build time — staging must be built with the
+      # staging hostnames or the browser bundle would call the live API.
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.production.spidnums.com}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://production.spidnums.com}
+    image: speednum-staging-frontend:latest
+    container_name: speednum-staging-frontend
+    restart: unless-stopped
+    networks:
+      - web
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:3000/', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))",
+        ]
+      interval: 60s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # Video (LiveKit + coturn). ON in staging while the feature is being fixed —
+  # live has these behind a `video` profile it does NOT enable, so the host's
+  # WebRTC ports and the video.spidnums.com / turn.spidnums.com hostnames are
+  # free for staging to own. Kept behind a `video` profile here too so that,
+  # once the fix is promoted to live, staging can drop `--profile video` and
+  # hand the ports back. Same host-networking constraints as live (see
+  # docker-compose.yml's long note) — reuses the same livekit.yaml /
+  # turnserver.conf / TLS cert on the host.
+  livekit:
+    image: livekit/livekit-server:v1.13.6
+    container_name: speednum-staging-livekit
+    restart: unless-stopped
+    profiles: ["video"]
+    network_mode: host
+    command: ["--config", "/etc/livekit.yaml"]
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  coturn:
+    image: coturn/coturn:4.17.2
+    container_name: speednum-staging-coturn
+    restart: unless-stopped
+    profiles: ["video"]
+    network_mode: host
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+    user: "1000:1000"
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - /home/deploy/certs/turn.spidnums.com:/etc/coturn/certs:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # Schema migrations (staging DB). Same `tools` profile as live so it never
+  # runs as part of `up`:
+  #   docker compose -p speednum-staging --env-file .env.staging \
+  #     -f docker-compose.staging.yml run --rm migrate status
+  migrate:
+    profiles: ["tools"]
+    image: speednum-staging-api:latest
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./api.staging.env
+    environment:
+      MIGRATIONS_DIR: /migrations
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-speednum_app}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-speednum}?sslmode=disable
+    volumes:
+      - ../db/migrations:/migrations:ro
+    networks:
+      - internal
+    entrypoint: ["python", "scripts/migrate.py"]
+    command: ["status"]
+    restart: "no"
+
+networks:
+  web:
+    external: true
+  internal:
+    driver: bridge
