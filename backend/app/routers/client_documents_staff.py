@@ -21,7 +21,8 @@ from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import select
 
 from ..deps import SessionDep, TenantUserDep, client_ip
-from ..models import Document, Profile
+from ..models import Client, Document, Profile
+from ..permissions import client_owner_clause
 from ..schemas import (
     ClientDocumentCreate,
     ClientDocumentRead,
@@ -31,7 +32,7 @@ from ..schemas import (
     Ok,
 )
 from ..services import audit, storage
-from ..utils import ensure_client_in_tenant, ensure_found
+from ..utils import ensure_found
 
 router = APIRouter(tags=["clients"])
 
@@ -42,6 +43,22 @@ def _prefix_for(tenant_id: uuid.UUID, client_id: uuid.UUID) -> str:
     """Same prefix scheme as client_documents.py's own `_prefix_for` — both
     routers write into the same client book, just from different callers."""
     return f"{tenant_id}/{client_id}/"
+
+
+async def _ensure_client_access(session: SessionDep, user: TenantUserDep, client_id: uuid.UUID) -> Client:
+    """Same scoping as clients.py's `_owner_scope` (permissions.client_owner_
+    clause): a staff member without clients.view_all who isn't this client's
+    assigned owner (Client.owner_id) gets a 404, exactly as if the client
+    didn't exist. Previously every endpoint below called only
+    ensure_client_in_tenant, which checks tenant membership alone — so any
+    staff member in the tenant, not just the client's assigned owner, could
+    list/upload/download/delete a colleague's client's documents."""
+    stmt = select(Client).where(Client.id == client_id, Client.tenant_id == user.tenant_id)
+    scope = client_owner_clause(user)
+    if scope is not None:
+        stmt = stmt.where(scope)
+    client = await session.scalar(stmt)
+    return ensure_found(client, "Client")
 
 
 def _mint_path(tenant_id: uuid.UUID, client_id: uuid.UUID, name: str) -> str:
@@ -59,7 +76,7 @@ def _storage_unavailable(exc: storage.StorageError) -> HTTPException:
 async def create_client_document_upload_url(
     client_id: uuid.UUID, payload: DocumentUploadUrlRequest, session: SessionDep, user: TenantUserDep
 ) -> DocumentUploadUrl:
-    await ensure_client_in_tenant(session, user.tenant_id, client_id)
+    await _ensure_client_access(session, user, client_id)
 
     path = _mint_path(user.tenant_id, client_id, payload.name)
     try:
@@ -74,7 +91,7 @@ async def create_client_document_upload_url(
 async def list_client_documents(
     client_id: uuid.UUID, session: SessionDep, user: TenantUserDep
 ) -> list[ClientDocumentRead]:
-    await ensure_client_in_tenant(session, user.tenant_id, client_id)
+    await _ensure_client_access(session, user, client_id)
 
     rows = (
         await session.execute(
@@ -106,7 +123,7 @@ async def list_client_documents(
 async def register_client_document(
     client_id: uuid.UUID, payload: ClientDocumentCreate, session: SessionDep, user: TenantUserDep, request: Request
 ) -> ClientDocumentRead:
-    client = await ensure_client_in_tenant(session, user.tenant_id, client_id)
+    client = await _ensure_client_access(session, user, client_id)
 
     # The path must be one we minted for this very book — see
     # client_documents.py's register_document for why this matters: signing
@@ -155,7 +172,7 @@ async def register_client_document(
 async def client_document_download_url(
     client_id: uuid.UUID, document_id: uuid.UUID, session: SessionDep, user: TenantUserDep
 ) -> DocumentDownloadUrl:
-    await ensure_client_in_tenant(session, user.tenant_id, client_id)
+    await _ensure_client_access(session, user, client_id)
 
     doc = await session.scalar(
         select(Document).where(
@@ -176,7 +193,7 @@ async def client_document_download_url(
 async def delete_client_document(
     client_id: uuid.UUID, document_id: uuid.UUID, session: SessionDep, user: TenantUserDep, request: Request
 ) -> Ok:
-    await ensure_client_in_tenant(session, user.tenant_id, client_id)
+    await _ensure_client_access(session, user, client_id)
 
     doc = await session.scalar(
         select(Document).where(

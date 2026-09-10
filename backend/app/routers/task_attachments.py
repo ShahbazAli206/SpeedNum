@@ -15,10 +15,11 @@ import re
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from ..deps import SessionDep, TenantUserDep, client_ip
-from ..models import Document, Profile, Task, TaskComment
+from ..models import Client, Document, Profile, Task, TaskComment
+from ..permissions import has_permission
 from ..schemas import (
     DocumentDownloadUrl,
     DocumentUploadUrl,
@@ -39,7 +40,24 @@ _UNSAFE_NAME = re.compile(r"[^\w.\-]+")
 
 
 async def _load_task(session: SessionDep, user: TenantUserDep, task_id: uuid.UUID) -> Task:
-    task = await session.scalar(select(Task).where(Task.id == task_id, Task.tenant_id == user.tenant_id))
+    """Same client-ownership visibility rule workflows.py's list_tasks already
+    applies (gated on tasks.view_all, not clients.view_all — see that
+    router's comment): a staff member without it can only reach a task tied
+    to a client they own, or an internal task with no client_id at all.
+    Previously this checked tenant membership only, so any staff member could
+    read/attach files to, or comment on, any other colleague's client's task.
+    Deliberately does NOT also grant access via Task.assignee_id — the
+    Caseware workflow spec's Gap #4 explicitly says not to add task-assignee-
+    based document access silently; that would need its own, audited
+    permission if the product ever wants a clerk to work a one-off task for a
+    client they don't own."""
+    stmt = select(Task).where(Task.id == task_id, Task.tenant_id == user.tenant_id)
+    if not has_permission(user, "tasks.view_all"):
+        owned_client_ids = select(Client.id).where(
+            Client.tenant_id == user.tenant_id, Client.owner_id == user.profile.id
+        )
+        stmt = stmt.where(or_(Task.client_id.is_(None), Task.client_id.in_(owned_client_ids)))
+    task = await session.scalar(stmt)
     return ensure_found(task, "Task")
 
 
