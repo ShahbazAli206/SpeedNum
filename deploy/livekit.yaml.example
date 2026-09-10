@@ -19,11 +19,20 @@ rtc:
   tcp_port: 7881
   port_range_start: 50000
   port_range_end: 60000
-  # This VPS is a single box with its own public IP, not behind a cloud load
-  # balancer — LiveKit needs to advertise that real IP in ICE candidates
-  # rather than whatever Docker-internal address network_mode: host would
-  # otherwise expose it as.
-  use_external_ip: true
+  # This VPS is a single box with a known static public IP, not behind a
+  # cloud load balancer. `use_external_ip: true` makes LiveKit enumerate
+  # every local interface it can see — with network_mode: host that includes
+  # every Docker bridge gateway (172.17.0.1, 172.18.0.1, ...) plus the host's
+  # IPv6 address, and it advertises ALL of them as ICE candidates alongside
+  # the real public IP. Confirmed live 2026-09-10: this pollutes the
+  # candidate list enough that real browsers fail ICE entirely (LiveKit logs
+  # show "removing participant without connection", connectionType:
+  # "unknown", sessionDuration: "0s") even though signaling connects fine.
+  # `node_ip` pins the single real address instead — no enumeration, no
+  # junk candidates. Verified fix: connectionType becomes "udp" with a real
+  # session duration once this is applied and livekit is restarted.
+  use_external_ip: false
+  node_ip: 2.25.108.16
 
   # Self-hosted coturn (deploy/turnserver.conf.example) — NOT LiveKit's own
   # embedded TURN server (see `turn:` below, left disabled). LiveKit mints a
