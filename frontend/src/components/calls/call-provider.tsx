@@ -15,15 +15,22 @@ import {
   acceptCall,
   createCall,
   declineCall,
+  getCall,
   listRingingCalls,
   type CallSession,
   type CallType,
 } from "@/lib/calls-api";
+import { useToast } from "@/components/toast";
 import { useSession } from "@/lib/session";
 
 import { CallChat } from "./call-chat";
 import { CallWindow } from "./call-window";
 import { IncomingCall } from "./incoming-call";
+
+/** Pull a human-readable reason out of an ApiError without leaking `[object]`. */
+function reason(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
 
 /**
  * The one component that decides when a call surface is on screen (spec §20).
@@ -43,9 +50,14 @@ const RING_POLL_MS = 5_000;
 
 interface CallContextValue {
   startCall: (inviteeProfileIds: string[], type?: CallType) => Promise<void>;
+  /** Open an existing call by id (e.g. from a notification link) if it's
+   *  still joinable; toasts instead of navigating if it's already over. */
+  joinCall: (callId: string) => Promise<void>;
   /** True while any call surface (outgoing/in-call) is open. */
   inCall: boolean;
 }
+
+const JOINABLE_STATUSES = new Set(["ringing", "accepted"]);
 
 const CallContext = createContext<CallContextValue | null>(null);
 
@@ -58,6 +70,7 @@ export function useCalls(): CallContextValue {
 export function CallProvider({ children }: { children: ReactNode }) {
   const { me, isLive } = useSession();
   const myProfileId = me?.profile.id ?? null;
+  const toast = useToast();
 
   const [activeCallId, setActiveCallId] = useState<string | null>(null);
   const [incoming, setIncoming] = useState<CallSession | null>(null);
@@ -68,10 +81,31 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const startCall = useCallback(
     async (inviteeProfileIds: string[], type: CallType = "video") => {
       if (!inviteeProfileIds.length) return;
-      const call = await createCall({ invitee_profile_ids: inviteeProfileIds, call_type: type });
-      setActiveCallId(call.id);
+      try {
+        const call = await createCall({ invitee_profile_ids: inviteeProfileIds, call_type: type });
+        setActiveCallId(call.id);
+      } catch (error) {
+        toast.error("Could not start the call", reason(error, "Please try again."));
+      }
     },
-    [],
+    [toast],
+  );
+
+  const joinCall = useCallback(
+    async (callId: string) => {
+      try {
+        const call = await getCall(callId);
+        if (!JOINABLE_STATUSES.has(call.status)) {
+          toast.error("This call has ended", "It's no longer joinable.");
+          return;
+        }
+        dismissed.current.delete(callId);
+        setActiveCallId(callId);
+      } catch (error) {
+        toast.error("Could not open the call", reason(error, "Please try again."));
+      }
+    },
+    [toast],
   );
 
   // Poll for an incoming call while idle. A call I initiated never rings me
@@ -127,8 +161,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   }, [activeCallId]);
 
   const value = useMemo<CallContextValue>(
-    () => ({ startCall, inCall: !!activeCallId }),
-    [startCall, activeCallId],
+    () => ({ startCall, joinCall, inCall: !!activeCallId }),
+    [startCall, joinCall, activeCallId],
   );
 
   return (

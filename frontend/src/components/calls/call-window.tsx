@@ -17,6 +17,22 @@ import { VideoGrid } from "./video-grid";
 
 type Panel = "none" | "participants" | "chat";
 
+/** getUserMedia rejects with a DOMException; map the common ones to copy a
+ *  user can actually act on instead of a silent "stays off" toggle. */
+function mediaErrorHint(err: unknown): string {
+  const name = err instanceof DOMException ? err.name : undefined;
+  if (name === "NotAllowedError" || name === "SecurityError") {
+    return "Camera/microphone access was blocked. Allow access in your browser's site settings, then retry.";
+  }
+  if (name === "NotFoundError") {
+    return "No camera or microphone was found on this device.";
+  }
+  if (name === "NotReadableError") {
+    return "Your camera or microphone is already in use by another app.";
+  }
+  return err instanceof Error && err.message ? err.message : "Could not access your camera or microphone.";
+}
+
 /**
  * The full in-call surface: fetches a LiveKit token for `callId`, connects,
  * and renders the video grid, connection state, control bar and side panels.
@@ -45,6 +61,8 @@ export function CallWindow({
   const [canModerate, setCanModerate] = useState(false);
   const [chatUnread, setChatUnread] = useState(0);
   const [fatal, setFatal] = useState<string | null>(null);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const [callType, setCallType] = useState<"audio" | "video">("video");
   const connectOnce = useRef(false);
 
   // Fetch a token and join, exactly once per mount. getCallToken is also the
@@ -57,11 +75,17 @@ export function CallWindow({
       try {
         const [{ livekit_url, token }, session] = await Promise.all([getCallToken(callId), getCall(callId)]);
         setCanModerate(!!myProfileId && session.initiator_profile_id === myProfileId);
+        setCallType(session.call_type);
         await call.connect(livekit_url, token);
         // Enable mic and camera on join for a video call; the user can mute
-        // immediately after. A pure audio call leaves the camera off.
-        await call.toggleMic().catch(() => {});
-        if (session.call_type === "video") await call.toggleCamera().catch(() => {});
+        // immediately after. A pure audio call leaves the camera off. A
+        // getUserMedia failure (permission denied, no device, device busy)
+        // must not silently leave mic/camera showing "off" with no
+        // explanation — surface it so the user can actually fix it.
+        await call.toggleMic().catch((err) => setMediaError(mediaErrorHint(err)));
+        if (session.call_type === "video") {
+          await call.toggleCamera().catch((err) => setMediaError(mediaErrorHint(err)));
+        }
       } catch (err) {
         setFatal(err instanceof Error ? err.message : "Could not join the call.");
       }
@@ -69,6 +93,14 @@ export function CallWindow({
     // call/callId are stable for this window's lifetime; connectOnce guards re-run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [callId]);
+
+  const retryMedia = useCallback(async () => {
+    setMediaError(null);
+    if (!call.isMicEnabled) await call.toggleMic().catch((err) => setMediaError(mediaErrorHint(err)));
+    if (callType === "video" && !call.isCameraEnabled) {
+      await call.toggleCamera().catch((err) => setMediaError(mediaErrorHint(err)));
+    }
+  }, [call, callType]);
 
   // When the call ends for everyone (or the local user is removed), close.
   useEffect(() => {
@@ -152,6 +184,19 @@ export function CallWindow({
           </aside>
         ) : null}
       </div>
+
+      {mediaError ? (
+        <div className="mx-4 mb-2 flex items-center justify-between gap-3 rounded-lg bg-amber-500/15 px-3 py-2 text-[13px] text-amber-200 ring-1 ring-amber-500/30">
+          <span>{mediaError}</span>
+          <button
+            type="button"
+            onClick={() => void retryMedia()}
+            className="shrink-0 rounded-full bg-amber-500/20 px-3 py-1 font-semibold text-amber-100 hover:bg-amber-500/30"
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
 
       <footer className={cn("px-4 py-4", call.isReconnecting && "opacity-90")}>
         <CallControls

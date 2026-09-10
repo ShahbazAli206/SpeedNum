@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
 
+import { useCalls } from "@/components/calls/call-provider";
 import { DashboardHeader } from "@/components/dashboard/page-shell";
 import { useToast } from "@/components/toast";
 import { Button, EmptyState } from "@/components/ui";
@@ -41,6 +42,11 @@ function metaFor(type: string) {
 
 const FILTERS = ["All", "Unread", "Deadline", "Letter", "Task", "Client", "Support", "Email", "System"] as const;
 
+// Calls are handled by <CallProvider>'s modal, not a page route — a call
+// notification's `link` (`/calls/{id}`) has no matching Next.js route and
+// would 404 if followed as a normal navigation.
+const CALL_LINK = /^\/calls\/([^/]+)$/;
+
 /** Pull a human-readable reason out of an ApiError without leaking `[object]`. */
 function message(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -55,6 +61,7 @@ export function NotificationsClient({
 }) {
   const toast = useToast();
   const session = useSession();
+  const { joinCall } = useCalls();
   const [read, setRead] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All");
 
@@ -240,9 +247,22 @@ export function NotificationsClient({
                 </>
               );
 
+              const callId = item.link ? CALL_LINK.exec(item.link)?.[1] : undefined;
+
               return (
                 <li key={item.id} className={cn(unreadItem && "bg-brand-soft/25")}>
-                  {item.link ? (
+                  {callId ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        markRead(item.id);
+                        void joinCall(callId);
+                      }}
+                      className="flex w-full items-start gap-3.5 px-5 py-4 text-left transition hover:bg-surface-2"
+                    >
+                      {content}
+                    </button>
+                  ) : item.link ? (
                     <Link
                       href={item.link}
                       onClick={() => markRead(item.id)}

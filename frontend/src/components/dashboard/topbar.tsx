@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useCalls } from "@/components/calls/call-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Menu as DropdownMenu } from "@/components/ui";
 import { get, post } from "@/lib/api";
@@ -22,6 +23,11 @@ const URGENCY_TONE = {
   upcoming: "bg-success",
 } as const;
 
+// Calls are handled by <CallProvider>'s modal, not a page route — a call
+// notification's `link` (`/calls/{id}`) has no matching Next.js route and
+// would 404 if followed as a normal navigation.
+const CALL_LINK = /^\/calls\/([^/]+)$/;
+
 export function Topbar({
   onOpenNav,
   onOpenSearch,
@@ -32,6 +38,7 @@ export function Topbar({
   const pathname = usePathname();
   const router = useRouter();
   const session = useSession();
+  const { joinCall } = useCalls();
   const [bellOpen, setBellOpen] = useState(false);
   const [items, setItems] = useState<Notification[] | null>(null);
   const bellRef = useRef<HTMLDivElement>(null);
@@ -234,12 +241,10 @@ export function Topbar({
                       Nothing yet — we&apos;ll let you know.
                     </li>
                   ) : (
-                    items.map((item) => (
-                      <li key={item.id} className="border-b border-line last:border-b-0">
-                        <Link
-                          href={item.link || "/dashboard"}
-                          className="flex items-start gap-3 px-4 py-3 transition hover:bg-surface-2"
-                        >
+                    items.map((item) => {
+                      const callId = item.link ? CALL_LINK.exec(item.link)?.[1] : undefined;
+                      const inner = (
+                        <>
                           <span
                             className={cn(
                               "mt-1.5 size-2 shrink-0 rounded-full",
@@ -261,9 +266,29 @@ export function Topbar({
                               </span>
                             ) : null}
                           </span>
-                        </Link>
-                      </li>
-                    ))
+                        </>
+                      );
+                      return (
+                        <li key={item.id} className="border-b border-line last:border-b-0">
+                          {callId ? (
+                            <button
+                              type="button"
+                              onClick={() => void joinCall(callId)}
+                              className="flex w-full items-start gap-3 px-4 py-3 text-left transition hover:bg-surface-2"
+                            >
+                              {inner}
+                            </button>
+                          ) : (
+                            <Link
+                              href={item.link || "/dashboard"}
+                              className="flex items-start gap-3 px-4 py-3 transition hover:bg-surface-2"
+                            >
+                              {inner}
+                            </Link>
+                          )}
+                        </li>
+                      );
+                    })
                   )}
                 </ul>
               ) : (
